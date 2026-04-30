@@ -1,0 +1,46 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/out/
+**/.next/
+
+# Coverage
+coverage/
+
+# Python cache
+**/__pycache__/
+*.py[cod]
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Env files (keep examples)
+.env
+.env.*
+!.env.example
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# AI / local tooling
+.claude/
+.codex/
+.agents/
+.windsurf/
+
+# Misc
+*.tgz
+
+# TypeScript incremental build info
+*.tsbuildinfo
