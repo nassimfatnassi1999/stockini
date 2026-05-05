@@ -7,6 +7,7 @@ export interface Lookup {
 
 export interface Product {
   id: Id;
+  reference: string;
   sku: string;
   barcode?: string | null;
   name: string;
@@ -24,6 +25,7 @@ export interface Product {
 
 export interface Customer {
   id: Id;
+  reference: string;
   name: string;
   phone?: string | null;
   email?: string | null;
@@ -35,6 +37,7 @@ export interface Customer {
 
 export interface Supplier {
   id: Id;
+  reference: string;
   name: string;
   contactPerson?: string | null;
   phone?: string | null;
@@ -72,6 +75,7 @@ export interface Purchase {
 
 export interface Payment {
   id: Id;
+  reference: string;
   type: string;
   method: string;
   amount: number | string;
@@ -111,6 +115,17 @@ export interface AuditLog {
   entityId?: string | null;
   createdAt: string;
   user?: { email: string; fullName: string } | null;
+}
+
+export interface DropdownOption {
+  id: Id;
+  category: string;
+  label: string;
+  value: string;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DashboardReport {

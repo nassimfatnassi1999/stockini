@@ -114,7 +114,7 @@ export function AppTopbar() {
         type="button"
         aria-label={sidebarAriaLabel}
         onClick={onSidebarToggle}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-text-secondary outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary"
+        className="app-action-button h-8 w-8 border-border bg-surface"
       >
         <SidebarIcon size={15} />
       </button>
@@ -124,7 +124,7 @@ export function AppTopbar() {
           type="button"
           aria-label="Page précédente"
           onClick={() => router.back()}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface text-text-secondary outline-none transition-colors hover:bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-primary"
+          className="app-action-button border-border bg-surface"
         >
           <ArrowLeft size={13} />
         </button>

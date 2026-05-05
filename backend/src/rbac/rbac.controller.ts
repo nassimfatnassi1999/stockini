@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -21,8 +29,14 @@ export class RbacController {
   }
 
   @Put('roles/:role/permissions')
-  updateRolePermissions(@Param('role') role: string, @Body() body: { permissionCodes: string[] }) {
-    return this.rbacService.updateRolePermissions(role, body.permissionCodes ?? []);
+  updateRolePermissions(
+    @Param('role') role: string,
+    @Body() body: { permissionCodes: string[] },
+  ) {
+    return this.rbacService.updateRolePermissions(
+      role,
+      body.permissionCodes ?? [],
+    );
   }
 
   @Get('users/:userId/overrides')
@@ -31,12 +45,17 @@ export class RbacController {
   }
 
   @Put('users/overrides')
-  setUserOverride(@Body() body: { userId: string; permissionCode: string; granted: boolean }) {
+  setUserOverride(
+    @Body() body: { userId: string; permissionCode: string; granted: boolean },
+  ) {
     return this.rbacService.setUserOverride(body);
   }
 
   @Delete('users/:userId/overrides/:permissionCode')
-  removeUserOverride(@Param('userId') userId: string, @Param('permissionCode') permissionCode: string) {
+  removeUserOverride(
+    @Param('userId') userId: string,
+    @Param('permissionCode') permissionCode: string,
+  ) {
     return this.rbacService.removeUserOverride(userId, permissionCode);
   }
 }

@@ -33,7 +33,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const permissions = Array.isArray(user.role.permissions)
-      ? user.role.permissions.filter((permission): permission is string => typeof permission === 'string')
+      ? user.role.permissions.filter(
+          (permission): permission is string => typeof permission === 'string',
+        )
       : [];
 
     return {

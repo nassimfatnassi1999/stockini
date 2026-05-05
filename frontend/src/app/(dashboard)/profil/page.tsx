@@ -119,14 +119,14 @@ export default function ProfilPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">Mon profil</h1>
-        <p className="mt-0.5 text-sm text-text-secondary">
+        <h1 className="app-page-title">Mon profil</h1>
+        <p className="app-page-subtitle">
           Gérez vos informations personnelles et votre mot de passe.
         </p>
       </div>
 
       {/* Section informations personnelles */}
-      <section className="rounded-xl border border-border bg-white shadow-card">
+      <section className="rounded-lg border border-border bg-white shadow-card">
         <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
           <User size={15} className="text-text-secondary" />
           <h2 className="text-sm font-semibold text-text-primary">Informations personnelles</h2>
@@ -140,7 +140,7 @@ export default function ProfilPage() {
                 {...regProfile('prenom')}
                 type="text"
                 placeholder="Prénom"
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary"
+                className="app-select"
               />
               {errProfile.prenom && (
                 <p className="text-xs text-red-500">{errProfile.prenom.message}</p>
@@ -153,7 +153,7 @@ export default function ProfilPage() {
                 {...regProfile('nom')}
                 type="text"
                 placeholder="Nom"
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary"
+                className="app-select"
               />
               {errProfile.nom && (
                 <p className="text-xs text-red-500">{errProfile.nom.message}</p>
@@ -168,7 +168,7 @@ export default function ProfilPage() {
                 type="email"
                 value={user.email}
                 disabled
-                className="w-full cursor-not-allowed rounded-lg border border-border bg-muted px-3 py-2 text-sm text-text-secondary"
+                className="app-select cursor-not-allowed bg-muted text-text-secondary"
               />
               <p className="text-[11px] text-text-muted">L'email ne peut pas être modifié.</p>
             </div>
@@ -179,7 +179,7 @@ export default function ProfilPage() {
                 type="text"
                 value={ROLE_LABELS[user.role] ?? user.role}
                 disabled
-                className="w-full cursor-not-allowed rounded-lg border border-border bg-muted px-3 py-2 text-sm text-text-secondary"
+                className="app-select cursor-not-allowed bg-muted text-text-secondary"
               />
               <p className="text-[11px] text-text-muted">Le rôle est géré par un administrateur.</p>
             </div>
@@ -189,7 +189,7 @@ export default function ProfilPage() {
             <button
               type="submit"
               disabled={loadingProfile}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white outline-none transition-colors hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white outline-none transition-colors hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loadingProfile && <Loader2 size={14} className="animate-spin" />}
               Enregistrer les informations
@@ -199,7 +199,7 @@ export default function ProfilPage() {
       </section>
 
       {/* Section sécurité / mot de passe */}
-      <section className="rounded-xl border border-border bg-white shadow-card">
+      <section className="rounded-lg border border-border bg-white shadow-card">
         <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
           <Lock size={15} className="text-text-secondary" />
           <h2 className="text-sm font-semibold text-text-primary">Sécurité</h2>
@@ -213,7 +213,7 @@ export default function ProfilPage() {
               type="password"
               placeholder="••••••••"
               autoComplete="current-password"
-              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary"
+              className="app-select"
             />
             {errPwd.oldPassword && (
               <p className="text-xs text-red-500">{errPwd.oldPassword.message}</p>
@@ -228,7 +228,7 @@ export default function ProfilPage() {
                 type="password"
                 placeholder="••••••••"
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary"
+                className="app-select"
               />
               {errPwd.newPassword && (
                 <p className="text-xs text-red-500">{errPwd.newPassword.message}</p>
@@ -242,7 +242,7 @@ export default function ProfilPage() {
                 type="password"
                 placeholder="••••••••"
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary"
+                className="app-select"
               />
               {errPwd.confirmNewPassword && (
                 <p className="text-xs text-red-500">{errPwd.confirmNewPassword.message}</p>
@@ -254,7 +254,7 @@ export default function ProfilPage() {
             <button
               type="submit"
               disabled={loadingPassword}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white outline-none transition-colors hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white outline-none transition-colors hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loadingPassword && <Loader2 size={14} className="animate-spin" />}
               Modifier le mot de passe

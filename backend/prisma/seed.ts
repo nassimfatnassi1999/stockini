@@ -12,6 +12,14 @@ const prisma = new PrismaClient({
 });
 
 async function main() {
+  const currentYear = new Date().getFullYear();
+  const counters = new Map<string, number>();
+  const nextReference = (prefix: string) => {
+    const next = (counters.get(prefix) ?? 0) + 1;
+    counters.set(prefix, next);
+    return `${prefix}-${currentYear}-${String(next).padStart(6, '0')}`;
+  };
+
   const roles = [
     { name: 'ADMIN', permissions: ['*'] },
     { name: 'STOCK_MANAGER', permissions: ['products:*', 'stock:*', 'alerts:*', 'reports:read'] },
@@ -114,7 +122,7 @@ async function main() {
   for (const supplier of supplierData) {
     const saved =
       (await prisma.supplier.findFirst({ where: { name: supplier.name } })) ??
-      (await prisma.supplier.create({ data: supplier }));
+      (await prisma.supplier.create({ data: { ...supplier, reference: nextReference('FOU') } }));
     suppliers.set(supplier.name, saved.id);
   }
 
@@ -150,7 +158,7 @@ async function main() {
     if (existing) {
       await prisma.customer.update({ where: { id: existing.id }, data: customer });
     } else {
-      await prisma.customer.create({ data: customer });
+      await prisma.customer.create({ data: { ...customer, reference: nextReference('CLI') } });
     }
   }
 
@@ -267,7 +275,7 @@ async function main() {
     await prisma.product.upsert({
       where: { sku: product.sku },
       update: { ...product, deletedAt: null, isActive: true },
-      create: product,
+      create: { ...product, reference: nextReference('PRD') },
     });
   }
 
@@ -276,6 +284,60 @@ async function main() {
     update: { value: 'Stockini' },
     create: { key: 'company.name', value: 'Stockini' },
   });
+
+  const dropdownOptions = [
+    ['customer_types', 'Particulier', 'INDIVIDUAL', 1],
+    ['customer_types', 'Entreprise', 'COMPANY', 2],
+    ['customer_types', 'Garage', 'GARAGE', 3],
+    ['payment_methods', 'Espèces', 'CASH', 1],
+    ['payment_methods', 'Carte bancaire', 'CARD', 2],
+    ['payment_methods', 'Virement', 'BANK_TRANSFER', 3],
+    ['payment_methods', 'Chèque', 'CHECK', 4],
+    ['payment_methods', 'Crédit', 'CREDIT', 5],
+    ['payment_types', 'Paiement client', 'CUSTOMER_PAYMENT', 1],
+    ['payment_types', 'Paiement fournisseur', 'SUPPLIER_PAYMENT', 2],
+    ['stock_operation_types', 'Entrée', 'ENTRY', 1],
+    ['stock_operation_types', 'Sortie', 'EXIT', 2],
+    ['stock_operation_types', 'Correction inventaire', 'ADJUSTMENT', 3],
+    ['stock_movement_reasons', 'entry', 'entry', 1],
+    ['stock_movement_reasons', 'sale', 'sale', 2],
+    ['stock_movement_reasons', 'correction', 'correction', 3],
+    ['stock_movement_reasons', 'retour', 'retour', 4],
+    ['sale_statuses', 'Brouillon', 'DRAFT', 1],
+    ['sale_statuses', 'Terminée', 'COMPLETED', 2],
+    ['sale_statuses', 'Annulée', 'CANCELLED', 3],
+    ['sale_statuses', 'Retournée', 'RETURNED', 4],
+    ['purchase_statuses', 'Brouillon', 'DRAFT', 1],
+    ['purchase_statuses', 'Commandée', 'ORDERED', 2],
+    ['purchase_statuses', 'Partiellement reçue', 'PARTIALLY_RECEIVED', 3],
+    ['purchase_statuses', 'Reçue', 'RECEIVED', 4],
+    ['purchase_statuses', 'Annulée', 'CANCELLED', 5],
+    ['payment_statuses', 'Non payé', 'UNPAID', 1],
+    ['payment_statuses', 'Partiel', 'PARTIAL', 2],
+    ['payment_statuses', 'Payé', 'PAID', 3],
+    ['report_types', 'Tableau de bord', 'dashboard', 1],
+    ['report_types', 'Stock', 'stock', 2],
+    ['report_types', 'Ventes', 'sales', 3],
+    ['report_types', 'Achats', 'purchases', 4],
+    ['alert_types', 'Stock faible', 'LOW_STOCK', 1],
+    ['alert_types', 'Rupture de stock', 'OUT_OF_STOCK', 2],
+    ['alert_types', 'Facture impayée', 'UNPAID_INVOICE', 3],
+    ['alert_types', 'Retard achat', 'PURCHASE_DELAY', 4],
+    ['alert_types', 'Système', 'SYSTEM', 5],
+    ['units', 'Pièce', 'piece', 1],
+    ['units', 'Lot', 'lot', 2],
+    ['stock_locations', 'A1-01', 'A1-01', 1],
+    ['stock_locations', 'B1-01', 'B1-01', 2],
+    ['stock_locations', 'B2-04', 'B2-04', 3],
+  ] as const;
+
+  for (const [category, label, value, sortOrder] of dropdownOptions) {
+    await prisma.dropdownOption.upsert({
+      where: { category_value: { category, value } },
+      update: { label, sortOrder, active: true },
+      create: { category, label, value, sortOrder, active: true },
+    });
+  }
 
   console.log('Stockini seed completed');
   console.log('Admin login: admin@stockini.local / Admin123!');

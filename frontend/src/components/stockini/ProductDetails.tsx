@@ -61,12 +61,12 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
       <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-text-primary">Détails produit</h2>
-          <p className="text-sm text-text-muted">{product.sku}</p>
+          <p className="font-mono text-sm text-text-muted">{product.reference ?? product.sku}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {!editMode && (
-            <Button type="button" size="sm" onClick={() => setEditMode(true)} className="bg-orange-500 hover:bg-orange-600">
-              <Pencil size={14} />
+            <Button type="button" size="sm" onClick={() => setEditMode(true)}>
+              <Pencil size={16} />
               Modifier
             </Button>
           )}
@@ -128,7 +128,7 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
               value={formData.categoryId}
               disabled={!editMode || saving || categories.length === 0}
               onChange={(event) => setFormData((current) => ({ ...current, categoryId: event.target.value }))}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-text-primary outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+              className="app-select"
             >
               {product.category && !categories.some((category) => category.id === product.category?.id) && (
                 <option value={product.category.id}>{product.category.name}</option>
@@ -147,7 +147,7 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
             <Button type="button" variant="outline" onClick={handleCancel} disabled={saving}>
               Annuler
             </Button>
-            <Button type="submit" disabled={saving || !formData.name.trim()} className="bg-orange-500 hover:bg-orange-600">
+            <Button type="submit" disabled={saving || !formData.name.trim()}>
               <Check size={14} />
               {saving ? 'Enregistrement...' : 'Enregistrer'}
             </Button>

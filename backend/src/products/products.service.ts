@@ -1,14 +1,31 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateProductDto, ProductQueryDto, UpdateProductDto } from './dto/product.dto';
+import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { SettingsService } from '../settings/settings.service';
+import {
+  CreateProductDto,
+  ProductQueryDto,
+  UpdateProductDto,
+} from './dto/product.dto';
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly references: ReferenceGeneratorService,
+    private readonly settings: SettingsService,
+  ) {}
 
-  create(dto: CreateProductDto) {
-    return this.prisma.product.create({ data: dto, include: this.includeRelations() });
+  async create(dto: CreateProductDto) {
+    await this.settings.assertActiveOption('stock_locations', dto.location);
+    return this.prisma.$transaction(async (tx) => {
+      const reference = await this.references.generate('PRD', 'product', tx);
+      return tx.product.create({
+        data: { ...dto, reference, sku: reference },
+        include: this.includeRelations(),
+      });
+    });
   }
 
   async findAll(query: ProductQueryDto) {
@@ -23,9 +40,15 @@ export class ProductsService {
             ],
           }
         : {}),
-      ...(query.sku ? { sku: { contains: query.sku, mode: 'insensitive' } } : {}),
-      ...(query.barcode ? { barcode: { contains: query.barcode, mode: 'insensitive' } } : {}),
-      ...(query.name ? { name: { contains: query.name, mode: 'insensitive' } } : {}),
+      ...(query.sku
+        ? { sku: { contains: query.sku, mode: 'insensitive' } }
+        : {}),
+      ...(query.barcode
+        ? { barcode: { contains: query.barcode, mode: 'insensitive' } }
+        : {}),
+      ...(query.name
+        ? { name: { contains: query.name, mode: 'insensitive' } }
+        : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.brandId ? { brandId: query.brandId } : {}),
     };
@@ -43,7 +66,10 @@ export class ProductsService {
     });
 
     if (query.stockStatus === 'low') {
-      return products.filter((product) => product.quantity > 0 && product.quantity <= product.minStock);
+      return products.filter(
+        (product) =>
+          product.quantity > 0 && product.quantity <= product.minStock,
+      );
     }
 
     return products;
@@ -57,8 +83,14 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto) {
+    await this.settings.assertActiveOption('stock_locations', dto.location);
+    if (dto.sku !== undefined) {
+      throw new BadRequestException('Product reference cannot be edited');
+    }
     if (dto.quantity !== undefined) {
-      const current = await this.prisma.product.findUniqueOrThrow({ where: { id } });
+      const current = await this.prisma.product.findUniqueOrThrow({
+        where: { id },
+      });
       if (dto.quantity < 0) {
         throw new BadRequestException('Product quantity cannot be negative');
       }

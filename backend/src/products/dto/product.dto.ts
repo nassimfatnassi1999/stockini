@@ -1,9 +1,16 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class CreateProductDto {
+  @IsOptional()
   @IsString()
-  sku!: string;
+  sku?: string;
 
   @IsOptional()
   @IsString()

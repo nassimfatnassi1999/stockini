@@ -41,7 +41,11 @@ export class RbacService {
     if (codes.includes('*')) {
       return this.permissions();
     }
-    return this.permissions().filter((permission) => codes.includes(permission.code) || codes.includes(`${permission.module}:*`));
+    return this.permissions().filter(
+      (permission) =>
+        codes.includes(permission.code) ||
+        codes.includes(`${permission.module}:*`),
+    );
   }
 
   async updateRolePermissions(role: string, permissionCodes: string[]) {
@@ -57,7 +61,11 @@ export class RbacService {
     return [];
   }
 
-  setUserOverride(input: { userId: string; permissionCode: string; granted: boolean }) {
+  setUserOverride(input: {
+    userId: string;
+    permissionCode: string;
+    granted: boolean;
+  }) {
     return {
       code: input.permissionCode,
       module: input.permissionCode.split(':')[0] ?? input.permissionCode,
@@ -77,6 +85,8 @@ export class RbacService {
   }
 
   private extractCodes(value: unknown) {
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : [];
   }
 }

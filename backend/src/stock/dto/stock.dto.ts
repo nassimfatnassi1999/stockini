@@ -13,10 +13,6 @@ export class StockChangeDto {
   @IsOptional()
   @IsString()
   reason?: string;
-
-  @IsOptional()
-  @IsString()
-  reference?: string;
 }
 
 export class StockAdjustmentDto {
@@ -31,8 +27,4 @@ export class StockAdjustmentDto {
   @IsOptional()
   @IsString()
   reason?: string;
-
-  @IsOptional()
-  @IsString()
-  reference?: string;
 }

@@ -29,20 +29,20 @@ interface ResizableDataTableProps<T = any> {
 }
 
 const DEFAULT_HEADER_STYLE: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
+  fontSize: 12,
+  fontWeight: 600,
   textTransform: 'uppercase',
-  letterSpacing: '0.08em',
-  color: '#9AAFC5',
-  padding: '10px 16px',
+  letterSpacing: '0.025em',
+  color: '#5A6A7E',
+  padding: '12px 16px',
   textAlign: 'left',
-  borderBottom: '2px solid #D5DCE8',
+  borderBottom: '1px solid #D5DCE8',
   background: '#F7F9FC',
 };
 
 const DEFAULT_CELL_STYLE: React.CSSProperties = {
   padding: '12px 16px',
-  fontSize: 13,
+  fontSize: 14,
   borderBottom: '1px solid #D5DCE8',
   verticalAlign: 'middle',
 };
@@ -89,7 +89,7 @@ export function ResizableDataTable<T>({
     const rowElement = document.querySelector(`[data-row-index="${index}"]`) as HTMLTableRowElement;
     if (rowElement) {
       Array.from(rowElement.cells).forEach((td) => {
-        (td as HTMLTableCellElement).style.background = '#F0F6FF';
+        (td as HTMLTableCellElement).style.background = '#F0F4F8';
       });
     }
   };

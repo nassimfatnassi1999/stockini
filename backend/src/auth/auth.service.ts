@@ -23,7 +23,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -31,8 +34,10 @@ export class AuthService {
     const payload = { sub: user.id, email: user.email, role: user.role.name };
     const accessToken = await this.jwtService.signAsync(payload);
     const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
-      expiresIn: (this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d') as JwtSignOptions['expiresIn'],
+      secret:
+        this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
+      expiresIn: (this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ??
+        '7d') as JwtSignOptions['expiresIn'],
     });
 
     return {
@@ -57,7 +62,10 @@ export class AuthService {
   }
 
   async updateMe(userId: string, dto: UpdateProfileDto) {
-    const fullName = (dto.fullName ?? [dto.prenom, dto.nom].filter(Boolean).join(' ').trim()) || undefined;
+    const fullName =
+      (dto.fullName ??
+        [dto.prenom, dto.nom].filter(Boolean).join(' ').trim()) ||
+      undefined;
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { fullName },
@@ -68,8 +76,13 @@ export class AuthService {
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    const passwordMatches = await bcrypt.compare(dto.currentPassword ?? dto.oldPassword ?? '', user.passwordHash);
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+    const passwordMatches = await bcrypt.compare(
+      dto.currentPassword ?? dto.oldPassword ?? '',
+      user.passwordHash,
+    );
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid current password');
     }
@@ -82,7 +95,12 @@ export class AuthService {
     return { ok: true };
   }
 
-  private profilePayload(user: { id: string; email: string; fullName: string; role: { name: string } }) {
+  private profilePayload(user: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: { name: string };
+  }) {
     const [prenom = '', ...nameParts] = user.fullName.split(' ');
     const nom = nameParts.join(' ') || user.fullName;
     return {

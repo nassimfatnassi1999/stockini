@@ -37,37 +37,24 @@ export function DeleteConfirmModal({
 
   const content = (
     <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 10000,
-        background: 'rgba(13,43,62,0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 16,
-      }}
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-[#0D2B3E]/45 p-4"
       onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) onCancel(); }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div
-        style={{
-          background: '#fff', borderRadius: 14, boxShadow: '0 8px 40px rgba(13,43,62,0.18)',
-          padding: '28px 28px 24px', maxWidth: 420, width: '100%',
-          animation: 'modal-in 0.18s ease-out',
-        }}
+        className="w-full max-w-[420px] rounded-lg bg-white p-6 shadow-[0_8px_40px_rgba(13,43,62,0.18)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-modal-title"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 36, height: 36, borderRadius: 8,
-              background: '#FFEBEE', flexShrink: 0,
-            }}>
-              <AlertTriangle size={18} style={{ color: '#C62828' }} />
+        <div className="mb-4 flex items-start justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-red-50 text-red-700">
+              <AlertTriangle size={18} />
             </span>
-            <h2 id="delete-modal-title" style={{ fontSize: 15, fontWeight: 700, color: '#1A2332', margin: 0 }}>
+            <h2 id="delete-modal-title" className="text-[15px] font-bold text-text-primary">
               Confirmer la suppression
             </h2>
           </div>
@@ -75,47 +62,36 @@ export function DeleteConfirmModal({
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
             disabled={loading}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: '#9AAFC5', padding: 4, display: 'flex',
-            }}
+            className="app-action-button"
           >
             <X size={16} />
           </button>
         </div>
 
-        <div style={{
-          background: '#FFF8F8', border: '1px solid #FFCDD2', borderRadius: 8,
-          padding: '14px 16px', marginBottom: 20, fontSize: 13, color: '#1A2332', lineHeight: 1.6,
-        }}>
-          <p style={{ margin: 0 }}>
+        <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-text-primary">
+          <p>
             Voulez-vous supprimer cet élément ?
           </p>
-          <p style={{ margin: '6px 0 0', color: '#5A6A7E' }}>
+          <p className="mt-1 text-text-secondary">
             <strong>Type :</strong> {entityType}
           </p>
-          <p style={{ margin: '2px 0 0', color: '#5A6A7E' }}>
+          <p className="text-text-secondary">
             <strong>Référence :</strong>{' '}
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#1A2332' }}>
+            <span className="font-mono font-semibold text-text-primary">
               {reference}
             </span>
           </p>
-          <p style={{ margin: '10px 0 0', fontSize: 12, color: '#C62828', fontWeight: 600 }}>
+          <p className="mt-2 text-xs font-semibold text-red-700">
             Cette action est irréversible.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
             disabled={loading}
-            style={{
-              padding: '8px 18px', fontSize: 13, fontWeight: 600,
-              border: '1.5px solid #D5DCE8', borderRadius: 8,
-              background: '#fff', color: '#5A6A7E', cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.6 : 1,
-            }}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-border bg-white px-4 text-sm font-semibold text-text-secondary hover:bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
             Annuler
           </button>
@@ -123,22 +99,11 @@ export function DeleteConfirmModal({
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onConfirm(); }}
             disabled={loading}
-            style={{
-              padding: '8px 18px', fontSize: 13, fontWeight: 600,
-              border: 'none', borderRadius: 8,
-              background: loading ? '#EF9A9A' : '#C62828',
-              color: '#fff', cursor: loading ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-              transition: 'background 0.15s',
-            }}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-red-700 px-4 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-red-300"
           >
             {loading ? (
               <>
-                <span style={{
-                  width: 13, height: 13, border: '2px solid rgba(255,255,255,0.4)',
-                  borderTopColor: '#fff', borderRadius: '50%',
-                  display: 'inline-block', animation: 'spin 0.7s linear infinite',
-                }} />
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
                 Suppression…
               </>
             ) : (
@@ -148,15 +113,6 @@ export function DeleteConfirmModal({
         </div>
       </div>
 
-      <style>{`
-        @keyframes modal-in {
-          from { opacity: 0; transform: scale(0.96) translateY(-8px); }
-          to   { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 

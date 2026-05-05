@@ -1,6 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PaymentStatus, PaymentType, SaleStatus, StockMovementType } from '@prisma/client';
+import {
+  PaymentStatus,
+  PaymentType,
+  SaleStatus,
+  StockMovementType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import { CreateSaleDto, UpdateSaleDto } from './dto/sale.dto';
 
@@ -9,18 +16,28 @@ export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockService: StockService,
+    private readonly references: ReferenceGeneratorService,
+    private readonly settings: SettingsService,
   ) {}
 
   async create(dto: CreateSaleDto, sellerId?: string) {
     if (!dto.items.length) {
       throw new BadRequestException('Sale must include at least one item');
     }
+    await this.settings.assertActiveOption(
+      'payment_methods',
+      dto.paymentMethod,
+    );
 
     return this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.nextInvoiceNumber();
+      const invoiceNumber = await this.references.generate('INV', 'sale', tx);
       const productIds = dto.items.map((item) => item.productId);
-      const products = await tx.product.findMany({ where: { id: { in: productIds }, deletedAt: null } });
-      const productsById = new Map(products.map((product) => [product.id, product]));
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds }, deletedAt: null },
+      });
+      const productsById = new Map(
+        products.map((product) => [product.id, product]),
+      );
 
       const items = dto.items.map((item) => {
         const product = productsById.get(item.productId);
@@ -28,7 +45,9 @@ export class SalesService {
           throw new BadRequestException(`Product ${item.productId} not found`);
         }
         if (product.quantity < item.quantity) {
-          throw new BadRequestException(`Insufficient stock for ${product.name}`);
+          throw new BadRequestException(
+            `Insufficient stock for ${product.name}`,
+          );
         }
         const unitPrice = item.unitPrice ?? Number(product.salePrice);
         return {
@@ -72,7 +91,6 @@ export class SalesService {
           productId: item.productId,
           type: StockMovementType.SALE,
           quantity: item.quantity,
-          reference: invoiceNumber,
           reason: 'Sale',
           userId: sellerId,
         });
@@ -81,6 +99,7 @@ export class SalesService {
       if (paidAmount > 0 && dto.paymentMethod) {
         await tx.payment.create({
           data: {
+            reference: await this.references.generate('PAY', 'payment', tx),
             type: PaymentType.CUSTOMER_PAYMENT,
             method: dto.paymentMethod,
             amount: paidAmount,
@@ -92,7 +111,12 @@ export class SalesService {
 
       return tx.sale.findUniqueOrThrow({
         where: { id: sale.id },
-        include: { items: { include: { product: true } }, customer: true, seller: true, payments: true },
+        include: {
+          items: { include: { product: true } },
+          customer: true,
+          seller: true,
+          payments: true,
+        },
       });
     });
   }
@@ -107,7 +131,11 @@ export class SalesService {
   findOne(id: string) {
     return this.prisma.sale.findUniqueOrThrow({
       where: { id },
-      include: { customer: true, items: { include: { product: true } }, payments: true },
+      include: {
+        customer: true,
+        items: { include: { product: true } },
+        payments: true,
+      },
     });
   }
 
@@ -127,7 +155,6 @@ export class SalesService {
           type: StockMovementType.CUSTOMER_RETURN,
           quantity: item.quantity,
           reason: 'Sale cancellation',
-          reference: sale.invoiceNumber,
           userId,
         });
       }
@@ -141,6 +168,11 @@ export class SalesService {
   }
 
   async update(id: string, dto: UpdateSaleDto) {
+    await this.settings.assertActiveOption('sale_statuses', dto.status);
+    await this.settings.assertActiveOption(
+      'payment_statuses',
+      dto.paymentStatus,
+    );
     const sale = await this.prisma.sale.findUniqueOrThrow({ where: { id } });
     const paidAmount = dto.paidAmount ?? Number(sale.paidAmount);
     return this.prisma.sale.update({
@@ -151,7 +183,11 @@ export class SalesService {
         paidAmount,
         remainingAmount: Math.max(Number(sale.total) - paidAmount, 0),
       },
-      include: { customer: true, items: { include: { product: true } }, payments: true },
+      include: {
+        customer: true,
+        items: { include: { product: true } },
+        payments: true,
+      },
     });
   }
 
@@ -167,10 +203,5 @@ export class SalesService {
       return PaymentStatus.PARTIAL;
     }
     return PaymentStatus.PAID;
-  }
-
-  private async nextInvoiceNumber() {
-    const count = await this.prisma.sale.count();
-    return `INV-${new Date().getFullYear()}-${String(count + 1).padStart(6, '0')}`;
   }
 }

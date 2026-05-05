@@ -33,53 +33,24 @@ export function Modal({
 
   if (!open || !mounted) return null;
 
-  const widths = { sm: 420, md: 600, lg: 780 };
+  const widths = { sm: 'max-w-[420px]', md: 'max-w-[600px]', lg: 'max-w-[780px]' };
 
   const content = (
     <div
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(13,43,62,0.55)',
-        zIndex: 900,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backdropFilter: 'blur(2px)',
-        animation: 'fadeIn 0.15s ease',
-      }}
+      className="fixed inset-0 z-[900] flex items-center justify-center bg-[#0D2B3E]/55 p-4 backdrop-blur-[2px]"
       onClick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div
-        style={{
-          background: '#fff',
-          borderRadius: 14,
-          width: widths[size],
-          maxWidth: '95vw',
-          maxHeight: '85vh',
-          overflowY: 'auto',
-          boxShadow: '0 24px 64px rgba(13,43,62,0.28)',
-        }}
+        className={`max-h-[85vh] w-full ${widths[size]} overflow-y-auto rounded-lg bg-white shadow-[0_24px_64px_rgba(13,43,62,0.28)]`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          style={{
-            padding: '22px 24px 14px',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            position: 'sticky', top: 0, background: '#fff', zIndex: 1,
-            borderBottom: '1px solid #D5DCE8',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: '#1A2332' }}>{title}</span>
+        <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-border bg-white px-6 py-4">
+          <div className="flex items-center gap-2">
+            <span className="text-base font-semibold text-text-primary">{title}</span>
             {reference && (
-              <span
-                style={{
-                  fontFamily: "'Space Mono', monospace",
-                  fontSize: 11, color: '#1B4F72',
-                  background: '#EBF5FB', padding: '3px 10px', borderRadius: 5,
-                }}
-              >
+              <span className="rounded-md bg-orange-50 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
                 {reference}
               </span>
             )}
@@ -87,46 +58,23 @@ export function Modal({
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
-            style={{
-              width: 28, height: 28, borderRadius: 6,
-              border: '1px solid #D5DCE8',
-              background: 'transparent', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#5A6A7E', transition: 'all 0.13s',
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = '#F7F9FC')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+            className="app-action-button"
           >
-            <X size={13} />
+            <X size={16} />
           </button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '20px 24px' }}>
+        <div className="px-6 py-5">
           {children}
         </div>
 
-        {/* Footer */}
         {onSave && (
-          <div
-            style={{
-              padding: '14px 24px',
-              borderTop: '1px solid #D5DCE8',
-              display: 'flex', justifyContent: 'flex-end', gap: 10,
-              position: 'sticky', bottom: 0, background: '#fff',
-            }}
-          >
+          <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border bg-white px-6 py-4">
             <button
               type="button"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
               disabled={saving}
-              style={{
-                padding: '6px 12px', borderRadius: 6,
-                background: 'transparent', color: '#5A6A7E',
-                border: '1px solid #D5DCE8',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-semibold text-text-secondary hover:bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               Annuler
             </button>
@@ -134,15 +82,7 @@ export function Modal({
               type="button"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSave?.(); }}
               disabled={saving}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 6,
-                background: saving ? '#FAD7A0' : '#E67E22',
-                color: '#fff', border: 'none',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer',
-                transition: 'background 0.13s',
-              }}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-primary-light disabled:opacity-80"
             >
               {saving ? 'Enregistrement…' : saveLabel}
             </button>
@@ -162,17 +102,10 @@ interface ModalSectionProps {
 
 export function ModalSection({ title, children }: ModalSectionProps) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div
-        style={{
-          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-          letterSpacing: '0.08em', color: '#9AAFC5',
-          marginBottom: 12,
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}
-      >
+    <div className="mb-5">
+      <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
         {title}
-        <div style={{ flex: 1, height: 1, background: '#D5DCE8' }} />
+        <div className="h-px flex-1 bg-border" />
       </div>
       {children}
     </div>

@@ -51,7 +51,7 @@ export function UserDropdown({ initials, identity }: UserDropdownProps) {
         <div
           role="menu"
           aria-label="Menu utilisateur"
-          className="animate-in fade-in slide-in-from-top-2 duration-150 absolute right-0 top-[calc(100%+8px)] z-50 min-w-[176px] rounded-xl border border-border bg-white py-1 shadow-card-hover"
+          className="animate-in fade-in slide-in-from-top-2 duration-150 absolute right-0 top-[calc(100%+8px)] z-50 min-w-[176px] rounded-lg border border-border bg-white py-1 shadow-card-hover"
         >
           <button
             type="button"

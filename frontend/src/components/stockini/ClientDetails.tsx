@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Check, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Customer } from '@/lib/stockini/types';
+import { api } from '@/lib/api';
+import type { Customer, DropdownOption } from '@/lib/stockini/types';
 
 type CustomerType = Customer['type'];
 
@@ -51,6 +53,13 @@ function getInitialFormData(client: Customer): ClientFormData {
 export function ClientDetails({ client, onClose, onSave, saving = false }: ClientDetailsProps) {
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState<ClientFormData>(() => getInitialFormData(client));
+  const customerTypes = useQuery({
+    queryKey: ['stockini-dropdown-options', 'customer_types'],
+    queryFn: () => api.get<DropdownOption[]>('/settings/dropdown-options/customer_types').then((r) => r.data),
+  });
+  const typeOptions = customerTypes.data?.length
+    ? customerTypes.data.map((option) => ({ value: option.value as CustomerType, label: option.label }))
+    : CUSTOMER_TYPES;
 
   useEffect(() => {
     setEditMode(false);
@@ -80,12 +89,12 @@ export function ClientDetails({ client, onClose, onSave, saving = false }: Clien
       <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-text-primary">Détails client</h2>
-          <p className="text-sm text-text-muted">{client.name}</p>
+          <p className="font-mono text-sm text-text-muted">{client.reference}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {!editMode && (
-            <Button type="button" size="sm" onClick={() => setEditMode(true)} className="bg-orange-500 hover:bg-orange-600">
-              <Pencil size={14} />
+            <Button type="button" size="sm" onClick={() => setEditMode(true)}>
+              <Pencil size={16} />
               Modifier
             </Button>
           )}
@@ -135,9 +144,9 @@ export function ClientDetails({ client, onClose, onSave, saving = false }: Clien
               value={formData.type}
               disabled={!editMode || saving}
               onChange={(event) => setFormData((current) => ({ ...current, type: event.target.value as CustomerType }))}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-text-primary outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+              className="app-select"
             >
-              {CUSTOMER_TYPES.map((type) => (
+              {typeOptions.map((type) => (
                 <option key={type.value} value={type.value}>
                   {type.label}
                 </option>
@@ -173,7 +182,7 @@ export function ClientDetails({ client, onClose, onSave, saving = false }: Clien
             <Button type="button" variant="outline" onClick={handleCancel} disabled={saving}>
               Annuler
             </Button>
-            <Button type="submit" disabled={saving || !formData.name.trim()} className="bg-orange-500 hover:bg-orange-600">
+            <Button type="submit" disabled={saving || !formData.name.trim()}>
               <Check size={14} />
               {saving ? 'Enregistrement...' : 'Enregistrer'}
             </Button>

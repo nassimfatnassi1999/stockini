@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2, X } from 'lucide-react';
-import type { Customer } from '@/lib/stockini/types';
+import type { Customer, DropdownOption } from '@/lib/stockini/types';
 
 const CUSTOMER_TYPES = [
   { value: 'INDIVIDUAL', label: 'Particulier' },
@@ -61,6 +61,10 @@ export default function ClientsPage() {
         .then((r) => r.data),
     placeholderData: (prev) => prev,
   });
+  const customerTypesQuery = useQuery<DropdownOption[]>({
+    queryKey: ['stockini-dropdown-options', 'customer_types'],
+    queryFn: () => api.get<DropdownOption[]>('/settings/dropdown-options/customer_types').then((r) => r.data),
+  });
 
   const createMutation = useMutation({
     mutationFn: (data: Partial<CreateCustomerForm>) => api.post<Customer>('/customers', data).then((r) => r.data),
@@ -89,6 +93,10 @@ export default function ClientsPage() {
   });
 
   const customers = customersQuery.data ?? [];
+  const customerTypeOptions = customerTypesQuery.data?.length
+    ? customerTypesQuery.data.map((option) => ({ value: option.value, label: option.label }))
+    : CUSTOMER_TYPES;
+  const getTypeLabel = (type: string) => customerTypeOptions.find((option) => option.value === type)?.label ?? typeLabel(type);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,15 +127,15 @@ export default function ClientsPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text-primary">Clients</h1>
-          <p className="mt-1 text-sm text-text-muted">
+          <h1 className="app-page-title">Clients</h1>
+          <p className="app-page-subtitle">
             {customers.length} client{customers.length !== 1 ? 's' : ''}
           </p>
         </div>
         <Button
           size="sm"
           onClick={() => setShowModal(true)}
-          className="gap-1.5 bg-orange-500 hover:bg-orange-600"
+          className="gap-1.5"
         >
           <Plus size={14} />
           Nouveau client
@@ -163,10 +171,13 @@ export default function ClientsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border/60 bg-surface">
+              <thead className="bg-surface">
+                <tr className="border-b border-border/60">
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
                     Nom
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    Référence
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
                     Type
@@ -190,18 +201,19 @@ export default function ClientsPage() {
               </thead>
               <tbody className="divide-y divide-border/40">
                 {customers.map((customer) => (
-                  <tr key={customer.id} className="hover:bg-surface/60 transition-colors">
+                  <tr key={customer.id} className="h-12 transition-colors hover:bg-muted/40">
                     <td className="px-4 py-3 font-medium">
                       <Link
                         href={`/clients/${customer.id}`}
-                        className="text-left font-medium text-blue-600 underline-offset-4 transition-colors hover:text-blue-700 hover:underline"
+                        className="text-left font-medium text-primary underline-offset-4 transition-colors hover:text-primary-dark hover:underline"
                       >
                         {customer.name}
                       </Link>
                     </td>
+                    <td className="px-4 py-3 font-mono text-xs font-semibold text-text-secondary">{customer.reference}</td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 ring-1 ring-blue-200">
-                        {typeLabel(customer.type)}
+                      <span className="app-status-badge border-slate-200 bg-slate-50 text-slate-700">
+                        {getTypeLabel(customer.type)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-text-secondary">{customer.phone ?? '—'}</td>
@@ -219,14 +231,14 @@ export default function ClientsPage() {
                             type="button"
                             onClick={() => deleteMutation.mutate(customer.id)}
                             disabled={deleteMutation.isPending}
-                            className="rounded px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                            className="inline-flex h-7 items-center rounded-md bg-red-600 px-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                           >
                             Confirmer
                           </button>
                           <button
                             type="button"
                             onClick={() => setDeleteConfirmId(null)}
-                            className="rounded px-2 py-1 text-xs font-medium text-text-secondary hover:bg-muted"
+                            className="inline-flex h-7 items-center rounded-md px-2 text-xs font-semibold text-text-secondary hover:bg-muted"
                           >
                             Annuler
                           </button>
@@ -236,9 +248,9 @@ export default function ClientsPage() {
                           type="button"
                           aria-label={`Supprimer ${customer.name}`}
                           onClick={() => setDeleteConfirmId(customer.id)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-red-50 hover:text-red-700"
+                          className="app-action-button app-action-delete"
                         >
-                          <Trash2 size={13} />
+                          <Trash2 size={16} />
                         </button>
                       )}
                     </td>
@@ -258,7 +270,7 @@ export default function ClientsPage() {
           aria-modal="true"
           aria-labelledby="modal-title"
         >
-          <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h2 id="modal-title" className="text-base font-semibold text-text-primary">
                 Nouveau client
@@ -267,7 +279,7 @@ export default function ClientsPage() {
                 type="button"
                 aria-label="Fermer"
                 onClick={closeModal}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-muted hover:bg-muted"
+                className="app-action-button h-8 w-8"
               >
                 <X size={16} />
               </button>
@@ -279,6 +291,17 @@ export default function ClientsPage() {
                   {formError}
                 </p>
               )}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="customer-reference">Référence</Label>
+                <input
+                  id="customer-reference"
+                  type="text"
+                  readOnly
+                  placeholder="Générée automatiquement"
+                  className="flex h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm text-text-muted shadow-sm cursor-not-allowed"
+                />
+              </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="customer-name">
@@ -305,9 +328,9 @@ export default function ClientsPage() {
                       type: e.target.value as CreateCustomerForm['type'],
                     }))
                   }
-                  className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm text-text-primary outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  className="app-select"
                 >
-                  {CUSTOMER_TYPES.map((t) => (
+                  {customerTypeOptions.map((t) => (
                     <option key={t.value} value={t.value}>
                       {t.label}
                     </option>
@@ -364,7 +387,7 @@ export default function ClientsPage() {
                 <Button
                   type="submit"
                   disabled={createMutation.isPending}
-                  className="bg-orange-500 hover:bg-orange-600"
+                  className="gap-1.5"
                 >
                   {createMutation.isPending ? 'Création…' : 'Créer le client'}
                 </Button>

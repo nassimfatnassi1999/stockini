@@ -20,7 +20,7 @@ import {
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, initials, money, statusLabel } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
-import type { Alert, Customer, Payment, Product, Purchase, Sale, StockMovement, Supplier } from '@/lib/stockini/types';
+import type { Alert, Customer, DropdownOption, Payment, Product, Purchase, Sale, StockMovement, Supplier } from '@/lib/stockini/types';
 import type { AuditLog } from '@/lib/stockini/types';
 
 function StatCard({ icon: Icon, label, value, tone = 'primary' }: {
@@ -55,8 +55,8 @@ function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 className="text-2xl font-semibold text-text-primary">{title}</h1>
-        <p className="mt-1 text-sm text-text-secondary">{subtitle}</p>
+        <h1 className="app-page-title">{title}</h1>
+        <p className="app-page-subtitle">{subtitle}</p>
       </div>
     </div>
   );
@@ -85,6 +85,51 @@ type FieldConfig = {
   options?: Array<{ value: string; label: string }>;
 };
 
+const FALLBACK_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  customer_types: [
+    { value: 'INDIVIDUAL', label: 'Particulier' },
+    { value: 'COMPANY', label: 'Entreprise' },
+    { value: 'GARAGE', label: 'Garage' },
+  ],
+  payment_methods: [
+    { value: 'CASH', label: 'Espèces' },
+    { value: 'CARD', label: 'Carte bancaire' },
+    { value: 'BANK_TRANSFER', label: 'Virement' },
+    { value: 'CHECK', label: 'Chèque' },
+    { value: 'CREDIT', label: 'Crédit' },
+  ],
+  payment_types: [
+    { value: 'CUSTOMER_PAYMENT', label: 'Client' },
+    { value: 'SUPPLIER_PAYMENT', label: 'Fournisseur' },
+  ],
+  stock_operation_types: [
+    { value: 'ENTRY', label: 'Entrée' },
+    { value: 'EXIT', label: 'Sortie' },
+    { value: 'ADJUSTMENT', label: 'Correction inventaire' },
+  ],
+  stock_movement_reasons: [
+    { value: 'entry', label: 'entry' },
+    { value: 'sale', label: 'sale' },
+    { value: 'correction', label: 'correction' },
+    { value: 'retour', label: 'retour' },
+  ],
+  alert_types: ['LOW_STOCK', 'OUT_OF_STOCK', 'UNPAID_INVOICE', 'PURCHASE_DELAY', 'SYSTEM'].map((value) => ({ value, label: statusLabel(value) })),
+  stock_locations: [
+    { value: 'A1-01', label: 'A1-01' },
+    { value: 'B1-01', label: 'B1-01' },
+    { value: 'B2-04', label: 'B2-04' },
+  ],
+};
+
+function useDropdownOptions(category: string) {
+  const query = useQuery({
+    queryKey: ['stockini-dropdown-options', category],
+    queryFn: () => stockiniApi.dropdownOptionsByCategory(category),
+  });
+  const options = (query.data ?? []).map((option) => ({ value: option.value, label: option.label }));
+  return options.length > 0 ? options : (FALLBACK_OPTIONS[category] ?? []);
+}
+
 function emptyForm(fields: FieldConfig[]) {
   return fields.reduce<Record<string, string | boolean>>((acc, field) => {
     acc[field.name] = field.type === 'checkbox' ? false : '';
@@ -99,6 +144,7 @@ function cleanPayload(form: Record<string, string | boolean>, fields: FieldConfi
       acc[field.name] = Boolean(value);
       return acc;
     }
+    if (field.readOnly) return acc;
     const text = String(value ?? '').trim();
     if (!text && !field.required) return acc;
     acc[field.name] = field.type === 'number' ? Number(text || 0) : text;
@@ -155,7 +201,7 @@ function CrudModal({
                       value={String(form[field.name] ?? '')}
                       onChange={(event) => onChange(field.name, event.target.value)}
                       required={field.required}
-                      className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      className="app-select"
                     >
                       <option value="">Sélectionner</option>
                       {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -167,6 +213,7 @@ function CrudModal({
                       min={field.type === 'number' ? 0 : undefined}
                       step={field.type === 'number' ? '0.001' : undefined}
                       value={String(form[field.name] ?? '')}
+                      placeholder={field.readOnly ? 'Générée automatiquement' : undefined}
                       onChange={(event) => onChange(field.name, event.target.value)}
                       readOnly={field.readOnly}
                       required={field.required}
@@ -193,12 +240,12 @@ function RowActions({ onEdit, onDelete, deleting }: { onEdit?: () => void; onDel
   return (
     <div className="flex justify-end gap-1">
       {onEdit && (
-        <Button type="button" size="sm" variant="outline" onClick={onEdit} title="Modifier">
-          <Pencil size={13} />
+        <Button type="button" size="action" variant="actionEdit" onClick={onEdit} title="Modifier">
+          <Pencil size={16} />
         </Button>
       )}
-      <Button type="button" size="sm" variant="destructive" onClick={onDelete} disabled={deleting} title="Supprimer">
-        <Trash2 size={13} />
+      <Button type="button" size="action" variant="actionDelete" onClick={onDelete} disabled={deleting} title="Supprimer">
+        <Trash2 size={16} />
       </Button>
     </div>
   );
@@ -291,7 +338,7 @@ export function StockiniDashboardPage() {
                 <StateRows loading={products.isLoading} error={products.error} empty={lowProducts.length === 0} colSpan={5} />
                 {lowProducts.map((product) => (
                   <TableRow key={product.id}>
-                    <TableCell className="font-mono font-semibold">{product.sku}</TableCell>
+                    <TableCell className="font-mono font-semibold">{product.reference ?? product.sku}</TableCell>
                     <TableCell>{product.name}</TableCell>
                     <TableCell className="text-text-secondary">{product.category?.name ?? '-'}</TableCell>
                     <TableCell className="text-right font-mono">{product.quantity}</TableCell>
@@ -336,7 +383,6 @@ export function ProductsPage() {
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [productForm, setProductForm] = useState<Record<string, string | boolean>>({
-    sku: '',
     name: '',
     categoryId: '',
     brandId: '',
@@ -351,9 +397,10 @@ export function ProductsPage() {
   const categories = useQuery({ queryKey: ['stockini-categories'], queryFn: stockiniApi.categories });
   const brands = useQuery({ queryKey: ['stockini-brands'], queryFn: stockiniApi.brands });
   const suppliers = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
+  const locationOptions = useDropdownOptions('stock_locations');
   const data = query.data ?? [];
   const fields: FieldConfig[] = [
-    { name: 'sku', label: 'SKU', required: true },
+    { name: 'referencePreview', label: 'Référence', readOnly: true },
     { name: 'name', label: 'Désignation', required: true },
     { name: 'categoryId', label: 'Catégorie', type: 'select', required: true, options: (categories.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
     { name: 'brandId', label: 'Marque', type: 'select', required: true, options: (brands.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
@@ -362,7 +409,7 @@ export function ProductsPage() {
     { name: 'salePrice', label: 'Prix vente', type: 'number', required: true },
     { name: 'quantity', label: 'Quantité initiale', type: 'number', required: true },
     { name: 'minStock', label: 'Seuil minimum', type: 'number', required: true },
-    { name: 'location', label: 'Emplacement' },
+    { name: 'location', label: 'Emplacement', type: 'select', options: locationOptions },
   ];
   const createMutation = useMutation({
     mutationFn: () => stockiniApi.createProduct(cleanPayload(productForm, fields) as Parameters<typeof stockiniApi.createProduct>[0]),
@@ -399,7 +446,7 @@ export function ProductsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SKU</TableHead>
+                <TableHead>Référence</TableHead>
                 <TableHead>Désignation</TableHead>
                 <TableHead>Catégorie</TableHead>
                 <TableHead>Marque</TableHead>
@@ -414,11 +461,11 @@ export function ProductsPage() {
               <StateRows loading={query.isLoading} error={query.error} empty={data.length === 0} colSpan={9} />
               {data.map((product) => (
                 <TableRow key={product.id}>
-                  <TableCell className="font-mono font-semibold">{product.sku}</TableCell>
+                  <TableCell className="font-mono font-semibold">{product.reference ?? product.sku}</TableCell>
                   <TableCell>
                     <Link
                       href={`/produits/${product.id}`}
-                      className="text-left font-medium text-blue-600 underline-offset-4 transition-colors hover:text-blue-700 hover:underline"
+                      className="text-left font-medium text-primary underline-offset-4 transition-colors hover:text-primary-dark hover:underline"
                     >
                       {product.name}
                     </Link>
@@ -466,8 +513,9 @@ export function CustomersPage() {
       subtitle="Clients particuliers, garages et sociétés issus du backend."
       loading={query.isLoading}
       error={query.error}
-      headers={['Client', 'Type', 'Téléphone', 'Email', 'Crédit']}
+      headers={['Référence', 'Client', 'Type', 'Téléphone', 'Email', 'Crédit']}
       rows={data.map((customer: Customer) => [
+        <span key="reference" className="font-mono font-semibold">{customer.reference}</span>,
         <Identity key="name" name={customer.name} />,
         statusLabel(customer.type),
         customer.phone ?? '-',
@@ -482,6 +530,7 @@ export function SuppliersPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Supplier | null>(null);
   const fields: FieldConfig[] = [
+    { name: 'referencePreview', label: 'Référence', readOnly: true },
     { name: 'name', label: 'Fournisseur', required: true },
     { name: 'contactPerson', label: 'Contact' },
     { name: 'phone', label: 'Téléphone' },
@@ -526,8 +575,9 @@ export function SuppliersPage() {
         subtitle=""
         loading={query.isLoading}
         error={query.error}
-        headers={['Fournisseur', 'Contact', 'Téléphone', 'Email', 'Conditions', 'Actions']}
+        headers={['Référence', 'Fournisseur', 'Contact', 'Téléphone', 'Email', 'Conditions', 'Actions']}
         rows={data.map((supplier: Supplier) => [
+          <span key="reference" className="font-mono font-semibold">{supplier.reference}</span>,
           <Identity key="name" name={supplier.name} />,
           supplier.contactPerson ?? '-',
           supplier.phone ?? '-',
@@ -538,6 +588,7 @@ export function SuppliersPage() {
             onEdit={() => {
               setEditing(supplier);
               setForm({
+                referencePreview: supplier.reference ?? '',
                 name: supplier.name,
                 contactPerson: supplier.contactPerson ?? '',
                 phone: supplier.phone ?? '',
@@ -575,14 +626,16 @@ export function SalesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const customers = useQuery({ queryKey: ['stockini-customers'], queryFn: stockiniApi.customers });
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
+  const paymentMethodOptions = useDropdownOptions('payment_methods');
   const discountOptions = [0, 5, 10, 15, 20, 25, 30].map((value) => ({ value: String(value), label: `${value}%` }));
   const fields: FieldConfig[] = [
+    { name: 'referencePreview', label: 'N° Facture', readOnly: true },
     { name: 'customerId', label: 'Client', type: 'select', required: true, options: (customers.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
     { name: 'productId', label: 'Produit', type: 'select', required: true, options: (products.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
     { name: 'quantity', label: 'Quantité', type: 'number', required: true },
     { name: 'discountPercent', label: 'Remise', type: 'select', required: true, options: discountOptions },
     { name: 'paidAmount', label: 'Montant payé', type: 'number', readOnly: true },
-    { name: 'paymentMethod', label: 'Méthode', type: 'select', required: true, options: ['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'CREDIT'].map((value) => ({ value, label: statusLabel(value) })) },
+    { name: 'paymentMethod', label: 'Méthode', type: 'select', required: true, options: paymentMethodOptions },
   ];
   const initialSaleForm = () => ({ ...emptyForm(fields), discountPercent: '0', paidAmount: '0.00' });
   const [form, setForm] = useState<Record<string, string | boolean>>(initialSaleForm);
@@ -711,6 +764,7 @@ export function PurchasesPage() {
   const suppliers = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
   const fields: FieldConfig[] = [
+    { name: 'referencePreview', label: 'N° Commande', readOnly: true },
     { name: 'supplierId', label: 'Fournisseur', type: 'select', required: true, options: (suppliers.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
     { name: 'productId', label: 'Produit', type: 'select', required: true, options: (products.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
     { name: 'quantity', label: 'Quantité', type: 'number', required: true },
@@ -790,9 +844,12 @@ export function PurchasesPage() {
 export function PaymentsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Payment | null>(null);
+  const paymentTypeOptions = useDropdownOptions('payment_types');
+  const paymentMethodOptions = useDropdownOptions('payment_methods');
   const fields: FieldConfig[] = [
-    { name: 'type', label: 'Type', type: 'select', required: true, options: [{ value: 'CUSTOMER_PAYMENT', label: 'Client' }, { value: 'SUPPLIER_PAYMENT', label: 'Fournisseur' }] },
-    { name: 'method', label: 'Méthode', type: 'select', required: true, options: ['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'CREDIT'].map((value) => ({ value, label: statusLabel(value) })) },
+    { name: 'referencePreview', label: 'Référence', readOnly: true },
+    { name: 'type', label: 'Type', type: 'select', required: true, options: paymentTypeOptions },
+    { name: 'method', label: 'Méthode', type: 'select', required: true, options: paymentMethodOptions },
     { name: 'amount', label: 'Montant', type: 'number', required: true },
     { name: 'note', label: 'Note' },
   ];
@@ -832,8 +889,9 @@ export function PaymentsPage() {
         subtitle=""
         loading={query.isLoading}
         error={query.error}
-        headers={['Date', 'Type', 'Méthode', 'Tiers', 'Montant', 'Actions']}
+        headers={['Référence', 'Date', 'Type', 'Méthode', 'Tiers', 'Montant', 'Actions']}
         rows={data.map((payment: Payment) => [
+          <span key="reference" className="font-mono font-semibold">{payment.reference}</span>,
           dateTime(payment.createdAt),
           statusLabel(payment.type),
           statusLabel(payment.method),
@@ -843,7 +901,7 @@ export function PaymentsPage() {
             key="actions"
             onEdit={() => {
               setEditing(payment);
-              setForm({ type: payment.type, method: payment.method, amount: String(payment.amount), note: '' });
+          setForm({ referencePreview: payment.reference ?? '', type: payment.type, method: payment.method, amount: String(payment.amount), note: '' });
             }}
             onDelete={() => deleteMutation.mutate(payment.id)}
             deleting={deleteMutation.isPending}
@@ -872,12 +930,14 @@ export function StockMovementsPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
+  const operationOptions = useDropdownOptions('stock_operation_types');
+  const reasonOptions = useDropdownOptions('stock_movement_reasons');
   const fields: FieldConfig[] = [
-    { name: 'movementKind', label: 'Opération', type: 'select', required: true, options: [{ value: 'entry', label: 'Entrée' }, { value: 'exit', label: 'Sortie' }, { value: 'adjustment', label: 'Correction inventaire' }] },
+    { name: 'referencePreview', label: 'Référence', readOnly: true },
+    { name: 'movementKind', label: 'Opération', type: 'select', required: true, options: operationOptions },
     { name: 'productId', label: 'Produit', type: 'select', required: true, options: (products.data ?? []).map((item) => ({ value: item.id, label: item.name })) },
     { name: 'quantity', label: 'Quantité / nouveau stock', type: 'number', required: true },
-    { name: 'reason', label: 'Motif' },
-    { name: 'reference', label: 'Référence' },
+    { name: 'reason', label: 'Motif', type: 'select', options: reasonOptions },
   ];
   const [form, setForm] = useState<Record<string, string | boolean>>(emptyForm(fields));
   const query = useQuery({ queryKey: ['stockini-movements'], queryFn: stockiniApi.movements });
@@ -888,12 +948,11 @@ export function StockMovementsPage() {
       const common = {
         productId: String(payload.productId),
         reason: payload.reason ? String(payload.reason) : undefined,
-        reference: payload.reference ? String(payload.reference) : undefined,
       };
-      if (payload.movementKind === 'adjustment') {
+      if (payload.movementKind === 'ADJUSTMENT') {
         return stockiniApi.stockAdjustment({ ...common, newQuantity: Number(payload.quantity) });
       }
-      if (payload.movementKind === 'exit') {
+      if (payload.movementKind === 'EXIT') {
         return stockiniApi.stockExit({ ...common, quantity: Number(payload.quantity) });
       }
       return stockiniApi.stockEntry({ ...common, quantity: Number(payload.quantity) });
@@ -952,8 +1011,9 @@ export function StockMovementsPage() {
 export function AlertsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Alert | null>(null);
+  const alertTypeOptions = useDropdownOptions('alert_types');
   const fields: FieldConfig[] = [
-    { name: 'type', label: 'Type', type: 'select', required: true, options: ['LOW_STOCK', 'OUT_OF_STOCK', 'UNPAID_INVOICE', 'PURCHASE_DELAY', 'SYSTEM'].map((value) => ({ value, label: statusLabel(value) })) },
+    { name: 'type', label: 'Type', type: 'select', required: true, options: alertTypeOptions },
     { name: 'title', label: 'Titre', required: true },
     { name: 'message', label: 'Message', required: true },
     { name: 'isRead', label: 'Lu', type: 'checkbox' },
@@ -1034,9 +1094,13 @@ export function SettingsPage() {
   const settings = useQuery({ queryKey: ['stockini-settings'], queryFn: stockiniApi.settings });
   const categories = useQuery({ queryKey: ['stockini-categories'], queryFn: stockiniApi.categories });
   const brands = useQuery({ queryKey: ['stockini-brands'], queryFn: stockiniApi.brands });
+  const dropdownOptions = useQuery({ queryKey: ['stockini-dropdown-options'], queryFn: stockiniApi.dropdownOptions });
   return (
     <>
-      <PageHeader title="Paramètres Stockini" subtitle="Référentiels backend: paramètres, catégories et marques." />
+      <PageHeader title="Paramètres Stockini" subtitle="Référentiels backend, catégories, marques et listes déroulantes." />
+      <div className="mb-4">
+        <DropdownOptionsManager loading={dropdownOptions.isLoading} options={dropdownOptions.data ?? []} />
+      </div>
       <div className="grid gap-4 xl:grid-cols-3">
         <EditableMiniList
           title="Paramètres"
@@ -1067,6 +1131,162 @@ export function SettingsPage() {
         />
       </div>
     </>
+  );
+}
+
+function DropdownOptionsManager({ loading, options }: { loading: boolean; options: DropdownOption[] }) {
+  const queryClient = useQueryClient();
+  const categories = Array.from(new Set([
+    'customer_types',
+    'payment_methods',
+    'payment_types',
+    'stock_operation_types',
+    'stock_movement_reasons',
+    'sale_statuses',
+    'purchase_statuses',
+    'payment_statuses',
+    'report_types',
+    'alert_types',
+    'units',
+    'stock_locations',
+    ...options.map((option) => option.category),
+  ])).sort();
+  const [selectedCategory, setSelectedCategory] = useState(categories[0] ?? 'customer_types');
+  const [editing, setEditing] = useState<DropdownOption | null>(null);
+  const fields: FieldConfig[] = [
+    { name: 'category', label: 'Catégorie', required: true },
+    { name: 'label', label: 'Libellé', required: true },
+    { name: 'value', label: 'Valeur', required: true },
+    { name: 'sortOrder', label: 'Ordre', type: 'number' },
+    { name: 'active', label: 'Actif', type: 'checkbox' },
+  ];
+  const [form, setForm] = useState<Record<string, string | boolean>>({ category: selectedCategory, label: '', value: '', sortOrder: '0', active: true });
+  const visibleOptions = options.filter((option) => option.category === selectedCategory);
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['stockini-dropdown-options'] });
+    queryClient.invalidateQueries({ queryKey: ['stockini-dropdown-options', selectedCategory] });
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const payload = cleanPayload(form, fields);
+      return editing?.id
+        ? stockiniApi.updateDropdownOption(editing.id, payload)
+        : stockiniApi.createDropdownOption(payload);
+    },
+    onSuccess: () => {
+      invalidate();
+      setEditing(null);
+      setForm({ category: selectedCategory, label: '', value: '', sortOrder: '0', active: true });
+      toast.success('Option enregistrée');
+    },
+  });
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) => stockiniApi.toggleDropdownOption(id, active),
+    onSuccess: invalidate,
+  });
+  const deleteMutation = useMutation({
+    mutationFn: stockiniApi.deleteDropdownOption,
+    onSuccess: () => {
+      invalidate();
+      toast.success('Option supprimée');
+    },
+    onError: () => toast.error("Option utilisée: désactivez-la au lieu de la supprimer."),
+  });
+
+  return (
+    <Card className="shadow-card">
+      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 p-4">
+        <div>
+          <CardTitle>Listes déroulantes</CardTitle>
+          <p className="mt-1 text-sm text-text-secondary">Options actives triées par ordre puis libellé dans les formulaires.</p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            setEditing({} as DropdownOption);
+            setForm({ category: selectedCategory, label: '', value: '', sortOrder: String(visibleOptions.length + 1), active: true });
+          }}
+        >
+          <Plus size={14} />
+          Ajouter
+        </Button>
+      </CardHeader>
+      <CardContent className="grid gap-4 p-4 pt-0 lg:grid-cols-[240px_1fr]">
+        <div className="space-y-1">
+          {categories.map((category) => (
+            <button
+              key={category}
+              type="button"
+              onClick={() => setSelectedCategory(category)}
+              className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors ${category === selectedCategory ? 'bg-primary/10 font-semibold text-primary' : 'text-text-secondary hover:bg-muted'}`}
+            >
+              <span>{category}</span>
+              <span className="font-mono text-xs">{options.filter((option) => option.category === category).length}</span>
+            </button>
+          ))}
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Libellé</TableHead>
+                <TableHead>Valeur</TableHead>
+                <TableHead>Ordre</TableHead>
+                <TableHead>Statut</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <StateRows loading={loading} error={null} empty={visibleOptions.length === 0} colSpan={5} />
+              {visibleOptions.map((option) => (
+                <TableRow key={option.id}>
+                  <TableCell className="font-medium">{option.label}</TableCell>
+                  <TableCell className="font-mono text-xs">{option.value}</TableCell>
+                  <TableCell className="font-mono">{option.sortOrder}</TableCell>
+                  <TableCell><Status value={option.active ? 'ACTIVE' : 'DISABLED'} /></TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button type="button" size="sm" variant="outline" onClick={() => toggleMutation.mutate({ id: option.id, active: !option.active })}>
+                        {option.active ? 'Désactiver' : 'Activer'}
+                      </Button>
+                      <RowActions
+                        onEdit={() => {
+                          setEditing(option);
+                          setForm({ category: option.category, label: option.label, value: option.value, sortOrder: String(option.sortOrder), active: option.active });
+                        }}
+                        onDelete={() => {
+                          if (window.confirm('Supprimer cette option ?')) {
+                            deleteMutation.mutate(option.id);
+                          }
+                        }}
+                        deleting={deleteMutation.isPending}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+      {editing && (
+        <CrudModal
+          title={editing.id ? 'Modifier option' : 'Nouvelle option'}
+          fields={fields}
+          form={form}
+          onChange={(name, value) => setForm((current) => ({ ...current, [name]: value }))}
+          onClose={() => setEditing(null)}
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveMutation.mutate();
+          }}
+          saving={saveMutation.isPending}
+        />
+      )}
+    </Card>
   );
 }
 
@@ -1128,14 +1348,25 @@ function SimpleTable({ title, subtitle, headers, rows, loading, error }: {
           <Table>
             <TableHeader>
               <TableRow>
-                {headers.map((header) => <TableHead key={header}>{header}</TableHead>)}
+                {headers.map((header) => (
+                  <TableHead key={header} className={header.toLowerCase() === 'actions' ? 'text-right' : undefined}>
+                    {header}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               <StateRows loading={loading} error={error} empty={rows.length === 0} colSpan={headers.length} />
               {rows.map((row, rowIndex) => (
                 <TableRow key={rowIndex}>
-                  {row.map((cell, cellIndex) => <TableCell key={cellIndex}>{cell}</TableCell>)}
+                  {row.map((cell, cellIndex) => (
+                    <TableCell
+                      key={cellIndex}
+                      className={headers[cellIndex]?.toLowerCase() === 'actions' ? 'text-right' : undefined}
+                    >
+                      {cell}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
             </TableBody>

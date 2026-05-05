@@ -5,11 +5,11 @@
 @layer base {
   :root {
     /* ─── Stockini Design System ─── */
-    --p: #1B4F72;
-    --pl: #2E86C1;
-    --pd: #0D2B3E;
+    --p: #E67E22;
+    --pl: #FAD7A0;
+    --pd: #C96712;
     --acc: #E67E22;
-    --accd: #A04000;
+    --accd: #C96712;
     --accl: #FAD7A0;
     --sf: #F7F9FC;
     --cd: #FFFFFF;
@@ -19,17 +19,17 @@
     --t2: #5A6A7E;
     --t3: #9AAFC5;
     --sb-bg: #0D2B3E;
-    --sb-hov: #1B4F72;
-    --sb-act: #2E86C1;
+    --sb-hov: #173B54;
+    --sb-act: #1B4F72;
     --sb-txt: #B8CCE0;
     --fn: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     --mn: 'Consolas', 'Menlo', 'Monaco', monospace;
-    --rc: 12px;
+    --rc: 8px;
     --rb: 8px;
     --rch: 20px;
     --shc: 0 2px 8px rgba(13, 43, 62, 0.07);
     --shh: 0 8px 28px rgba(13, 43, 62, 0.14);
-    --radius: 12px;
+    --radius: 8px;
   }
 
   * {
@@ -60,9 +60,51 @@
   button:active {
     transform: scale(0.97);
   }
+
+  input,
+  select,
+  textarea {
+    font-size: 0.875rem;
+  }
 }
 
 @layer components {
+  .app-page-title {
+    @apply text-xl font-semibold tracking-tight text-text-primary;
+  }
+
+  .app-page-subtitle {
+    @apply mt-1 text-sm text-text-secondary;
+  }
+
+  .app-select {
+    @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary outline-none ring-offset-background placeholder:text-muted-foreground focus:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .app-action-button {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-text-muted outline-none transition-colors hover:bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .app-action-button svg {
+    @apply h-4 w-4;
+  }
+
+  .app-action-edit {
+    @apply hover:border-orange-200 hover:bg-orange-50 hover:text-primary;
+  }
+
+  .app-action-view {
+    @apply hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700;
+  }
+
+  .app-action-delete {
+    @apply hover:border-red-200 hover:bg-red-50 hover:text-red-700;
+  }
+
+  .app-status-badge {
+    @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium leading-5;
+  }
+
   /* Référence GR/DR — Space Mono obligatoire */
   .gr-reference,
   .dr-reference {

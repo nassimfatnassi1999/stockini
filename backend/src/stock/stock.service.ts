@@ -1,44 +1,67 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AlertType, Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { SettingsService } from '../settings/settings.service';
 import { StockAdjustmentDto, StockChangeDto } from './dto/stock.dto';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class StockService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly references: ReferenceGeneratorService,
+    private readonly settings: SettingsService,
+  ) {}
 
-  entry(dto: StockChangeDto, userId?: string) {
+  async entry(dto: StockChangeDto, userId?: string) {
+    await this.settings.assertActiveOption(
+      'stock_movement_reasons',
+      dto.reason,
+    );
     return this.prisma.$transaction((tx) =>
       this.applyMovement(tx, {
         productId: dto.productId,
         type: StockMovementType.ENTRY,
         quantity: dto.quantity,
         reason: dto.reason,
-        reference: dto.reference,
         userId,
       }),
     );
   }
 
-  exit(dto: StockChangeDto, userId?: string) {
+  async exit(dto: StockChangeDto, userId?: string) {
+    await this.settings.assertActiveOption(
+      'stock_movement_reasons',
+      dto.reason,
+    );
     return this.prisma.$transaction((tx) =>
       this.applyMovement(tx, {
         productId: dto.productId,
         type: StockMovementType.EXIT,
         quantity: dto.quantity,
         reason: dto.reason,
-        reference: dto.reference,
         userId,
       }),
     );
   }
 
-  adjustment(dto: StockAdjustmentDto, userId?: string) {
+  async adjustment(dto: StockAdjustmentDto, userId?: string) {
+    await this.settings.assertActiveOption(
+      'stock_movement_reasons',
+      dto.reason,
+    );
     return this.prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUniqueOrThrow({ where: { id: dto.productId } });
+      const product = await tx.product.findUniqueOrThrow({
+        where: { id: dto.productId },
+      });
       const delta = dto.newQuantity - product.quantity;
+      const reference = await this.references.generate(
+        'COR',
+        'stockMovement',
+        tx,
+      );
       const movement = await tx.stockMovement.create({
         data: {
           productId: dto.productId,
@@ -47,12 +70,20 @@ export class StockService {
           previousQuantity: product.quantity,
           newQuantity: dto.newQuantity,
           reason: dto.reason,
-          reference: dto.reference,
+          reference,
           userId,
         },
       });
-      await tx.product.update({ where: { id: dto.productId }, data: { quantity: dto.newQuantity } });
-      await this.ensureStockAlert(tx, dto.productId, dto.newQuantity, product.minStock);
+      await tx.product.update({
+        where: { id: dto.productId },
+        data: { quantity: dto.newQuantity },
+      });
+      await this.ensureStockAlert(
+        tx,
+        dto.productId,
+        dto.newQuantity,
+        product.minStock,
+      );
       return movement;
     });
   }
@@ -60,7 +91,10 @@ export class StockService {
   history(productId?: string) {
     return this.prisma.stockMovement.findMany({
       where: productId ? { productId } : undefined,
-      include: { product: true, user: { select: { id: true, fullName: true, email: true } } },
+      include: {
+        product: true,
+        user: { select: { id: true, fullName: true, email: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -72,11 +106,12 @@ export class StockService {
       type: StockMovementType;
       quantity: number;
       reason?: string;
-      reference?: string;
       userId?: string;
     },
   ) {
-    const product = await client.product.findUniqueOrThrow({ where: { id: input.productId } });
+    const product = await client.product.findUniqueOrThrow({
+      where: { id: input.productId },
+    });
     const signedQuantity = this.signedQuantity(input.type, input.quantity);
     const newQuantity = product.quantity + signedQuantity;
 
@@ -92,7 +127,11 @@ export class StockService {
         previousQuantity: product.quantity,
         newQuantity,
         reason: input.reason,
-        reference: input.reference,
+        reference: await this.references.generate(
+          this.prefixForMovement(input.type),
+          'stockMovement',
+          client,
+        ),
         userId: input.userId,
       },
     });
@@ -101,8 +140,26 @@ export class StockService {
       where: { id: input.productId },
       data: { quantity: newQuantity },
     });
-    await this.ensureStockAlert(client, input.productId, newQuantity, product.minStock);
+    await this.ensureStockAlert(
+      client,
+      input.productId,
+      newQuantity,
+      product.minStock,
+    );
     return movement;
+  }
+
+  private prefixForMovement(type: StockMovementType) {
+    if (
+      type === StockMovementType.ADJUSTMENT ||
+      type === StockMovementType.INVENTORY_CORRECTION
+    ) {
+      return 'COR';
+    }
+    if (type === StockMovementType.PURCHASE_RECEPTION) {
+      return 'REC';
+    }
+    return 'STK';
   }
 
   private signedQuantity(type: StockMovementType, quantity: number) {
@@ -114,7 +171,12 @@ export class StockService {
     return negativeTypes.includes(type) ? -quantity : quantity;
   }
 
-  private async ensureStockAlert(client: DbClient, productId: string, quantity: number, minStock: number) {
+  private async ensureStockAlert(
+    client: DbClient,
+    productId: string,
+    quantity: number,
+    minStock: number,
+  ) {
     if (quantity > minStock) {
       return;
     }

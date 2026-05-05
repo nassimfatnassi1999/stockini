@@ -76,33 +76,12 @@ export function ActionDeleteButton({
           e.stopPropagation();
           setModalOpen(true);
         }}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 28, height: 28, border: '1px solid #FFCDD2',
-          borderRadius: 6, background: 'transparent',
-          cursor: loading ? 'not-allowed' : 'pointer',
-          color: '#E53935', flexShrink: 0,
-          transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          if (loading) return;
-          (e.currentTarget as HTMLElement).style.background = '#FFEBEE';
-          (e.currentTarget as HTMLElement).style.borderColor = '#E53935';
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = 'transparent';
-          (e.currentTarget as HTMLElement).style.borderColor = '#FFCDD2';
-        }}
+        className="app-action-button app-action-delete flex-shrink-0"
       >
         {loading ? (
-          <span style={{
-            width: 11, height: 11,
-            border: '2px solid #FFCDD2', borderTopColor: '#E53935',
-            borderRadius: '50%', display: 'inline-block',
-            animation: 'spin 0.7s linear infinite',
-          }} />
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-red-200 border-t-red-600" />
         ) : (
-          <Trash2 size={13} />
+          <Trash2 size={16} />
         )}
       </button>
 
@@ -114,8 +93,6 @@ export function ActionDeleteButton({
         onConfirm={handleConfirm}
         onCancel={() => { if (!loading) setModalOpen(false); }}
       />
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>
   );
 }

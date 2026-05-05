@@ -6,21 +6,21 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const STATUS_COLORS: Record<string, string> = {
-  'A_planifier': 'bg-gray-100 text-gray-700 border-gray-200',
-  'Preparation': 'bg-blue-100 text-blue-700 border-blue-200',
-  'DT_DICT': 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  'Planifie': 'bg-purple-100 text-purple-700 border-purple-200',
+  'A_planifier': 'bg-slate-50 text-slate-700 border-slate-200',
+  'Preparation': 'bg-orange-50 text-orange-700 border-orange-200',
+  'DT_DICT': 'bg-amber-50 text-amber-700 border-amber-200',
+  'Planifie': 'bg-slate-50 text-slate-700 border-slate-200',
   'Intervention_realisee': 'bg-orange-100 text-orange-700 border-orange-200',
-  'Livrables_en_cours': 'bg-cyan-100 text-cyan-700 border-cyan-200',
-  'Cloture': 'bg-green-100 text-green-700 border-green-200',
-  'En_attente': 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  'Paye': 'bg-green-100 text-green-700 border-green-200',
-  'Impaye': 'bg-red-100 text-red-700 border-red-200',
-  'Partiel': 'bg-orange-100 text-orange-700 border-orange-200',
-  'Nouvelle_demande': 'bg-blue-100 text-blue-700 border-blue-200',
-  'Acceptee': 'bg-green-100 text-green-700 border-green-200',
-  'Refusee': 'bg-red-100 text-red-700 border-red-200',
-  'Annulee': 'bg-gray-100 text-gray-500 border-gray-200',
+  'Livrables_en_cours': 'bg-slate-50 text-slate-700 border-slate-200',
+  'Cloture': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'En_attente': 'bg-amber-50 text-amber-700 border-amber-200',
+  'Paye': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Impaye': 'bg-red-50 text-red-700 border-red-200',
+  'Partiel': 'bg-orange-50 text-orange-700 border-orange-200',
+  'Nouvelle_demande': 'bg-slate-50 text-slate-700 border-slate-200',
+  'Acceptee': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Refusee': 'bg-red-50 text-red-700 border-red-200',
+  'Annulee': 'bg-slate-50 text-slate-500 border-slate-200',
 };
 
 export const STATUS_LABELS: Record<string, string> = {

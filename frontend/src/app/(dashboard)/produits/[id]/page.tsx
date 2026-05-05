@@ -87,8 +87,8 @@ function ProductDetailsRoute() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">ProductDetailsPage</h1>
-        <p className="mt-1 text-sm text-text-muted">Fiche produit et modification du catalogue.</p>
+        <h1 className="app-page-title">Détail produit</h1>
+        <p className="app-page-subtitle">Fiche produit et modification du catalogue.</p>
       </div>
       <ProductDetails
         product={productQuery.data}

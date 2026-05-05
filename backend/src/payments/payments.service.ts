@@ -1,13 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { SettingsService } from '../settings/settings.service';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly references: ReferenceGeneratorService,
+    private readonly settings: SettingsService,
+  ) {}
 
-  create(dto: CreatePaymentDto) {
-    return this.prisma.payment.create({ data: dto });
+  async create(dto: CreatePaymentDto) {
+    await this.settings.assertActiveOption('payment_types', dto.type);
+    await this.settings.assertActiveOption('payment_methods', dto.method);
+    return this.prisma.$transaction(async (tx) =>
+      tx.payment.create({
+        data: {
+          ...dto,
+          reference: await this.references.generate('PAY', 'payment', tx),
+        },
+      }),
+    );
   }
 
   findAll() {
@@ -24,7 +39,9 @@ export class PaymentsService {
     });
   }
 
-  update(id: string, dto: UpdatePaymentDto) {
+  async update(id: string, dto: UpdatePaymentDto) {
+    await this.settings.assertActiveOption('payment_types', dto.type);
+    await this.settings.assertActiveOption('payment_methods', dto.method);
     return this.prisma.payment.update({
       where: { id },
       data: dto,

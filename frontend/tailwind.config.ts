@@ -6,17 +6,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // === Stockini — Industrial Precision ===
+        // === Stockini — Professional Operations UI ===
         primary: {
-          DEFAULT: '#1B4F72',
-          light: '#2E86C1',
-          dark: '#0D2B3E',
+          DEFAULT: '#E67E22',
+          light: '#FAD7A0',
+          dark: '#C96712',
           foreground: '#FFFFFF',
         },
         accent: {
           DEFAULT: '#E67E22',
           light: '#FAD7A0',
-          dark: '#A04000',
+          dark: '#C96712',
           foreground: '#FFFFFF',
         },
         surface: '#F7F9FC',
@@ -35,19 +35,19 @@ const config: Config = {
 
         // Statuts métier
         status: {
-          new: '#2196F3',
-          progress: '#FF9800',
-          done: '#4CAF50',
-          blocked: '#F44336',
-          draft: '#9E9E9E',
-          planned: '#9C27B0',
+          new: '#64748B',
+          progress: '#E67E22',
+          done: '#16A34A',
+          blocked: '#DC2626',
+          draft: '#94A3B8',
+          planned: '#64748B',
         },
 
         // Sidebar
         sidebar: {
           bg: '#0D2B3E',
-          hover: '#1B4F72',
-          active: '#2E86C1',
+          hover: '#173B54',
+          active: '#1B4F72',
           text: '#B8CCE0',
           'text-active': '#FFFFFF',
           border: '#1B4F72',
@@ -57,7 +57,7 @@ const config: Config = {
         background: '#F7F9FC',
         foreground: '#1A2332',
         input: '#D5DCE8',
-        ring: '#1B4F72',
+        ring: '#E67E22',
         muted: {
           DEFAULT: '#F0F4F8',
           foreground: '#5A6A7E',
@@ -80,9 +80,9 @@ const config: Config = {
         mono: ['var(--font-mono)', 'Space Mono', 'monospace'],
       },
       borderRadius: {
-        card: '12px',
+        card: '8px',
         chip: '20px',
-        lg: '10px',
+        lg: '8px',
         md: '8px',
         sm: '6px',
       },

@@ -135,7 +135,7 @@ export function NotificationsDropdown() {
                 title="Tout marquer comme lu"
                 onClick={() => markAllRead.mutate()}
                 disabled={unreadCount === 0 || markAllRead.isPending}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                className="app-action-button app-action-edit disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <CheckCheck size={14} />
               </button>
@@ -145,7 +145,7 @@ export function NotificationsDropdown() {
                 title="Tout supprimer"
                 onClick={() => deleteAll.mutate()}
                 disabled={notifications.length === 0 || deleteAll.isPending}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                className="app-action-button app-action-delete disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Trash2 size={14} />
               </button>
@@ -166,7 +166,7 @@ export function NotificationsDropdown() {
                     type="button"
                     onClick={() => handleNotificationClick(notification)}
                     className={`group flex w-full items-start gap-2 border-b border-border px-3 py-3 text-left transition-colors last:border-b-0 ${
-                      unreadItem ? 'bg-blue-50 hover:bg-blue-100' : 'bg-white hover:bg-muted'
+                      unreadItem ? 'bg-orange-50 hover:bg-orange-100' : 'bg-white hover:bg-muted'
                     }`}
                   >
                     <span
@@ -198,9 +198,9 @@ export function NotificationsDropdown() {
                           deleteOne.mutate(notification.id);
                         }
                       }}
-                      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-text-muted opacity-80 transition-colors hover:bg-red-50 hover:text-red-700 group-hover:opacity-100"
+                      className="app-action-button app-action-delete flex-none opacity-80 group-hover:opacity-100"
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={16} />
                     </span>
                   </button>
                 );

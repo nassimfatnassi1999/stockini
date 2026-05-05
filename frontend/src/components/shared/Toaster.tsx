@@ -8,7 +8,7 @@ const CONFIG = {
   success: { icon: CheckCircle2, color: '#2E7D32', bg: '#E8F5E9', border: '#A5D6A7' },
   error:   { icon: XCircle,       color: '#C62828', bg: '#FFEBEE', border: '#EF9A9A' },
   warning: { icon: AlertTriangle, color: '#E65100', bg: '#FFF3E0', border: '#FFCC80' },
-  info:    { icon: Info,          color: '#1B4F72', bg: '#E3F2FD', border: '#90CAF9' },
+  info:    { icon: Info,          color: '#64748B', bg: '#F8FAFC', border: '#CBD5E1' },
 } as const;
 
 export function Toaster() {
@@ -19,42 +19,28 @@ export function Toaster() {
   if (toasts.length === 0) return null;
 
   return (
-    <div style={{
-      position: 'fixed', top: 20, right: 20, zIndex: 9999,
-      display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 380, width: '100%',
-      pointerEvents: 'none',
-    }}>
+    <div className="pointer-events-none fixed right-5 top-5 z-[9999] flex w-full max-w-[380px] flex-col gap-2">
       {toasts.map((t) => {
         const { icon: Icon, color, bg, border } = CONFIG[t.type];
         return (
           <div
             key={t.id}
-            style={{
-              display: 'flex', alignItems: 'flex-start', gap: 10,
-              background: bg, border: `1px solid ${border}`, borderRadius: 10,
-              padding: '12px 14px', boxShadow: '0 4px 16px rgba(13,43,62,0.12)',
-              animation: 'toast-in 0.2s ease-out',
-              pointerEvents: 'all',
-            }}
+            className="pointer-events-auto flex items-start gap-2.5 rounded-lg border px-3.5 py-3 shadow-[0_4px_16px_rgba(13,43,62,0.12)]"
+            style={{ background: bg, borderColor: border }}
           >
             <Icon size={16} style={{ color, flexShrink: 0, marginTop: 1 }} />
-            <span style={{ fontSize: 13, color: '#1A2332', lineHeight: 1.5, flex: 1 }}>
+            <span className="flex-1 text-[13px] leading-5 text-text-primary">
               {t.message}
             </span>
             <X
               size={14}
-              style={{ color, cursor: 'pointer', flexShrink: 0, marginTop: 1 }}
+              className="mt-0.5 flex-shrink-0 cursor-pointer"
+              style={{ color }}
               onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
             />
           </div>
         );
       })}
-      <style>{`
-        @keyframes toast-in {
-          from { opacity: 0; transform: translateX(16px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
     </div>
   );
 }

@@ -119,7 +119,7 @@ export function AppSidebar() {
       >
         <div className="flex h-[64px] items-center border-b border-white/10 px-3">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary-light font-mono text-lg font-bold text-white">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-sidebar-active font-mono text-lg font-bold text-white">
               ST
             </div>
             {!isCollapsedDesktop && (
@@ -167,12 +167,12 @@ export function AppSidebar() {
                         'group relative flex items-center rounded-md text-[12px] font-medium outline-none transition-colors',
                         isCollapsedDesktop ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-2',
                         active
-                          ? 'border-l-[2.5px] border-accent bg-sidebar-active text-white'
+                          ? 'border-l-[2.5px] border-accent bg-sidebar-active text-white shadow-[inset_0_0_0_1px_rgba(230,126,34,0.18)]'
                           : 'border-l-[2.5px] border-transparent text-sidebar-text hover:bg-sidebar-hover hover:text-white',
                         'focus-visible:ring-2 focus-visible:ring-white',
                       )}
                     >
-                      <Icon size={15} className={cn(active ? 'opacity-100' : 'opacity-80', 'flex-shrink-0')} />
+                      <Icon size={16} className={cn(active ? 'opacity-100' : 'opacity-80', 'flex-shrink-0')} />
 
                       {!isCollapsedDesktop && <span className="truncate">{label}</span>}
 
@@ -204,12 +204,12 @@ export function AppSidebar() {
                   'group relative flex items-center rounded-md text-[12px] font-medium outline-none transition-colors',
                   isCollapsedDesktop ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-2',
                   pathname.startsWith('/admin')
-                    ? 'border-l-[2.5px] border-accent bg-sidebar-active text-white'
+                    ? 'border-l-[2.5px] border-accent bg-sidebar-active text-white shadow-[inset_0_0_0_1px_rgba(230,126,34,0.18)]'
                     : 'border-l-[2.5px] border-transparent text-sidebar-text hover:bg-sidebar-hover hover:text-white',
                   'focus-visible:ring-2 focus-visible:ring-white',
                 )}
               >
-                <ShieldCheck size={15} className="flex-shrink-0 opacity-80" />
+                <ShieldCheck size={16} className="flex-shrink-0 opacity-80" />
                 {!isCollapsedDesktop && <span className="truncate">Permissions</span>}
                 {isCollapsedDesktop && (
                   <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[#132f43] px-2 py-1 text-[11px] text-white shadow-card-hover opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 lg:block">
@@ -222,7 +222,7 @@ export function AppSidebar() {
         </nav>
 
         <div className={cn('border-t border-white/10 p-3', isCollapsedDesktop ? 'flex justify-center' : 'flex items-center gap-2.5')}>
-          <div className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full bg-primary-light font-mono text-[10px] font-bold text-white">
+          <div className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full bg-sidebar-active font-mono text-[10px] font-bold text-white">
             {initials}
           </div>
           {!isCollapsedDesktop && (

@@ -1,13 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { SettingsService } from '../settings/settings.service';
 import { CreateCustomerDto, UpdateCustomerDto } from './dto/customer.dto';
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly references: ReferenceGeneratorService,
+    private readonly settings: SettingsService,
+  ) {}
 
-  create(dto: CreateCustomerDto) {
-    return this.prisma.customer.create({ data: dto });
+  async create(dto: CreateCustomerDto) {
+    await this.settings.assertActiveOption('customer_types', dto.type);
+    return this.prisma.$transaction(async (tx) =>
+      tx.customer.create({
+        data: {
+          ...dto,
+          reference: await this.references.generate('CLI', 'customer', tx),
+        },
+      }),
+    );
   }
 
   findAll(search?: string) {
@@ -29,7 +43,8 @@ export class CustomersService {
     return this.prisma.customer.findUniqueOrThrow({ where: { id } });
   }
 
-  update(id: string, dto: UpdateCustomerDto) {
+  async update(id: string, dto: UpdateCustomerDto) {
+    await this.settings.assertActiveOption('customer_types', dto.type);
     return this.prisma.customer.update({ where: { id }, data: dto });
   }
 

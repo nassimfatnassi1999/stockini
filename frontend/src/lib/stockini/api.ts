@@ -10,6 +10,7 @@ import type {
   Sale,
   StockMovement,
   Supplier,
+  DropdownOption,
 } from './types';
 
 type ProductUpdatePayload = Omit<Partial<Product>, 'quantity'> & { categoryId?: string };
@@ -54,16 +55,23 @@ export const stockiniApi = {
   updateAlert: (id: string, data: Partial<Alert>) => api.patch<Alert>(`/alerts/${id}`, data).then((r) => r.data),
   deleteAlert: (id: string) => api.delete(`/alerts/${id}`).then((r) => r.data),
   movements: () => api.get<StockMovement[]>('/stock/movements').then((r) => r.data),
-  stockEntry: (data: { productId: string; quantity: number; reason?: string; reference?: string }) =>
+  stockEntry: (data: { productId: string; quantity: number; reason?: string }) =>
     api.post<StockMovement>('/stock/entry', data).then((r) => r.data),
-  stockExit: (data: { productId: string; quantity: number; reason?: string; reference?: string }) =>
+  stockExit: (data: { productId: string; quantity: number; reason?: string }) =>
     api.post<StockMovement>('/stock/exit', data).then((r) => r.data),
-  stockAdjustment: (data: { productId: string; newQuantity: number; reason?: string; reference?: string }) =>
+  stockAdjustment: (data: { productId: string; newQuantity: number; reason?: string }) =>
     api.post<StockMovement>('/stock/adjustment', data).then((r) => r.data),
   settings: () => api.get<Array<{ key: string; value: string }>>('/settings').then((r) => r.data),
   createSetting: (data: { key: string; value: string }) => api.post('/settings', data).then((r) => r.data),
   updateSetting: (key: string, data: { value: string }) => api.patch(`/settings/${key}`, data).then((r) => r.data),
   deleteSetting: (key: string) => api.delete(`/settings/${key}`).then((r) => r.data),
+  dropdownCategories: () => api.get<Array<{ category: string; _count: { _all: number } }>>('/settings/dropdown-options/categories').then((r) => r.data),
+  dropdownOptions: () => api.get<DropdownOption[]>('/settings/dropdown-options').then((r) => r.data),
+  dropdownOptionsByCategory: (category: string) => api.get<DropdownOption[]>(`/settings/dropdown-options/${category}`).then((r) => r.data),
+  createDropdownOption: (data: Partial<DropdownOption>) => api.post<DropdownOption>('/settings/dropdown-options', data).then((r) => r.data),
+  updateDropdownOption: (id: string, data: Partial<DropdownOption>) => api.put<DropdownOption>(`/settings/dropdown-options/${id}`, data).then((r) => r.data),
+  toggleDropdownOption: (id: string, active: boolean) => api.patch<DropdownOption>(`/settings/dropdown-options/${id}/active`, { active }).then((r) => r.data),
+  deleteDropdownOption: (id: string) => api.delete(`/settings/dropdown-options/${id}`).then((r) => r.data),
   auditLogs: () => api.get<AuditLog[]>('/audit-logs').then((r) => r.data),
   categories: () => api.get<Array<{ id: string; name: string; description?: string }>>('/categories').then((r) => r.data),
   createCategory: (data: { name: string; description?: string }) => api.post('/categories', data).then((r) => r.data),

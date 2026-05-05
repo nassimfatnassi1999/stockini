@@ -1,14 +1,26 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PaymentStatus, PurchaseStatus, StockMovementType } from '@prisma/client';
+import {
+  PaymentStatus,
+  PurchaseStatus,
+  StockMovementType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
-import { CreatePurchaseDto, ReceivePurchaseDto, UpdatePurchaseDto } from './dto/purchase.dto';
+import {
+  CreatePurchaseDto,
+  ReceivePurchaseDto,
+  UpdatePurchaseDto,
+} from './dto/purchase.dto';
 
 @Injectable()
 export class PurchasesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockService: StockService,
+    private readonly references: ReferenceGeneratorService,
+    private readonly settings: SettingsService,
   ) {}
 
   async create(dto: CreatePurchaseDto, createdById?: string) {
@@ -28,23 +40,25 @@ export class PurchasesService {
     const total = subtotal - discount + tax;
     const paidAmount = dto.paidAmount ?? 0;
 
-    return this.prisma.purchase.create({
-      data: {
-        orderNumber: await this.nextOrderNumber(),
-        supplierId: dto.supplierId,
-        subtotal,
-        discount,
-        tax,
-        total,
-        paidAmount,
-        remainingAmount: Math.max(total - paidAmount, 0),
-        paymentStatus: this.paymentStatus(total, paidAmount),
-        status: PurchaseStatus.ORDERED,
-        createdById,
-        items: { create: items },
-      },
-      include: { supplier: true, items: true },
-    });
+    return this.prisma.$transaction(async (tx) =>
+      tx.purchase.create({
+        data: {
+          orderNumber: await this.references.generate('ACH', 'purchase', tx),
+          supplierId: dto.supplierId,
+          subtotal,
+          discount,
+          tax,
+          total,
+          paidAmount,
+          remainingAmount: Math.max(total - paidAmount, 0),
+          paymentStatus: this.paymentStatus(total, paidAmount),
+          status: PurchaseStatus.ORDERED,
+          createdById,
+          items: { create: items },
+        },
+        include: { supplier: true, items: true },
+      }),
+    );
   }
 
   findAll() {
@@ -57,7 +71,11 @@ export class PurchasesService {
   findOne(id: string) {
     return this.prisma.purchase.findUniqueOrThrow({
       where: { id },
-      include: { supplier: true, items: { include: { product: true } }, payments: true },
+      include: {
+        supplier: true,
+        items: { include: { product: true } },
+        payments: true,
+      },
     });
   }
 
@@ -75,15 +93,22 @@ export class PurchasesService {
         throw new BadRequestException('Cancelled purchase cannot be received');
       }
 
-      const purchaseItemsById = new Map(purchase.items.map((item) => [item.id, item]));
+      const purchaseItemsById = new Map(
+        purchase.items.map((item) => [item.id, item]),
+      );
       for (const item of dto.items) {
         const purchaseItem = purchaseItemsById.get(item.purchaseItemId);
         if (!purchaseItem) {
-          throw new BadRequestException(`Purchase item ${item.purchaseItemId} not found`);
+          throw new BadRequestException(
+            `Purchase item ${item.purchaseItemId} not found`,
+          );
         }
-        const nextReceivedQuantity = purchaseItem.receivedQuantity + item.quantity;
+        const nextReceivedQuantity =
+          purchaseItem.receivedQuantity + item.quantity;
         if (nextReceivedQuantity > purchaseItem.quantity) {
-          throw new BadRequestException('Received quantity exceeds ordered quantity');
+          throw new BadRequestException(
+            'Received quantity exceeds ordered quantity',
+          );
         }
 
         await tx.purchaseItem.update({
@@ -94,15 +119,20 @@ export class PurchasesService {
           productId: purchaseItem.productId,
           type: StockMovementType.PURCHASE_RECEPTION,
           quantity: item.quantity,
-          reference: purchase.orderNumber,
           reason: 'Purchase reception',
           userId,
         });
       }
 
-      const updatedItems = await tx.purchaseItem.findMany({ where: { purchaseId: id } });
-      const allReceived = updatedItems.every((item) => item.receivedQuantity >= item.quantity);
-      const someReceived = updatedItems.some((item) => item.receivedQuantity > 0);
+      const updatedItems = await tx.purchaseItem.findMany({
+        where: { purchaseId: id },
+      });
+      const allReceived = updatedItems.every(
+        (item) => item.receivedQuantity >= item.quantity,
+      );
+      const someReceived = updatedItems.some(
+        (item) => item.receivedQuantity > 0,
+      );
 
       return tx.purchase.update({
         where: { id },
@@ -126,7 +156,14 @@ export class PurchasesService {
   }
 
   async update(id: string, dto: UpdatePurchaseDto) {
-    const purchase = await this.prisma.purchase.findUniqueOrThrow({ where: { id } });
+    await this.settings.assertActiveOption('purchase_statuses', dto.status);
+    await this.settings.assertActiveOption(
+      'payment_statuses',
+      dto.paymentStatus,
+    );
+    const purchase = await this.prisma.purchase.findUniqueOrThrow({
+      where: { id },
+    });
     const paidAmount = dto.paidAmount ?? Number(purchase.paidAmount);
     return this.prisma.purchase.update({
       where: { id },
@@ -136,7 +173,11 @@ export class PurchasesService {
         paidAmount,
         remainingAmount: Math.max(Number(purchase.total) - paidAmount, 0),
       },
-      include: { supplier: true, items: { include: { product: true } }, payments: true },
+      include: {
+        supplier: true,
+        items: { include: { product: true } },
+        payments: true,
+      },
     });
   }
 
@@ -152,10 +193,5 @@ export class PurchasesService {
       return PaymentStatus.PARTIAL;
     }
     return PaymentStatus.PAID;
-  }
-
-  private async nextOrderNumber() {
-    const count = await this.prisma.purchase.count();
-    return `PO-${new Date().getFullYear()}-${String(count + 1).padStart(6, '0')}`;
   }
 }

@@ -93,6 +93,7 @@ model Role {
 
 model Product {
   id             String          @id @default(cuid())
+  reference      String          @unique
   sku            String          @unique
   barcode        String?         @unique
   name           String
@@ -122,6 +123,7 @@ model Product {
   @@index([brandId])
   @@index([supplierId])
   @@index([name])
+  @@index([reference])
   @@index([deletedAt])
 }
 
@@ -140,6 +142,7 @@ model Brand {
 
 model Customer {
   id            String       @id @default(cuid())
+  reference     String       @unique
   name          String
   phone         String?
   email         String?
@@ -153,10 +156,12 @@ model Customer {
   payments      Payment[]
 
   @@index([name])
+  @@index([reference])
 }
 
 model Supplier {
   id            String      @id @default(cuid())
+  reference     String      @unique
   name          String
   contactPerson String?
   phone         String?
@@ -171,6 +176,7 @@ model Supplier {
   payments      Payment[]
 
   @@index([name])
+  @@index([reference])
 }
 
 model StockMovement {
@@ -181,7 +187,7 @@ model StockMovement {
   previousQuantity Int
   newQuantity      Int
   reason           String?
-  reference        String?
+  reference        String?           @unique
   userId           String?
   createdAt        DateTime          @default(now())
   product          Product           @relation(fields: [productId], references: [id])
@@ -273,6 +279,7 @@ model PurchaseItem {
 
 model Payment {
   id         String        @id @default(cuid())
+  reference  String        @unique
   type       PaymentType
   method     PaymentMethod
   amount     Decimal       @db.Decimal(12, 3)
@@ -292,6 +299,7 @@ model Payment {
   @@index([customerId])
   @@index([supplierId])
   @@index([createdAt])
+  @@index([reference])
 }
 
 model Alert {
@@ -330,4 +338,30 @@ model Setting {
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ReferenceCounter {
+  id        String   @id @default(cuid())
+  prefix    String
+  year      Int
+  sequence  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([prefix, year], name: "prefix_year")
+  @@index([prefix, year])
+}
+
+model DropdownOption {
+  id        String   @id @default(cuid())
+  category  String
+  label     String
+  value     String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([category, value], name: "category_value")
+  @@index([category, active, sortOrder])
 }

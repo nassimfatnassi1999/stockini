@@ -76,8 +76,8 @@ function ClientDetailsRoute() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">ClientDetailsPage</h1>
-        <p className="mt-1 text-sm text-text-muted">Fiche client et modification des informations.</p>
+        <h1 className="app-page-title">Détail client</h1>
+        <p className="app-page-subtitle">Fiche client et modification des informations.</p>
       </div>
       <ClientDetails
         client={clientQuery.data}
