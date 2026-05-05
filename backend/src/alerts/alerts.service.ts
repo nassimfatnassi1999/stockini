@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateAlertDto } from './dto/alert.dto';
+import { CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
 
 @Injectable()
 export class AlertsService {
@@ -20,5 +20,13 @@ export class AlertsService {
 
   markRead(id: string) {
     return this.prisma.alert.update({ where: { id }, data: { isRead: true } });
+  }
+
+  update(id: string, dto: UpdateAlertDto) {
+    return this.prisma.alert.update({ where: { id }, data: dto, include: { product: true } });
+  }
+
+  remove(id: string) {
+    return this.prisma.alert.delete({ where: { id } });
   }
 }

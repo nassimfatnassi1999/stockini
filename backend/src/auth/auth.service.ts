@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto, LoginDto, UpdateProfileDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
@@ -44,6 +44,54 @@ export class AuthService {
         fullName: user.fullName,
         role: user.role.name,
       },
+    };
+  }
+
+  async me(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    return this.profilePayload(user);
+  }
+
+  async updateMe(userId: string, dto: UpdateProfileDto) {
+    const fullName = (dto.fullName ?? [dto.prenom, dto.nom].filter(Boolean).join(' ').trim()) || undefined;
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { fullName },
+      include: { role: true },
+    });
+
+    return this.profilePayload(user);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const passwordMatches = await bcrypt.compare(dto.currentPassword ?? dto.oldPassword ?? '', user.passwordHash);
+    if (!passwordMatches) {
+      throw new UnauthorizedException('Invalid current password');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await bcrypt.hash(dto.newPassword, 10) },
+    });
+
+    return { ok: true };
+  }
+
+  private profilePayload(user: { id: string; email: string; fullName: string; role: { name: string } }) {
+    const [prenom = '', ...nameParts] = user.fullName.split(' ');
+    const nom = nameParts.join(' ') || user.fullName;
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      prenom,
+      nom,
+      role: user.role.name,
     };
   }
 }

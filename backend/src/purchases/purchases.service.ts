@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PaymentStatus, PurchaseStatus, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
-import { CreatePurchaseDto, ReceivePurchaseDto } from './dto/purchase.dto';
+import { CreatePurchaseDto, ReceivePurchaseDto, UpdatePurchaseDto } from './dto/purchase.dto';
 
 @Injectable()
 export class PurchasesService {
@@ -123,6 +123,25 @@ export class PurchasesService {
       where: { id },
       data: { status: PurchaseStatus.CANCELLED },
     });
+  }
+
+  async update(id: string, dto: UpdatePurchaseDto) {
+    const purchase = await this.prisma.purchase.findUniqueOrThrow({ where: { id } });
+    const paidAmount = dto.paidAmount ?? Number(purchase.paidAmount);
+    return this.prisma.purchase.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        paymentStatus: dto.paymentStatus,
+        paidAmount,
+        remainingAmount: Math.max(Number(purchase.total) - paidAmount, 0),
+      },
+      include: { supplier: true, items: { include: { product: true } }, payments: true },
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.purchase.delete({ where: { id } });
   }
 
   private paymentStatus(total: number, paidAmount: number) {

@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-#  StockPro — Gestion de pièces de rechange
+#  Stockini — Gestion de pièces de rechange
 #  Makefile de développement, base de données, Prisma, Docker et production
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ NC := \033[0m
 
 help: ## Afficher cette aide
 	@echo ""
-	@echo -e "$(BLUE)$(BOLD)StockPro — Gestion de pièces de rechange$(NC)"
+	@echo -e "$(BLUE)$(BOLD)Stockini — Gestion de pièces de rechange$(NC)"
 	@echo -e "$(BLUE)================================================$(NC)"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; printf "$(BOLD)Commandes disponibles:$(NC)\n\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -95,7 +95,7 @@ deps-check: backend-env-check frontend-env-check
 	fi
 
 install: install-backend install-frontend ## Installer toutes les dépendances
-	@echo -e "$(GREEN)Toutes les dépendances StockPro sont installées.$(NC)"
+	@echo -e "$(GREEN)Toutes les dépendances Stockini sont installées.$(NC)"
 
 install-backend: backend-env-check ## Installer les dépendances backend
 	@echo -e "$(BLUE)Installation des dépendances backend...$(NC)"
@@ -106,18 +106,19 @@ install-frontend: frontend-env-check ## Installer les dépendances frontend
 	@cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && npm install
 
 dev: env-check deps-check db-up db-wait db-migrate db-seed ## Lancer backend et frontend en développement
-	@echo -e "$(GREEN)Démarrage StockPro en développement...$(NC)"
+	@echo -e "$(GREEN)Démarrage Stockini en développement...$(NC)"
 	@set -a; source "$(ENV_FILE)"; set +a; \
 	initial_port="$${PORT:-$(BACKEND_PORT)}"; \
+	initial_frontend_port="$(FRONTEND_PORT)"; \
 	is_port_busy() { \
 		local port="$$1"; \
 		if command -v lsof >/dev/null 2>&1; then \
-			lsof -iTCP:"$$port" -sTCP:LISTEN -Pn >/dev/null 2>&1; \
-		elif command -v ss >/dev/null 2>&1; then \
-			ss -ltn | awk -v target=":$$port" '$$4 ~ target "$$" { found = 1 } END { exit !found }'; \
-		else \
-			(timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$$port") >/dev/null 2>&1; \
+			lsof -iTCP:"$$port" -sTCP:LISTEN -Pn >/dev/null 2>&1 && return 0; \
 		fi; \
+		if command -v ss >/dev/null 2>&1; then \
+			ss -ltn 2>/dev/null | awk -v target=":$$port" '$$4 ~ target "$$" { found = 1 } END { exit !found }' && return 0; \
+		fi; \
+		(timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$$port") >/dev/null 2>&1; \
 	}; \
 	find_free_port() { \
 		local port="$$1"; \
@@ -127,15 +128,22 @@ dev: env-check deps-check db-up db-wait db-migrate db-seed ## Lancer backend et 
 		echo "$$port"; \
 	}; \
 	backend_port="$$(find_free_port "$$initial_port")"; \
+	frontend_port="$$(find_free_port "$$initial_frontend_port")"; \
+	while [ "$$frontend_port" = "$$backend_port" ]; do \
+		frontend_port="$$(find_free_port "$$((frontend_port + 1))")"; \
+	done; \
 	if [ "$$backend_port" != "$$initial_port" ]; then \
 		echo -e "$(YELLOW)⚠ Port $$initial_port occupé → fallback sur $$backend_port$(NC)"; \
 	fi; \
+	if [ "$$frontend_port" != "$$initial_frontend_port" ]; then \
+		echo -e "$(YELLOW)⚠ Port $$initial_frontend_port occupé → fallback sur $$frontend_port$(NC)"; \
+	fi; \
 	echo -e "$(YELLOW)Backend → http://localhost:$$backend_port/api$(NC)"; \
 	echo -e "$(YELLOW)Swagger → http://localhost:$$backend_port/api/docs$(NC)"; \
-	echo -e "$(YELLOW)Frontend → http://localhost:$(FRONTEND_PORT)$(NC)"; \
+	echo -e "$(YELLOW)Frontend → http://localhost:$$frontend_port$(NC)"; \
 	trap 'kill 0' INT TERM EXIT; \
 	(cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$$backend_port" npm run start:dev 2>&1 | sed -u 's/^/[backend] /') & \
-	(cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$(FRONTEND_PORT)" NEXT_PUBLIC_API_URL="http://localhost:$$backend_port" npm run dev 2>&1 | sed -u 's/^/[frontend] /') & \
+	(cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$$frontend_port" NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_API_URL="http://localhost:$$backend_port" npm run dev 2>&1 | sed -u 's/^/[frontend] /') & \
 	wait
 
 stop: env-check ## Arrêter les services Docker de développement
@@ -169,7 +177,7 @@ db-migrate: backend-env-check db-up db-wait ## Appliquer les migrations Prisma
 	fi
 
 db-seed: backend-env-check db-up db-wait ## Lancer le seed Prisma si nécessaire
-	@echo -e "$(BLUE)Seed Prisma StockPro...$(NC)"
+	@echo -e "$(BLUE)Seed Prisma Stockini...$(NC)"
 	@$(MAKE) db-seed-only
 
 db-seed-only: backend-env-check ## Exécuter uniquement le seed Prisma
@@ -195,11 +203,11 @@ build: backend-env-check frontend-env-check ## Builder backend et frontend
 	@echo -e "$(BLUE)Build backend...$(NC)"
 	@cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && npm run build
 	@echo -e "$(BLUE)Build frontend...$(NC)"
-	@cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && npm run build
-	@echo -e "$(GREEN)Build StockPro terminé.$(NC)"
+	@cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && NEXT_TELEMETRY_DISABLED=1 npm run build
+	@echo -e "$(GREEN)Build Stockini terminé.$(NC)"
 
 clean: ## Nettoyer les artefacts locaux
-	@read -p "Confirmer le nettoyage local StockPro ? [y/N] " confirm; \
+	@read -p "Confirmer le nettoyage local Stockini ? [y/N] " confirm; \
 	if [[ "$$confirm" =~ ^[Yy]$$ ]]; then \
 		echo -e "$(YELLOW)Nettoyage local...$(NC)"; \
 		rm -rf "$(BACKEND)/dist" "$(BACKEND)/coverage" "$(FRONTEND)/.next" "$(FRONTEND)/dist" "$(FRONTEND)/out"; \
@@ -209,7 +217,7 @@ clean: ## Nettoyer les artefacts locaux
 	fi
 
 clean-all: env-check ## Nettoyer node_modules, builds et volumes Docker
-	@read -p "Confirmer le nettoyage complet StockPro ? [y/N] " confirm; \
+	@read -p "Confirmer le nettoyage complet Stockini ? [y/N] " confirm; \
 	if [[ "$$confirm" =~ ^[Yy]$$ ]]; then \
 		echo -e "$(RED)Nettoyage complet...$(NC)"; \
 		$(COMPOSE) down -v --remove-orphans; \
@@ -219,8 +227,8 @@ clean-all: env-check ## Nettoyer node_modules, builds et volumes Docker
 		echo "Annulé."; \
 	fi
 
-prod: prod-db prod-build prod-up prod-wait prod-migrate ## Déployer StockPro en production
-	@echo -e "$(GREEN)StockPro production est prêt.$(NC)"
+prod: prod-db prod-build prod-up prod-wait prod-migrate ## Déployer Stockini en production
+	@echo -e "$(GREEN)Stockini production est prêt.$(NC)"
 
 prod-db: prod-env-check ## Démarrer uniquement PostgreSQL en production
 	@echo -e "$(BLUE)Démarrage DB production...$(NC)"
@@ -260,7 +268,7 @@ prod-wait: prod-env-check ## Attendre que PostgreSQL production soit prêt
 	@echo -e "$(GREEN)PostgreSQL production est prêt.$(NC)"
 
 prod-clean: prod-env-check ## Nettoyer les ressources Docker de production
-	@read -p "Confirmer le nettoyage Docker production StockPro ? [y/N] " confirm; \
+	@read -p "Confirmer le nettoyage Docker production Stockini ? [y/N] " confirm; \
 	if [[ "$$confirm" =~ ^[Yy]$$ ]]; then \
 		echo -e "$(RED)Nettoyage production...$(NC)"; \
 		$(COMPOSE_PROD) down --remove-orphans; \

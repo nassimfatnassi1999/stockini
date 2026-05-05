@@ -35,16 +35,16 @@ async function main() {
   }
 
   await prisma.user.upsert({
-    where: { email: 'admin@stockpro.local' },
+    where: { email: 'admin@stockini.local' },
     update: {
-      fullName: 'StockPro Admin',
+      fullName: 'Stockini Admin',
       roleId: adminRoleId,
       isActive: true,
     },
     create: {
-      email: 'admin@stockpro.local',
+      email: 'admin@stockini.local',
       passwordHash: await bcrypt.hash('Admin123!', 10),
-      fullName: 'StockPro Admin',
+      fullName: 'Stockini Admin',
       roleId: adminRoleId,
       isActive: true,
     },
@@ -273,12 +273,12 @@ async function main() {
 
   await prisma.setting.upsert({
     where: { key: 'company.name' },
-    update: { value: 'StockPro' },
-    create: { key: 'company.name', value: 'StockPro' },
+    update: { value: 'Stockini' },
+    create: { key: 'company.name', value: 'Stockini' },
   });
 
-  console.log('StockPro seed completed');
-  console.log('Admin login: admin@stockpro.local / Admin123!');
+  console.log('Stockini seed completed');
+  console.log('Admin login: admin@stockini.local / Admin123!');
 }
 
 main()

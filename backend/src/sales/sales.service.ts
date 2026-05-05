@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PaymentStatus, PaymentType, SaleStatus, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
-import { CreateSaleDto } from './dto/sale.dto';
+import { CreateSaleDto, UpdateSaleDto } from './dto/sale.dto';
 
 @Injectable()
 export class SalesService {
@@ -138,6 +138,25 @@ export class SalesService {
         include: { items: true, payments: true },
       });
     });
+  }
+
+  async update(id: string, dto: UpdateSaleDto) {
+    const sale = await this.prisma.sale.findUniqueOrThrow({ where: { id } });
+    const paidAmount = dto.paidAmount ?? Number(sale.paidAmount);
+    return this.prisma.sale.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        paymentStatus: dto.paymentStatus,
+        paidAmount,
+        remainingAmount: Math.max(Number(sale.total) - paidAmount, 0),
+      },
+      include: { customer: true, items: { include: { product: true } }, payments: true },
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.sale.delete({ where: { id } });
   }
 
   private paymentStatus(total: number, paidAmount: number) {

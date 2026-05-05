@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CreatePaymentDto } from './dto/payment.dto';
+import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard)
@@ -21,5 +21,15 @@ export class PaymentsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(id);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdatePaymentDto) {
+    return this.paymentsService.update(id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.paymentsService.remove(id);
   }
 }

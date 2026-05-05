@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreatePaymentDto } from './dto/payment.dto';
+import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -22,5 +22,17 @@ export class PaymentsService {
       where: { id },
       include: { sale: true, purchase: true, customer: true, supplier: true },
     });
+  }
+
+  update(id: string, dto: UpdatePaymentDto) {
+    return this.prisma.payment.update({
+      where: { id },
+      data: dto,
+      include: { sale: true, purchase: true, customer: true, supplier: true },
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.payment.delete({ where: { id } });
   }
 }

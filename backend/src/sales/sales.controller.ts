@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateSaleDto } from './dto/sale.dto';
+import { CreateSaleDto, UpdateSaleDto } from './dto/sale.dto';
 import { SalesService } from './sales.service';
 
 @UseGuards(JwtAuthGuard)
@@ -28,5 +28,15 @@ export class SalesController {
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.salesService.cancel(id, user?.id);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateSaleDto) {
+    return this.salesService.update(id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.salesService.remove(id);
   }
 }

@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { PaymentStatus, PurchaseStatus } from '@prisma/client';
+import { IsEnum } from 'class-validator';
 
 export class CreatePurchaseItemDto {
   @IsString()
@@ -59,4 +61,20 @@ export class ReceivePurchaseDto {
   @ValidateNested({ each: true })
   @Type(() => ReceivePurchaseItemDto)
   items!: ReceivePurchaseItemDto[];
+}
+
+export class UpdatePurchaseDto {
+  @IsOptional()
+  @IsEnum(PurchaseStatus)
+  status?: PurchaseStatus;
+
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  paymentStatus?: PaymentStatus;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  paidAmount?: number;
 }

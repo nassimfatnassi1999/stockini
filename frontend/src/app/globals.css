@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ─── Stockini Design System ─── */
+    --p: #1B4F72;
+    --pl: #2E86C1;
+    --pd: #0D2B3E;
+    --acc: #E67E22;
+    --accd: #A04000;
+    --accl: #FAD7A0;
+    --sf: #F7F9FC;
+    --cd: #FFFFFF;
+    --bd: #D5DCE8;
+    --bds: #9EB0C8;
+    --t1: #1A2332;
+    --t2: #5A6A7E;
+    --t3: #9AAFC5;
+    --sb-bg: #0D2B3E;
+    --sb-hov: #1B4F72;
+    --sb-act: #2E86C1;
+    --sb-txt: #B8CCE0;
+    --fn: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --mn: 'Consolas', 'Menlo', 'Monaco', monospace;
+    --rc: 12px;
+    --rb: 8px;
+    --rch: 20px;
+    --shc: 0 2px 8px rgba(13, 43, 62, 0.07);
+    --shh: 0 8px 28px rgba(13, 43, 62, 0.14);
+    --radius: 12px;
+  }
+
+  * {
+    border-color: theme('colors.border.DEFAULT');
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: var(--font-sans, var(--fn));
+  }
+
+  body {
+    background-color: theme('colors.surface');
+    color: theme('colors.text-primary');
+    font-family: var(--font-sans, var(--fn));
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Transitions globales sobres (§2.9) */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 150ms;
+    transition-timing-function: ease;
+  }
+
+  /* Feedback tactile boutons */
+  button:active {
+    transform: scale(0.97);
+  }
+}
+
+@layer components {
+  /* Référence GR/DR — Space Mono obligatoire */
+  .gr-reference,
+  .dr-reference {
+    font-family: var(--font-mono, var(--mn));
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  /* Skeleton loading */
+  .skeleton {
+    background: linear-gradient(90deg, #f0f4f8 25%, #e0e8f0 50%, #f0f4f8 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+  }
+}

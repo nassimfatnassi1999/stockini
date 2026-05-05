@@ -1,6 +1,6 @@
-# StockPro
+# Stockini
 
-StockPro is a spare-parts management application with a NestJS API, a Next.js dashboard, PostgreSQL, and Prisma.
+Stockini is a spare-parts stock management application with a NestJS API, a Next.js dashboard, PostgreSQL, and Prisma.
 
 ## Stack
 
@@ -38,6 +38,7 @@ The root `.env` file is shared by the local development commands.
 
 ```env
 DATABASE_URL="postgresql://stockpro:stockpro_password@localhost:5432/stockpro?schema=public"
+APP_NAME="Stockini"
 JWT_SECRET="change_me"
 JWT_REFRESH_SECRET="change_me_refresh"
 JWT_EXPIRES_IN="15m"
@@ -116,7 +117,7 @@ npm run test
 
 ## Frontend
 
-The frontend source lives in `frontend/app`, with shared UI components in `frontend/components`.
+The frontend source lives in `frontend/src/app`, with shared UI components in `frontend/src/components`.
 
 Useful frontend commands:
 

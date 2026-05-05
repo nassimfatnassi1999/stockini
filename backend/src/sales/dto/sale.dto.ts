@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod, PaymentStatus, SaleStatus } from '@prisma/client';
 
 export class CreateSaleItemDto {
   @IsString()
@@ -49,4 +49,20 @@ export class CreateSaleDto {
   @ValidateNested({ each: true })
   @Type(() => CreateSaleItemDto)
   items!: CreateSaleItemDto[];
+}
+
+export class UpdateSaleDto {
+  @IsOptional()
+  @IsEnum(SaleStatus)
+  status?: SaleStatus;
+
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  paymentStatus?: PaymentStatus;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  paidAmount?: number;
 }

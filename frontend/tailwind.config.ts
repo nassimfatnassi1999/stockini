@@ -1,82 +1,113 @@
-import type { Config } from 'tailwindcss'
+import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  darkMode: 'class',
-  content: [
-    './pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-  ],
+  darkMode: ['class'],
+  content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
-        bg: {
-          DEFAULT: '#0d0f14',
-          2: '#13161e',
-          3: '#1a1e28',
-          4: '#22273a',
+        // === Stockini — Industrial Precision ===
+        primary: {
+          DEFAULT: '#1B4F72',
+          light: '#2E86C1',
+          dark: '#0D2B3E',
+          foreground: '#FFFFFF',
         },
-        sidebar: '#0b0d12',
         accent: {
-          DEFAULT: '#3b82f6',
-          2: '#60a5fa',
-          dim: 'rgba(59,130,246,0.15)',
+          DEFAULT: '#E67E22',
+          light: '#FAD7A0',
+          dark: '#A04000',
+          foreground: '#FFFFFF',
         },
-        green: {
-          DEFAULT: '#22c55e',
-          dim: 'rgba(34,197,94,0.12)',
-        },
-        red: {
-          DEFAULT: '#ef4444',
-          dim: 'rgba(239,68,68,0.12)',
-        },
-        amber: {
-          DEFAULT: '#f59e0b',
-          dim: 'rgba(245,158,11,0.12)',
-        },
-        purple: {
-          DEFAULT: '#a78bfa',
-          dim: 'rgba(167,139,250,0.12)',
-        },
-        teal: {
-          DEFAULT: '#14b8a6',
-          dim: 'rgba(20,184,166,0.12)',
-        },
-        text: {
-          1: '#f0f2f8',
-          2: '#8b92a9',
-          3: '#555e77',
+        surface: '#F7F9FC',
+        card: {
+          DEFAULT: '#FFFFFF',
+          foreground: '#1A2332',
         },
         border: {
-          DEFAULT: 'rgba(255,255,255,0.06)',
-          2: 'rgba(255,255,255,0.1)',
+          DEFAULT: '#D5DCE8',
+          strong: '#9EB0C8',
+        },
+        'text-primary': '#1A2332',
+        'text-secondary': '#5A6A7E',
+        'text-muted': '#9AAFC5',
+        'text-inverse': '#FFFFFF',
+
+        // Statuts métier
+        status: {
+          new: '#2196F3',
+          progress: '#FF9800',
+          done: '#4CAF50',
+          blocked: '#F44336',
+          draft: '#9E9E9E',
+          planned: '#9C27B0',
+        },
+
+        // Sidebar
+        sidebar: {
+          bg: '#0D2B3E',
+          hover: '#1B4F72',
+          active: '#2E86C1',
+          text: '#B8CCE0',
+          'text-active': '#FFFFFF',
+          border: '#1B4F72',
+        },
+
+        // Aliases shadcn (pour compat composants existants)
+        background: '#F7F9FC',
+        foreground: '#1A2332',
+        input: '#D5DCE8',
+        ring: '#1B4F72',
+        muted: {
+          DEFAULT: '#F0F4F8',
+          foreground: '#5A6A7E',
+        },
+        popover: {
+          DEFAULT: '#FFFFFF',
+          foreground: '#1A2332',
+        },
+        destructive: {
+          DEFAULT: '#F44336',
+          foreground: '#FFFFFF',
+        },
+        secondary: {
+          DEFAULT: '#F0F4F8',
+          foreground: '#1A2332',
         },
       },
       fontFamily: {
-        sans: ['Sora', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
-      },
-      fontSize: {
-        '10': '10px',
-        '11': '11px',
-        '12': '12px',
-        '12.5': '12.5px',
-        '13': '13px',
-        '14': '14px',
-        '15': '15px',
+        sans: ['var(--font-sans)', 'DM Sans', 'sans-serif'],
+        mono: ['var(--font-mono)', 'Space Mono', 'monospace'],
       },
       borderRadius: {
-        r: '8px',
-        r2: '12px',
-        r3: '16px',
+        card: '12px',
+        chip: '20px',
+        lg: '10px',
+        md: '8px',
+        sm: '6px',
       },
-      spacing: {
-        sidebar: '240px',
-        topbar: '56px',
+      boxShadow: {
+        card: '0 2px 8px rgba(13,43,62,0.06)',
+        'card-hover': '0 8px 24px rgba(13,43,62,0.12)',
+        topbar: '0 1px 3px rgba(0,0,0,0.08)',
+      },
+      keyframes: {
+        fadeInUp: {
+          from: { opacity: '0', transform: 'translateY(12px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '200% 0' },
+          '100%': { backgroundPosition: '-200% 0' },
+        },
+      },
+      animation: {
+        fadeInUp: 'fadeInUp 0.3s ease both',
+        shimmer: 'shimmer 1.5s infinite',
       },
     },
   },
-  plugins: [],
-}
+  plugins: [require('tailwindcss-animate')],
+};
 
-export default config
+export default config;

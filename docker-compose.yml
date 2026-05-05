@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: stockpro-postgres
+    container_name: stockini-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: stockpro
@@ -21,7 +21,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: stockpro-backend
+    container_name: stockini-backend
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://stockpro:stockpro_password@postgres:5432/stockpro?schema=public
@@ -30,6 +30,7 @@ services:
       JWT_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 7d
       PORT: 3001
+      APP_NAME: Stockini
     ports:
       - '3001:3001'
     depends_on:
@@ -40,10 +41,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: stockpro-frontend
+    container_name: stockini-frontend
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:3001
+      APP_NAME: Stockini
     ports:
       - '3000:3000'
     depends_on:

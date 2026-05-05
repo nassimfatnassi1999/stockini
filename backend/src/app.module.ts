@@ -12,6 +12,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { RbacModule } from './rbac/rbac.module';
 import { ReportsModule } from './reports/reports.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
@@ -38,6 +39,7 @@ import { UsersModule } from './users/users.module';
     AlertsModule,
     SettingsModule,
     AuditLogsModule,
+    RbacModule,
   ],
   controllers: [AppController],
   providers: [AppService],

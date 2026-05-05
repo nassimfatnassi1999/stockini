@@ -34,3 +34,39 @@ export class CreatePaymentDto {
   @IsString()
   note?: string;
 }
+
+export class UpdatePaymentDto {
+  @IsOptional()
+  @IsEnum(PaymentType)
+  type?: PaymentType;
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount?: number;
+
+  @IsOptional()
+  @IsString()
+  saleId?: string;
+
+  @IsOptional()
+  @IsString()
+  purchaseId?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
