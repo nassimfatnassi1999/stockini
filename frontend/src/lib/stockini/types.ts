@@ -12,8 +12,9 @@ export interface Product {
   barcode?: string | null;
   name: string;
   description?: string | null;
-  purchasePrice: number | string;
-  salePrice: number | string;
+  purchasePrice: number | string;       // Prix d'achat HT
+  purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × 1.19)
+  salePrice: number | string;           // Prix de vente (TTC × 1.4)
   quantity: number;
   minStock: number;
   location?: string | null;

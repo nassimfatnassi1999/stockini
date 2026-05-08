@@ -28,6 +28,14 @@ export class CustomersController {
     return this.customersService.findAll(search);
   }
 
+  @Get('next-reference')
+  async getNextReference(@Query('type') type: string) {
+    const reference = await this.customersService.getNextReference(
+      type ?? 'INDIVIDUAL',
+    );
+    return { reference };
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.customersService.findOne(id);

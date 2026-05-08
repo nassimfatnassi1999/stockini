@@ -28,7 +28,7 @@ interface ClientDetailsProps {
 }
 
 const CUSTOMER_TYPES: Array<{ value: CustomerType; label: string }> = [
-  { value: 'INDIVIDUAL', label: 'Particulier' },
+  { value: 'INDIVIDUAL', label: 'Passager' },
   { value: 'COMPANY', label: 'Entreprise' },
   { value: 'GARAGE', label: 'Garage' },
 ];

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -12,7 +12,7 @@ import { Search, Plus, Trash2, X } from 'lucide-react';
 import type { Customer, DropdownOption } from '@/lib/stockini/types';
 
 const CUSTOMER_TYPES = [
-  { value: 'INDIVIDUAL', label: 'Particulier' },
+  { value: 'INDIVIDUAL', label: 'Passager' },
   { value: 'GARAGE', label: 'Garage' },
   { value: 'COMPANY', label: 'Entreprise' },
 ] as const;
@@ -52,6 +52,28 @@ export default function ClientsPage() {
   const [form, setForm] = useState<CreateCustomerForm>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [refPreview, setRefPreview] = useState<string | null>(null);
+  const refFetchController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!showModal) {
+      setRefPreview(null);
+      return;
+    }
+    refFetchController.current?.abort();
+    const controller = new AbortController();
+    refFetchController.current = controller;
+    api
+      .get<{ reference: string }>('/customers/next-reference', {
+        params: { type: form.type },
+        signal: controller.signal,
+      })
+      .then((r) => setRefPreview(r.data.reference))
+      .catch(() => {});
+    return () => controller.abort();
+  // Re-fetch whenever the modal opens or the type changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showModal, form.type]);
 
   const customersQuery = useQuery<Customer[]>({
     queryKey: ['customers', search],
@@ -298,8 +320,9 @@ export default function ClientsPage() {
                   id="customer-reference"
                   type="text"
                   readOnly
-                  placeholder="Générée automatiquement"
-                  className="flex h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm text-text-muted shadow-sm cursor-not-allowed"
+                  value={refPreview ?? ''}
+                  placeholder={refPreview === null ? 'Calcul en cours…' : ''}
+                  className="flex h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm font-mono text-text-secondary shadow-sm cursor-not-allowed"
                 />
               </div>
 
@@ -371,12 +394,12 @@ export default function ClientsPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="customer-tax">N° fiscal (NIF/NIS)</Label>
+                <Label htmlFor="customer-tax">Matricule fiscal</Label>
                 <Input
                   id="customer-tax"
                   value={form.taxNumber}
                   onChange={(e) => setForm((f) => ({ ...f, taxNumber: e.target.value }))}
-                  placeholder="Numéro fiscal optionnel"
+                  placeholder="Matricule fiscal optionnel"
                 />
               </div>
 

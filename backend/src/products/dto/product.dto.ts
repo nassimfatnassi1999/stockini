@@ -33,15 +33,11 @@ export class CreateProductDto {
   @IsString()
   supplierId?: string;
 
+  // Prix d'achat HT — salePrice and purchasePriceTtc are derived by the service
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   purchasePrice!: number;
-
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  salePrice!: number;
 
   @Type(() => Number)
   @IsNumber()
@@ -95,17 +91,12 @@ export class UpdateProductDto {
   @IsString()
   supplierId?: string;
 
+  // Prix d'achat HT — salePrice and purchasePriceTtc are derived by the service
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   purchasePrice?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  salePrice?: number;
 
   @IsOptional()
   @Type(() => Number)

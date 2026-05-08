@@ -4,6 +4,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
 import {
+  calcPurchasePriceTtc,
+  calcSalePrice,
+} from '../common/utils/pricing.util';
+import {
   CreateProductDto,
   ProductQueryDto,
   UpdateProductDto,
@@ -19,10 +23,11 @@ export class ProductsService {
 
   async create(dto: CreateProductDto) {
     await this.settings.assertActiveOption('stock_locations', dto.location);
+    const derivedPrices = this.derivePrices(dto.purchasePrice);
     return this.prisma.$transaction(async (tx) => {
       const reference = await this.references.generate('PRD', 'product', tx);
       return tx.product.create({
-        data: { ...dto, reference, sku: reference },
+        data: { ...dto, ...derivedPrices, reference, sku: reference },
         include: this.includeRelations(),
       });
     });
@@ -99,9 +104,14 @@ export class ProductsService {
       }
     }
 
+    const derivedPrices =
+      dto.purchasePrice !== undefined
+        ? this.derivePrices(dto.purchasePrice)
+        : {};
+
     return this.prisma.product.update({
       where: { id },
-      data: dto,
+      data: { ...dto, ...derivedPrices },
       include: this.includeRelations(),
     });
   }
@@ -112,6 +122,13 @@ export class ProductsService {
       data: { deletedAt: new Date(), isActive: false },
       include: this.includeRelations(),
     });
+  }
+
+  private derivePrices(purchasePrice: number) {
+    return {
+      purchasePriceTtc: calcPurchasePriceTtc(purchasePrice),
+      salePrice: calcSalePrice(purchasePrice),
+    };
   }
 
   private includeRelations() {

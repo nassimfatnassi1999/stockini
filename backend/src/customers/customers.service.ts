@@ -14,14 +14,19 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto) {
     await this.settings.assertActiveOption('customer_types', dto.type);
+    const type = dto.type ?? 'INDIVIDUAL';
     return this.prisma.$transaction(async (tx) =>
       tx.customer.create({
         data: {
           ...dto,
-          reference: await this.references.generate('CLI', 'customer', tx),
+          reference: await this.references.generateForCustomer(type, tx),
         },
       }),
     );
+  }
+
+  getNextReference(type: string) {
+    return this.references.peekNextCustomerReference(type ?? 'INDIVIDUAL');
   }
 
   findAll(search?: string) {

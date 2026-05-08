@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { money } from '@/lib/stockini/format';
+import { calcPurchasePriceTtc, calcSalePrice, roundPrice } from '@/lib/stockini/pricing';
 import type { Lookup, Product } from '@/lib/stockini/types';
 
 interface ProductFormData {
   name: string;
-  salePrice: string;
+  purchasePriceHt: string;
   quantity: string;
   categoryId: string;
 }
@@ -26,7 +27,7 @@ interface ProductDetailsProps {
 function getInitialFormData(product: Product): ProductFormData {
   return {
     name: product.name,
-    salePrice: String(product.salePrice ?? 0),
+    purchasePriceHt: String(product.purchasePrice ?? 0),
     quantity: String(product.quantity ?? 0),
     categoryId: product.category?.id ?? '',
   };
@@ -48,13 +49,26 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
 
   const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const priceHt = Number(formData.purchasePriceHt) || 0;
+    // Only send purchasePrice HT — backend derives purchasePriceTtc and salePrice
     await onSave({
       name: formData.name.trim(),
-      salePrice: Number(formData.salePrice) || 0,
+      purchasePrice: priceHt,
       ...(formData.categoryId ? { categoryId: formData.categoryId } : {}),
     });
     setEditMode(false);
   };
+
+  // Live-calculated prices based on form input (or stored values when not editing)
+  const displayPriceHt = editMode
+    ? (parseFloat(formData.purchasePriceHt) || 0)
+    : (Number(product.purchasePrice) || 0);
+  const displayPriceTtc = editMode
+    ? roundPrice(calcPurchasePriceTtc(displayPriceHt))
+    : (Number(product.purchasePriceTtc) || roundPrice(calcPurchasePriceTtc(displayPriceHt)));
+  const displaySalePrice = editMode
+    ? roundPrice(calcSalePrice(displayPriceHt))
+    : (Number(product.salePrice) || roundPrice(calcSalePrice(displayPriceHt)));
 
   return (
     <section className="rounded-lg border border-border/70 bg-white shadow-sm transition-all duration-200">
@@ -85,6 +99,7 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
 
       <form onSubmit={handleSave} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-2">
+          {/* Nom */}
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="product-detail-name">Nom produit</Label>
             <Input
@@ -94,20 +109,55 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
               onChange={(event) => setFormData((current) => ({ ...current, name: event.target.value }))}
             />
           </div>
+
+          {/* Prix d'achat HT */}
           <div className="space-y-1.5">
-            <Label htmlFor="product-detail-price">Prix</Label>
+            <Label htmlFor="product-detail-ht">Prix d'achat HT</Label>
+            <div className="relative">
+              <Input
+                id="product-detail-ht"
+                type={editMode ? 'number' : 'text'}
+                min="0"
+                step="0.001"
+                value={editMode ? formData.purchasePriceHt : money(product.purchasePrice)}
+                disabled={!editMode || saving}
+                onChange={(event) =>
+                  setFormData((current) => ({ ...current, purchasePriceHt: event.target.value }))
+                }
+              />
+              {editMode && (
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
+              )}
+            </div>
+          </div>
+
+          {/* Prix d'achat TTC — always read-only, live-calculated */}
+          <div className="space-y-1.5">
+            <Label>Prix d'achat TTC <span className="text-xs font-normal text-text-muted">(HT × 1,19)</span></Label>
             <Input
-              id="product-detail-price"
-              type={editMode ? 'number' : 'text'}
-              min="0"
-              step="0.01"
-              value={editMode ? formData.salePrice : money(formData.salePrice)}
-              disabled={!editMode || saving}
-              onChange={(event) => setFormData((current) => ({ ...current, salePrice: event.target.value }))}
+              type="text"
+              readOnly
+              value={money(displayPriceTtc)}
+              className="bg-muted/40 cursor-not-allowed font-mono text-text-secondary"
+              tabIndex={-1}
             />
           </div>
+
+          {/* Prix de vente — always read-only, live-calculated */}
           <div className="space-y-1.5">
-            <Label htmlFor="product-detail-stock">Stock</Label>
+            <Label>Prix de vente <span className="text-xs font-normal text-text-muted">(TTC × 1,4)</span></Label>
+            <Input
+              type="text"
+              readOnly
+              value={money(displaySalePrice)}
+              className="bg-primary/5 cursor-not-allowed font-mono font-semibold text-primary"
+              tabIndex={-1}
+            />
+          </div>
+
+          {/* Stock — read-only, managed via stock module */}
+          <div className="space-y-1.5">
+            <Label htmlFor="product-detail-stock">Stock actuel</Label>
             <Input
               id="product-detail-stock"
               type="number"
@@ -121,6 +171,8 @@ export function ProductDetails({ product, categories = [], onClose, onSave, savi
               Le stock se modifie via les entrées/sorties de stock.
             </p>
           </div>
+
+          {/* Catégorie */}
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="product-detail-category">Catégorie</Label>
             <select

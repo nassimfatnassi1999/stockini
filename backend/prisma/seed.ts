@@ -286,7 +286,7 @@ async function main() {
   });
 
   const dropdownOptions = [
-    ['customer_types', 'Particulier', 'INDIVIDUAL', 1],
+    ['customer_types', 'Passager', 'INDIVIDUAL', 1],
     ['customer_types', 'Entreprise', 'COMPANY', 2],
     ['customer_types', 'Garage', 'GARAGE', 3],
     ['payment_methods', 'Espèces', 'CASH', 1],
