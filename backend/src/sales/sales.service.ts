@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import {
   PaymentStatus,
   PaymentType,
@@ -16,6 +21,8 @@ const MIN_MARGIN_PERCENT = 20;
 
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockService: StockService,
@@ -152,14 +159,20 @@ export class SalesService {
 
   findAll() {
     return this.prisma.sale.findMany({
+      where: { deletedAt: null },
       include: { customer: true, items: true, payments: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  findOne(id: string) {
-    return this.prisma.sale.findUniqueOrThrow({
-      where: { id },
+  findOne(id: string, user?: AuthUser) {
+    if (!this.hasPermission(user, 'sales.view_details')) {
+      throw new ForbiddenException(
+        "Vous n'avez pas la permission de voir les détails d'une vente",
+      );
+    }
+    return this.prisma.sale.findFirstOrThrow({
+      where: { id, deletedAt: null },
       include: {
         customer: true,
         items: { include: { product: true } },
@@ -168,7 +181,13 @@ export class SalesService {
     });
   }
 
-  cancel(id: string, userId?: string) {
+  cancel(id: string, user?: AuthUser) {
+    if (!this.hasPermission(user, 'sales.delete')) {
+      throw new ForbiddenException(
+        "Vous n'avez pas la permission d'annuler une vente",
+      );
+    }
+    const userId = user?.id;
     return this.prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUniqueOrThrow({
         where: { id },
@@ -220,8 +239,43 @@ export class SalesService {
     });
   }
 
-  remove(id: string) {
-    return this.prisma.sale.delete({ where: { id } });
+  remove(id: string, user?: AuthUser) {
+    if (!this.hasPermission(user, 'sales.delete')) {
+      throw new ForbiddenException(
+        "Vous n'avez pas la permission de supprimer une vente",
+      );
+    }
+    const userId = user?.id;
+    this.logger.log(`DELETE /sales/${id} soft-delete called by ${userId ?? 'unknown'}`);
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findUniqueOrThrow({
+        where: { id },
+        include: { items: true },
+      });
+      if (sale.status !== SaleStatus.CANCELLED) {
+        for (const item of sale.items) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.CUSTOMER_RETURN,
+            quantity: item.quantity,
+            reason: 'Sale deleted',
+            userId,
+          });
+        }
+      }
+      const updatedSale = await tx.sale.update({
+        where: { id },
+        data: {
+          status: SaleStatus.CANCELLED,
+          deletedAt: new Date(),
+          deletedBy: userId ?? null,
+        },
+      });
+      this.logger.log(
+        `Sale ${updatedSale.id} soft-deleted at ${updatedSale.deletedAt?.toISOString() ?? 'null'} with status ${updatedSale.status}`,
+      );
+      return updatedSale;
+    });
   }
 
   private paymentStatus(total: number, paidAmount: number) {

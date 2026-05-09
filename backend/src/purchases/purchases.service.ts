@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   PaymentStatus,
   PurchaseStatus,
@@ -16,6 +16,8 @@ import {
 
 @Injectable()
 export class PurchasesService {
+  private readonly logger = new Logger(PurchasesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockService: StockService,
@@ -63,14 +65,15 @@ export class PurchasesService {
 
   findAll() {
     return this.prisma.purchase.findMany({
+      where: { deletedAt: null },
       include: { supplier: true, items: true, payments: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   findOne(id: string) {
-    return this.prisma.purchase.findUniqueOrThrow({
-      where: { id },
+    return this.prisma.purchase.findFirstOrThrow({
+      where: { id, deletedAt: null },
       include: {
         supplier: true,
         items: { include: { product: true } },
@@ -181,8 +184,20 @@ export class PurchasesService {
     });
   }
 
-  remove(id: string) {
-    return this.prisma.purchase.delete({ where: { id } });
+  async remove(id: string, userId?: string) {
+    this.logger.log(`DELETE /purchases/${id} soft-delete called by ${userId ?? 'unknown'}`);
+    const purchase = await this.prisma.purchase.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        deletedBy: userId ?? null,
+        status: PurchaseStatus.CANCELLED,
+      },
+    });
+    this.logger.log(
+      `Purchase ${purchase.id} soft-deleted at ${purchase.deletedAt?.toISOString() ?? 'null'} with status ${purchase.status}`,
+    );
+    return purchase;
   }
 
   private paymentStatus(total: number, paidAmount: number) {

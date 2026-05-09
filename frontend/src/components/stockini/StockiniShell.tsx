@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Banknote, Boxes, Check, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react';
+import { SendToTrashDialog } from '@/components/stockini/SendToTrashDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -593,6 +594,7 @@ export function ProductsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const query = useQuery({ queryKey: ['stockini-products', search], queryFn: () => stockiniApi.products(search) });
   const categories = useQuery({ queryKey: ['stockini-categories'], queryFn: stockiniApi.categories });
   const brands = useQuery({ queryKey: ['stockini-brands'], queryFn: stockiniApi.brands });
@@ -623,7 +625,8 @@ export function ProductsPage() {
     mutationFn: stockiniApi.deleteProduct,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
-      toast.success('Produit supprimé');
+      toast.success('Produit envoyé à la corbeille');
+      setTrashTarget(null);
     },
   });
 
@@ -683,7 +686,7 @@ export function ProductsPage() {
                   </TableCell>
                   <TableCell><StockBadge product={product} /></TableCell>
                   <TableCell>
-                    <RowActions onDelete={() => deleteMutation.mutate(product.id)} deleting={deleteMutation.isPending} />
+                    <RowActions onDelete={() => setTrashTarget({ id: product.id, name: product.name })} deleting={deleteMutation.isPending} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -700,6 +703,14 @@ export function ProductsPage() {
           onClose={() => setModalOpen(false)}
           onSubmit={(form) => createMutation.mutate(form)}
           saving={createMutation.isPending}
+        />
+      )}
+      {trashTarget && (
+        <SendToTrashDialog
+          label={trashTarget.name}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(trashTarget.id)}
+          onCancel={() => setTrashTarget(null)}
         />
       )}
     </>
@@ -731,6 +742,7 @@ export function CustomersPage() {
 export function SuppliersPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Supplier | null>(null);
+  const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const fields: FieldConfig[] = [
     { name: 'referencePreview', label: 'Référence', readOnly: true },
     { name: 'name', label: 'Fournisseur', required: true },
@@ -760,7 +772,8 @@ export function SuppliersPage() {
     mutationFn: stockiniApi.deleteSupplier,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-suppliers'] });
-      toast.success('Fournisseur supprimé');
+      toast.success('Fournisseur envoyé à la corbeille');
+      setTrashTarget(null);
     },
   });
   return (
@@ -800,7 +813,7 @@ export function SuppliersPage() {
                 paymentTerms: supplier.paymentTerms ?? '',
               });
             }}
-            onDelete={() => deleteMutation.mutate(supplier.id)}
+            onDelete={() => setTrashTarget({ id: supplier.id, name: supplier.name })}
             deleting={deleteMutation.isPending}
           />,
         ])}
@@ -819,6 +832,14 @@ export function SuppliersPage() {
           saving={saveMutation.isPending}
         />
       )}
+      {trashTarget && (
+        <SendToTrashDialog
+          label={trashTarget.name}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(trashTarget.id)}
+          onCancel={() => setTrashTarget(null)}
+        />
+      )}
     </>
   );
 }
@@ -826,6 +847,7 @@ export function SuppliersPage() {
 export function SalesPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const customers = useQuery({ queryKey: ['stockini-customers'], queryFn: stockiniApi.customers });
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
   const paymentMethodOptions = useDropdownOptions('payment_methods');
@@ -891,7 +913,9 @@ export function SalesPage() {
     mutationFn: stockiniApi.deleteSale,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
-      toast.success('Vente supprimée');
+      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
+      toast.success('Vente envoyée à la corbeille — stock restauré');
+      setTrashTarget(null);
     },
   });
   return (
@@ -917,7 +941,7 @@ export function SalesPage() {
           money(sale.total),
           statusLabel(sale.paymentStatus),
           <Status key="status" value={sale.status} />,
-          <RowActions key="actions" onDelete={() => deleteMutation.mutate(sale.id)} deleting={deleteMutation.isPending} />,
+          <RowActions key="actions" onDelete={() => setTrashTarget({ id: sale.id, name: sale.invoiceNumber })} deleting={deleteMutation.isPending} />,
         ])}
       />
       {modalOpen && (
@@ -956,6 +980,14 @@ export function SalesPage() {
           saving={createMutation.isPending}
         />
       )}
+      {trashTarget && (
+        <SendToTrashDialog
+          label={trashTarget.name}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(trashTarget.id)}
+          onCancel={() => setTrashTarget(null)}
+        />
+      )}
     </>
   );
 }
@@ -963,6 +995,7 @@ export function SalesPage() {
 export function PurchasesPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const suppliers = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
   const fields: FieldConfig[] = [
@@ -996,7 +1029,8 @@ export function PurchasesPage() {
     mutationFn: stockiniApi.deletePurchase,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
-      toast.success('Achat supprimé');
+      toast.success('Achat envoyé à la corbeille');
+      setTrashTarget(null);
     },
   });
   return (
@@ -1022,7 +1056,7 @@ export function PurchasesPage() {
           money(purchase.total),
           statusLabel(purchase.paymentStatus),
           <Status key="status" value={purchase.status} />,
-          <RowActions key="actions" onDelete={() => deleteMutation.mutate(purchase.id)} deleting={deleteMutation.isPending} />,
+          <RowActions key="actions" onDelete={() => setTrashTarget({ id: purchase.id, name: purchase.orderNumber })} deleting={deleteMutation.isPending} />,
         ])}
       />
       {modalOpen && (
@@ -1039,6 +1073,14 @@ export function PurchasesPage() {
           saving={createMutation.isPending}
         />
       )}
+      {trashTarget && (
+        <SendToTrashDialog
+          label={trashTarget.name}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(trashTarget.id)}
+          onCancel={() => setTrashTarget(null)}
+        />
+      )}
     </>
   );
 }
@@ -1046,6 +1088,7 @@ export function PurchasesPage() {
 export function PaymentsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Payment | null>(null);
+  const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const paymentTypeOptions = useDropdownOptions('payment_types');
   const paymentMethodOptions = useDropdownOptions('payment_methods');
   const fields: FieldConfig[] = [
@@ -1074,7 +1117,8 @@ export function PaymentsPage() {
     mutationFn: stockiniApi.deletePayment,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
-      toast.success('Paiement supprimé');
+      toast.success('Paiement envoyé à la corbeille');
+      setTrashTarget(null);
     },
   });
   return (
@@ -1105,7 +1149,7 @@ export function PaymentsPage() {
               setEditing(payment);
           setForm({ referencePreview: payment.reference ?? '', type: payment.type, method: payment.method, amount: String(payment.amount), note: '' });
             }}
-            onDelete={() => deleteMutation.mutate(payment.id)}
+            onDelete={() => setTrashTarget({ id: payment.id, name: payment.reference })}
             deleting={deleteMutation.isPending}
           />,
         ])}
@@ -1122,6 +1166,14 @@ export function PaymentsPage() {
             saveMutation.mutate();
           }}
           saving={saveMutation.isPending}
+        />
+      )}
+      {trashTarget && (
+        <SendToTrashDialog
+          label={trashTarget.name}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(trashTarget.id)}
+          onCancel={() => setTrashTarget(null)}
         />
       )}
     </>

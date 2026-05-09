@@ -58,7 +58,7 @@ export class PurchasesController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.purchasesService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.purchasesService.remove(id, user?.id);
   }
 }

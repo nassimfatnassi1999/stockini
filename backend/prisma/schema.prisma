@@ -113,6 +113,7 @@ model Product {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
+  deletedBy      String?
   category       Category        @relation(fields: [categoryId], references: [id])
   brand          Brand           @relation(fields: [brandId], references: [id])
   supplier       Supplier?       @relation(fields: [supplierId], references: [id])
@@ -154,11 +155,14 @@ model Customer {
   creditBalance Decimal      @default(0) @db.Decimal(12, 3)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+  deletedBy     String?
   sales         Sale[]
   payments      Payment[]
 
   @@index([name])
   @@index([reference])
+  @@index([deletedAt])
 }
 
 model Supplier {
@@ -173,12 +177,15 @@ model Supplier {
   paymentTerms  String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+  deletedBy     String?
   products      Product[]
   purchases     Purchase[]
   payments      Payment[]
 
   @@index([name])
   @@index([reference])
+  @@index([deletedAt])
 }
 
 model StockMovement {
@@ -215,6 +222,8 @@ model Sale {
   sellerId        String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  deletedBy       String?
   customer        Customer?     @relation(fields: [customerId], references: [id])
   seller          User?         @relation("SellerSales", fields: [sellerId], references: [id])
   items           SaleItem[]
@@ -223,6 +232,7 @@ model Sale {
   @@index([customerId])
   @@index([sellerId])
   @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model SaleItem {
@@ -254,6 +264,8 @@ model Purchase {
   createdById     String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+  deletedBy       String?
   supplier        Supplier       @relation(fields: [supplierId], references: [id])
   createdBy       User?          @relation("CreatorPurchases", fields: [createdById], references: [id])
   items           PurchaseItem[]
@@ -262,6 +274,7 @@ model Purchase {
   @@index([supplierId])
   @@index([createdById])
   @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model PurchaseItem {
@@ -291,6 +304,8 @@ model Payment {
   supplierId String?
   note       String?
   createdAt  DateTime      @default(now())
+  deletedAt  DateTime?
+  deletedBy  String?
   sale       Sale?         @relation(fields: [saleId], references: [id])
   purchase   Purchase?     @relation(fields: [purchaseId], references: [id])
   customer   Customer?     @relation(fields: [customerId], references: [id])
@@ -302,6 +317,7 @@ model Payment {
   @@index([supplierId])
   @@index([createdAt])
   @@index([reference])
+  @@index([deletedAt])
 }
 
 model Alert {

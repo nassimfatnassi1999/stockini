@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -6,6 +6,8 @@ import { CreateCustomerDto, UpdateCustomerDto } from './dto/customer.dto';
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
@@ -33,19 +35,20 @@ export class CustomersService {
     return this.prisma.customer.findMany({
       where: search
         ? {
+            deletedAt: null,
             OR: [
               { name: { contains: search, mode: 'insensitive' } },
               { phone: { contains: search, mode: 'insensitive' } },
               { email: { contains: search, mode: 'insensitive' } },
             ],
           }
-        : undefined,
+        : { deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   findOne(id: string) {
-    return this.prisma.customer.findUniqueOrThrow({ where: { id } });
+    return this.prisma.customer.findFirstOrThrow({ where: { id, deletedAt: null } });
   }
 
   async update(id: string, dto: UpdateCustomerDto) {
@@ -53,7 +56,15 @@ export class CustomersService {
     return this.prisma.customer.update({ where: { id }, data: dto });
   }
 
-  remove(id: string) {
-    return this.prisma.customer.delete({ where: { id } });
+  async remove(id: string, userId?: string) {
+    this.logger.log(`DELETE /customers/${id} soft-delete called by ${userId ?? 'unknown'}`);
+    const customer = await this.prisma.customer.update({
+      where: { id },
+      data: { deletedAt: new Date(), deletedBy: userId ?? null },
+    });
+    this.logger.log(
+      `Customer ${customer.id} soft-deleted at ${customer.deletedAt?.toISOString() ?? 'null'}`,
+    );
+    return customer;
   }
 }

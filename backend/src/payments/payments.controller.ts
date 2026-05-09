@@ -9,6 +9,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
 import { PaymentsService } from './payments.service';
 
@@ -38,7 +40,7 @@ export class PaymentsController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.paymentsService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.paymentsService.remove(id, user?.id);
   }
 }

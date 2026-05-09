@@ -16,6 +16,7 @@ const MODULES = [
   'audit-logs',
   'users',
   'permissions',
+  'corbeille',
 ] as const;
 
 const ACTIONS = ['read', 'create', 'update', 'delete'] as const;
@@ -27,6 +28,66 @@ const SPECIAL_PERMISSIONS = [
     module: 'ventes',
     action: 'allow_low_margin',
     description: 'Autoriser vente avec marge inférieure à 20%',
+  },
+  {
+    code: 'sales.view_details',
+    module: 'ventes',
+    action: 'view_details',
+    description: "Voir les détails d'une vente",
+  },
+  {
+    code: 'sales.delete',
+    module: 'ventes',
+    action: 'delete_sale',
+    description: 'Annuler / supprimer une vente',
+  },
+  {
+    code: 'trash.view',
+    module: 'corbeille',
+    action: 'view',
+    description: 'Voir la corbeille',
+  },
+  {
+    code: 'trash.restore',
+    module: 'corbeille',
+    action: 'restore',
+    description: 'Restaurer un élément de la corbeille',
+  },
+  {
+    code: 'trash.permanent_delete',
+    module: 'corbeille',
+    action: 'permanent_delete',
+    description: 'Supprimer définitivement un élément',
+  },
+  {
+    code: 'products.delete',
+    module: 'produits',
+    action: 'delete_product',
+    description: 'Envoyer un produit à la corbeille',
+  },
+  {
+    code: 'clients.delete',
+    module: 'clients',
+    action: 'delete_client',
+    description: 'Envoyer un client à la corbeille',
+  },
+  {
+    code: 'suppliers.delete',
+    module: 'fournisseurs',
+    action: 'delete_supplier',
+    description: 'Envoyer un fournisseur à la corbeille',
+  },
+  {
+    code: 'purchases.delete',
+    module: 'achats',
+    action: 'delete_purchase',
+    description: 'Envoyer un achat à la corbeille',
+  },
+  {
+    code: 'payments.delete',
+    module: 'paiements',
+    action: 'delete_payment',
+    description: 'Envoyer un paiement à la corbeille',
   },
 ] as const;
 

@@ -8,12 +8,25 @@ import type {
   Product,
   Purchase,
   Sale,
+  SaleDetail,
   StockMovement,
   Supplier,
   DropdownOption,
+  TrashEntityType,
+  TrashItem,
 } from './types';
 
 type ProductUpdatePayload = Omit<Partial<Product>, 'quantity'> & { categoryId?: string };
+
+function normalizeTrashItem(item: TrashItem): TrashItem {
+  const entity = item.entity ?? item.entityType ?? item.entity_type;
+  return {
+    ...item,
+    entity,
+    entityType: entity,
+    entity_type: entity,
+  };
+}
 
 export const stockiniApi = {
   dashboard: () => api.get<DashboardReport>('/reports/dashboard').then((r) => r.data),
@@ -39,8 +52,10 @@ export const stockiniApi = {
   updateSupplier: (id: string, data: Partial<Supplier>) => api.patch<Supplier>(`/suppliers/${id}`, data).then((r) => r.data),
   deleteSupplier: (id: string) => api.delete(`/suppliers/${id}`).then((r) => r.data),
   sales: () => api.get<Sale[]>('/sales').then((r) => r.data),
+  sale: (id: string) => api.get<SaleDetail>(`/sales/${id}`).then((r) => r.data),
   createSale: (data: unknown) => api.post<Sale>('/sales', data).then((r) => r.data),
   updateSale: (id: string, data: Partial<Sale>) => api.patch<Sale>(`/sales/${id}`, data).then((r) => r.data),
+  cancelSale: (id: string) => api.patch(`/sales/${id}/cancel`).then((r) => r.data),
   deleteSale: (id: string) => api.delete(`/sales/${id}`).then((r) => r.data),
   purchases: () => api.get<Purchase[]>('/purchases').then((r) => r.data),
   createPurchase: (data: unknown) => api.post<Purchase>('/purchases', data).then((r) => r.data),
@@ -72,6 +87,14 @@ export const stockiniApi = {
   updateDropdownOption: (id: string, data: Partial<DropdownOption>) => api.put<DropdownOption>(`/settings/dropdown-options/${id}`, data).then((r) => r.data),
   toggleDropdownOption: (id: string, active: boolean) => api.patch<DropdownOption>(`/settings/dropdown-options/${id}/active`, { active }).then((r) => r.data),
   deleteDropdownOption: (id: string) => api.delete(`/settings/dropdown-options/${id}`).then((r) => r.data),
+  trash: (entity?: TrashEntityType) =>
+    api
+      .get<TrashItem[]>('/trash', { params: entity ? { entity } : undefined })
+      .then((r) => r.data.map(normalizeTrashItem)),
+  restoreTrashItem: (entity: TrashEntityType, id: string) =>
+    api.patch(`/trash/${entity}/${id}/restore`).then((r) => r.data),
+  permanentDeleteTrashItem: (entity: TrashEntityType, id: string) =>
+    api.delete(`/trash/${entity}/${id}/permanent`).then((r) => r.data),
   auditLogs: () => api.get<AuditLog[]>('/audit-logs').then((r) => r.data),
   categories: () => api.get<Array<{ id: string; name: string; description?: string }>>('/categories').then((r) => r.data),
   createCategory: (data: { name: string; description?: string }) => api.post('/categories', data).then((r) => r.data),

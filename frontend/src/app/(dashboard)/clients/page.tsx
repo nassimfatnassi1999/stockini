@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2, X } from 'lucide-react';
+import { SendToTrashDialog } from '@/components/stockini/SendToTrashDialog';
 import type { Customer, DropdownOption } from '@/lib/stockini/types';
 
 const CUSTOMER_TYPES = [
@@ -51,7 +52,7 @@ export default function ClientsPage() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<CreateCustomerForm>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const [refPreview, setRefPreview] = useState<string | null>(null);
   const refFetchController = useRef<AbortController | null>(null);
 
@@ -106,8 +107,8 @@ export default function ClientsPage() {
     mutationFn: (id: string) => api.delete(`/customers/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
-      toast.success('Client supprimé');
-      setDeleteConfirmId(null);
+      toast.success('Client envoyé à la corbeille');
+      setTrashTarget(null);
     },
     onError: () => {
       toast.error('Échec de la suppression');
@@ -247,34 +248,14 @@ export default function ClientsPage() {
                       {formatCurrency(customer.creditBalance)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {deleteConfirmId === customer.id ? (
-                        <span className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => deleteMutation.mutate(customer.id)}
-                            disabled={deleteMutation.isPending}
-                            className="inline-flex h-7 items-center rounded-md bg-red-600 px-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                          >
-                            Confirmer
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteConfirmId(null)}
-                            className="inline-flex h-7 items-center rounded-md px-2 text-xs font-semibold text-text-secondary hover:bg-muted"
-                          >
-                            Annuler
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          aria-label={`Supprimer ${customer.name}`}
-                          onClick={() => setDeleteConfirmId(customer.id)}
-                          className="app-action-button app-action-delete"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        aria-label={`Supprimer ${customer.name}`}
+                        onClick={() => setTrashTarget({ id: customer.id, name: customer.name })}
+                        className="app-action-button app-action-delete"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -283,6 +264,15 @@ export default function ClientsPage() {
           </div>
         )}
       </div>
+
+      {trashTarget && (
+        <SendToTrashDialog
+          label={trashTarget.name}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(trashTarget.id)}
+          onCancel={() => setTrashTarget(null)}
+        />
+      )}
 
       {/* Create Customer Modal */}
       {showModal && (

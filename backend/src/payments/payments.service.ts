@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -6,6 +6,8 @@ import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
@@ -27,14 +29,15 @@ export class PaymentsService {
 
   findAll() {
     return this.prisma.payment.findMany({
+      where: { deletedAt: null },
       include: { sale: true, purchase: true, customer: true, supplier: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   findOne(id: string) {
-    return this.prisma.payment.findUniqueOrThrow({
-      where: { id },
+    return this.prisma.payment.findFirstOrThrow({
+      where: { id, deletedAt: null },
       include: { sale: true, purchase: true, customer: true, supplier: true },
     });
   }
@@ -49,7 +52,15 @@ export class PaymentsService {
     });
   }
 
-  remove(id: string) {
-    return this.prisma.payment.delete({ where: { id } });
+  async remove(id: string, userId?: string) {
+    this.logger.log(`DELETE /payments/${id} soft-delete called by ${userId ?? 'unknown'}`);
+    const payment = await this.prisma.payment.update({
+      where: { id },
+      data: { deletedAt: new Date(), deletedBy: userId ?? null },
+    });
+    this.logger.log(
+      `Payment ${payment.id} soft-deleted at ${payment.deletedAt?.toISOString() ?? 'null'}`,
+    );
+    return payment;
   }
 }

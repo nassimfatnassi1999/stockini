@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
@@ -15,6 +15,8 @@ import {
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
@@ -116,12 +118,17 @@ export class ProductsService {
     });
   }
 
-  remove(id: string) {
-    return this.prisma.product.update({
+  async remove(id: string, userId?: string) {
+    this.logger.log(`DELETE /products/${id} soft-delete called by ${userId ?? 'unknown'}`);
+    const product = await this.prisma.product.update({
       where: { id },
-      data: { deletedAt: new Date(), isActive: false },
+      data: { deletedAt: new Date(), deletedBy: userId ?? null, isActive: false },
       include: this.includeRelations(),
     });
+    this.logger.log(
+      `Product ${product.id} soft-deleted at ${product.deletedAt?.toISOString() ?? 'null'}`,
+    );
+    return product;
   }
 
   private derivePrices(purchasePrice: number) {

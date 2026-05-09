@@ -35,6 +35,8 @@ export interface Customer {
   type: 'INDIVIDUAL' | 'GARAGE' | 'COMPANY';
   taxNumber?: string | null;
   creditBalance: number | string;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
 }
 
 export interface Supplier {
@@ -47,6 +49,8 @@ export interface Supplier {
   address?: string | null;
   taxNumber?: string | null;
   paymentTerms?: string | null;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
 }
 
 export interface Sale {
@@ -60,6 +64,38 @@ export interface Sale {
   createdAt: string;
   customer?: Customer | null;
   items?: Array<{ id: Id; quantity: number }>;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
+}
+
+export interface SaleItemDetail {
+  id: Id;
+  productId: Id;
+  quantity: number;
+  unitPrice: number | string;
+  total: number | string;
+  product?: {
+    id: Id;
+    reference: string;
+    name: string;
+    purchasePrice: number | string;
+  } | null;
+}
+
+export interface SaleDetail {
+  id: Id;
+  invoiceNumber: string;
+  subtotal: number | string;
+  discount: number | string;
+  tax: number | string;
+  total: number | string;
+  paidAmount: number | string;
+  remainingAmount: number | string;
+  paymentStatus: string;
+  status: string;
+  createdAt: string;
+  customer?: Customer | null;
+  items: SaleItemDetail[];
 }
 
 export interface Purchase {
@@ -73,6 +109,8 @@ export interface Purchase {
   createdAt: string;
   supplier?: Supplier | null;
   items?: Array<{ id: Id; quantity: number; receivedQuantity?: number }>;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
 }
 
 export interface Payment {
@@ -86,6 +124,23 @@ export interface Payment {
   supplier?: Supplier | null;
   sale?: Sale | null;
   purchase?: Purchase | null;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
+}
+
+export type TrashEntityType = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment';
+
+export interface TrashItem {
+  id: Id;
+  entity: TrashEntityType;
+  entityType?: TrashEntityType;
+  entity_type?: TrashEntityType;
+  reference: string;
+  name: string;
+  deletedAt: string;
+  deletedBy?: string | null;
+  status?: string | null;
+  total?: number | null;
 }
 
 export interface Alert {

@@ -30,13 +30,13 @@ export class SalesController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.salesService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.salesService.findOne(id, user);
   }
 
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
-    return this.salesService.cancel(id, user?.id);
+    return this.salesService.cancel(id, user);
   }
 
   @Patch(':id')
@@ -45,7 +45,7 @@ export class SalesController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.salesService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.salesService.remove(id, user);
   }
 }

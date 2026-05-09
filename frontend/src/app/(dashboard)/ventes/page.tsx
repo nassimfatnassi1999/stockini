@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, FileText, Printer } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, FileText, Printer, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { hasPermission } from '@/lib/auth';
@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ProductRegisterGrid } from '@/components/stockini/register/ProductRegisterGrid';
+import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
+import { SendToTrashDialog } from '@/components/stockini/SendToTrashDialog';
 import {
   calculateDocumentTotals,
   createEmptyLine,
@@ -23,6 +25,8 @@ import { money } from '@/lib/stockini/format';
 import type { Customer, DropdownOption, Sale } from '@/lib/stockini/types';
 
 const PERMISSION_LOW_MARGIN = 'sales.allow_low_margin';
+const PERMISSION_VIEW_DETAILS = 'sales.view_details';
+const PERMISSION_DELETE_SALE = 'sales.delete';
 
 function round3(v: number) {
   return Math.round(v * 1000) / 1000;
@@ -34,11 +38,24 @@ const PAYMENT_LABELS: Record<string, string> = {
   UNPAID: 'Non payé',
 };
 
+const PAYMENT_COLORS: Record<string, string> = {
+  PAID: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  PARTIAL: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+  UNPAID: 'border-red-200 bg-red-50 text-red-700',
+};
+
 const SALE_STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Brouillon',
   COMPLETED: 'Terminée',
   CANCELLED: 'Annulée',
   RETURNED: 'Retournée',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  COMPLETED: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  DRAFT: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+  CANCELLED: 'border-red-200 bg-red-50 text-red-700',
+  RETURNED: 'border-orange-200 bg-orange-50 text-orange-700',
 };
 
 export default function VentesPage() {
@@ -49,9 +66,15 @@ export default function VentesPage() {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [showHistory, setShowHistory] = useState(true);
   const [allowLowMargin, setAllowLowMargin] = useState(false);
+  const [canViewDetails, setCanViewDetails] = useState(false);
+  const [canDeleteSale, setCanDeleteSale] = useState(false);
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
 
   useEffect(() => {
     setAllowLowMargin(hasPermission(PERMISSION_LOW_MARGIN));
+    setCanViewDetails(hasPermission(PERMISSION_VIEW_DETAILS));
+    setCanDeleteSale(hasPermission(PERMISSION_DELETE_SALE));
   }, []);
 
   const customersQuery = useQuery<Customer[]>({
@@ -76,7 +99,6 @@ export default function VentesPage() {
   const totals = calculateDocumentTotals(lines);
   const paidAmountNum = Number(paidAmount) || 0;
 
-  // Lines with missing purchase price or margin below minimum
   const invalidMarginLines = filledLines.filter(
     (l) => l.productId !== null && (l.purchasePriceHt <= 0 || (l.margePercent !== null && l.margePercent < MIN_MARGIN_PERCENT)),
   );
@@ -104,8 +126,6 @@ export default function VentesPage() {
           `La ligne "${missingProduct.designation || missingProduct.reference}" n'est pas liée à un produit du stock`,
         );
       }
-
-      // Margin validation (front-end guard — backend also enforces)
       if (hasMissingPurchasePrice) {
         throw new Error(
           "Vente bloquée : un ou plusieurs produits n'ont pas de prix d'achat défini.",
@@ -154,6 +174,25 @@ export default function VentesPage() {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/sales/${id}`).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
+      toast.success('Vente envoyée à la corbeille — stock restauré');
+      setDeleteTarget(null);
+    },
+    onError: (error: unknown) => {
+      const msg = (
+        error as { response?: { data?: { message?: string | string[] } } }
+      )?.response?.data?.message;
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors de la suppression');
+      toast.error(text);
+      setDeleteTarget(null);
+    },
+  });
+
   const handleGeneratePdf = (type: DocumentType) => {
     generatePlaceholderPdf(type);
   };
@@ -163,6 +202,8 @@ export default function VentesPage() {
     month: 'long',
     day: 'numeric',
   });
+
+  const hasActions = canViewDetails || canDeleteSale;
 
   return (
     <div className="space-y-4">
@@ -316,6 +357,7 @@ export default function VentesPage() {
                     'Total TTC',
                     'Paiement',
                     'Statut',
+                    ...(hasActions ? ['Actions'] : []),
                   ].map((h) => (
                     <th
                       key={h}
@@ -329,13 +371,19 @@ export default function VentesPage() {
               <tbody className="divide-y divide-border/40">
                 {salesQuery.isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-text-muted">
+                    <td
+                      colSpan={hasActions ? 8 : 7}
+                      className="px-4 py-8 text-center text-sm text-text-muted"
+                    >
                       Chargement…
                     </td>
                   </tr>
                 ) : (salesQuery.data ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-text-muted">
+                    <td
+                      colSpan={hasActions ? 8 : 7}
+                      className="px-4 py-8 text-center text-sm text-text-muted"
+                    >
                       Aucune vente enregistrée
                     </td>
                   </tr>
@@ -358,15 +406,45 @@ export default function VentesPage() {
                         {money(sale.total)}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="app-status-badge border-slate-200 bg-slate-50 text-slate-700">
+                        <span
+                          className={`app-status-badge ${PAYMENT_COLORS[sale.paymentStatus] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                        >
                           {PAYMENT_LABELS[sale.paymentStatus] ?? sale.paymentStatus}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="app-status-badge border-slate-200 bg-slate-50 text-slate-700">
+                        <span
+                          className={`app-status-badge ${STATUS_COLORS[sale.status] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                        >
                           {SALE_STATUS_LABELS[sale.status] ?? sale.status}
                         </span>
                       </td>
+                      {hasActions && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            {canViewDetails && (
+                              <Button
+                                variant="actionView"
+                                size="action"
+                                title="Voir les détails"
+                                onClick={() => setSelectedSaleId(sale.id)}
+                              >
+                                <Eye size={14} />
+                              </Button>
+                            )}
+                            {canDeleteSale && sale.status !== 'CANCELLED' && (
+                              <Button
+                                variant="actionDelete"
+                                size="action"
+                                title="Annuler / Supprimer"
+                                onClick={() => setDeleteTarget(sale)}
+                              >
+                                <Trash2 size={14} />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -375,6 +453,23 @@ export default function VentesPage() {
           </div>
         )}
       </div>
+
+      {/* Sale details modal */}
+      {selectedSaleId && (
+        <SaleDetailsModal
+          saleId={selectedSaleId}
+          onClose={() => setSelectedSaleId(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <SendToTrashDialog
+          label={deleteTarget.invoiceNumber}
+          isPending={cancelMutation.isPending}
+          onConfirm={() => cancelMutation.mutate(deleteTarget.id)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
