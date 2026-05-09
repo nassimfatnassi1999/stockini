@@ -21,7 +21,7 @@ export class SalesController {
 
   @Post()
   create(@Body() dto: CreateSaleDto, @CurrentUser() user?: AuthUser) {
-    return this.salesService.create(dto, user?.id);
+    return this.salesService.create(dto, user);
   }
 
   @Get()

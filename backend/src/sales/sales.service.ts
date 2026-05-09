@@ -9,7 +9,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CreateSaleDto, UpdateSaleDto } from './dto/sale.dto';
+
+const MIN_MARGIN_PERCENT = 20;
 
 @Injectable()
 export class SalesService {
@@ -20,7 +23,7 @@ export class SalesService {
     private readonly settings: SettingsService,
   ) {}
 
-  async create(dto: CreateSaleDto, sellerId?: string) {
+  async create(dto: CreateSaleDto, user?: AuthUser) {
     if (!dto.items.length) {
       throw new BadRequestException('Sale must include at least one item');
     }
@@ -28,6 +31,8 @@ export class SalesService {
       'payment_methods',
       dto.paymentMethod,
     );
+
+    const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
 
     return this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.references.generate('INV', 'sale', tx);
@@ -49,7 +54,26 @@ export class SalesService {
             `Insufficient stock for ${product.name}`,
           );
         }
+
         const unitPrice = item.unitPrice ?? Number(product.salePrice);
+        const discountPercent = item.discountPercent ?? 0;
+        const netUnitPrice = unitPrice * (1 - discountPercent / 100);
+
+        // Server-side margin check (uses net price after per-line discount)
+        const purchasePriceHt = Number(product.purchasePrice);
+        if (purchasePriceHt <= 0) {
+          throw new BadRequestException(
+            `Le produit "${product.name}" n'a pas de prix d'achat défini. Vente refusée.`,
+          );
+        }
+        const marginPercent =
+          ((netUnitPrice - purchasePriceHt) / purchasePriceHt) * 100;
+        if (marginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
+          throw new BadRequestException(
+            `Vente refusée : vous n'avez pas le droit de vendre avec une marge inférieure à 20% (produit "${product.name}", marge actuelle ${marginPercent.toFixed(2)}%).`,
+          );
+        }
+
         return {
           productId: item.productId,
           quantity: item.quantity,
@@ -66,6 +90,7 @@ export class SalesService {
       const remainingAmount = Math.max(total - paidAmount, 0);
       const paymentStatus = this.paymentStatus(total, paidAmount);
 
+      const sellerId = user?.id;
       const sale = await tx.sale.create({
         data: {
           invoiceNumber,
@@ -93,6 +118,10 @@ export class SalesService {
           quantity: item.quantity,
           reason: 'Sale',
           userId: sellerId,
+        });
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { lastSellingPrice: item.unitPrice },
         });
       }
 
@@ -203,5 +232,12 @@ export class SalesService {
       return PaymentStatus.PARTIAL;
     }
     return PaymentStatus.PAID;
+  }
+
+  /** Returns true when the user holds a specific permission or the wildcard '*'. */
+  private hasPermission(user: AuthUser | undefined, permission: string): boolean {
+    if (!user) return false;
+    const perms = user.permissions ?? [];
+    return perms.includes('*') || perms.includes(permission);
   }
 }

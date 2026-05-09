@@ -24,6 +24,12 @@ export class CreateSaleItemDto {
   @IsNumber()
   @Min(0)
   unitPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  discountPercent?: number;
 }
 
 export class CreateSaleDto {

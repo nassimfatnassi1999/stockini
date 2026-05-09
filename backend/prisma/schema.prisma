@@ -104,6 +104,7 @@ model Product {
   purchasePrice    Decimal         @db.Decimal(12, 3)
   purchasePriceTtc Decimal         @default(0) @db.Decimal(12, 3)
   salePrice        Decimal         @db.Decimal(12, 3)
+  lastSellingPrice Decimal?        @db.Decimal(12, 3)
   quantity       Int             @default(0)
   minStock       Int             @default(0)
   location       String?

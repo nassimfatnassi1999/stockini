@@ -653,12 +653,13 @@ export function ProductsPage() {
                 <TableHead className="text-right">Achat HT</TableHead>
                 <TableHead className="text-right">Achat TTC</TableHead>
                 <TableHead className="text-right">Prix vente</TableHead>
+                <TableHead className="text-right">Dernier prix vente</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <StateRows loading={query.isLoading} error={query.error} empty={data.length === 0} colSpan={10} />
+              <StateRows loading={query.isLoading} error={query.error} empty={data.length === 0} colSpan={11} />
               {data.map((product) => (
                 <TableRow key={product.id}>
                   <TableCell className="font-mono font-semibold">{product.reference ?? product.sku}</TableCell>
@@ -677,6 +678,9 @@ export function ProductsPage() {
                   <TableCell className="text-right font-mono text-text-secondary">{money(product.purchasePrice)}</TableCell>
                   <TableCell className="text-right font-mono text-text-secondary">{money(product.purchasePriceTtc)}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-primary">{money(product.salePrice)}</TableCell>
+                  <TableCell className="text-right font-mono text-text-secondary">
+                    {product.lastSellingPrice != null ? money(product.lastSellingPrice) : '—'}
+                  </TableCell>
                   <TableCell><StockBadge product={product} /></TableCell>
                   <TableCell>
                     <RowActions onDelete={() => deleteMutation.mutate(product.id)} deleting={deleteMutation.isPending} />

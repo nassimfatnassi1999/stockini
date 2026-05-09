@@ -20,12 +20,22 @@ const MODULES = [
 
 const ACTIONS = ['read', 'create', 'update', 'delete'] as const;
 
+/** Special business-rule permissions that supplement the standard CRUD matrix. */
+const SPECIAL_PERMISSIONS = [
+  {
+    code: 'sales.allow_low_margin',
+    module: 'ventes',
+    action: 'allow_low_margin',
+    description: 'Autoriser vente avec marge inférieure à 20%',
+  },
+] as const;
+
 @Injectable()
 export class RbacService {
   constructor(private readonly prisma: PrismaService) {}
 
   permissions() {
-    return MODULES.flatMap((module) =>
+    const standard = MODULES.flatMap((module) =>
       ACTIONS.map((action) => ({
         code: `${module}:${action}`,
         module,
@@ -33,6 +43,7 @@ export class RbacService {
         description: `${action} ${module}`,
       })),
     );
+    return [...standard, ...SPECIAL_PERMISSIONS];
   }
 
   async rolePermissions(role: string) {

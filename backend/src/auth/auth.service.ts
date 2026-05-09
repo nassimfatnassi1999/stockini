@@ -40,6 +40,8 @@ export class AuthService {
         '7d') as JwtSignOptions['expiresIn'],
     });
 
+    const permissions = this.extractPermissions(user.role.permissions);
+
     return {
       accessToken,
       refreshToken,
@@ -48,6 +50,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role.name,
+        permissions,
       },
     };
   }
@@ -59,6 +62,12 @@ export class AuthService {
     });
 
     return this.profilePayload(user);
+  }
+
+  private extractPermissions(raw: unknown): string[] {
+    return Array.isArray(raw)
+      ? raw.filter((p): p is string => typeof p === 'string')
+      : [];
   }
 
   async updateMe(userId: string, dto: UpdateProfileDto) {
@@ -99,7 +108,7 @@ export class AuthService {
     id: string;
     email: string;
     fullName: string;
-    role: { name: string };
+    role: { name: string; permissions: unknown };
   }) {
     const [prenom = '', ...nameParts] = user.fullName.split(' ');
     const nom = nameParts.join(' ') || user.fullName;
@@ -110,6 +119,7 @@ export class AuthService {
       prenom,
       nom,
       role: user.role.name,
+      permissions: this.extractPermissions(user.role.permissions),
     };
   }
 }

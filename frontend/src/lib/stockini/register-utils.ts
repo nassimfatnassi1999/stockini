@@ -1,3 +1,6 @@
+export const MIN_MARGIN_PERCENT = 20;
+export const DEFAULT_MARGIN_PERCENT = 40;
+
 export interface RegisterLine {
   id: string;
   productId: string | null;
@@ -7,10 +10,44 @@ export interface RegisterLine {
   brand: string;
   quantity: number;
   puHt: number;
+  purchasePriceHt: number;
   remisePercent: number;
   tvaPercent: number;
   netHt: number;
   netTtc: number;
+  margePercent: number | null;
+  margeAmount: number | null;
+}
+
+/** PU HT using the default 40% markup on purchase cost */
+export function calcDefaultSellingPriceHt(purchasePriceHt: number): number {
+  return round3(purchasePriceHt * (1 + DEFAULT_MARGIN_PERCENT / 100));
+}
+
+/** Effective unit price after applying a per-line discount */
+export function calcNetUnitPriceHt(puHt: number, discountPercent: number): number {
+  return round3(puHt * (1 - discountPercent / 100));
+}
+
+/** Profit amount per unit after discount, null when purchasePriceHt is 0 */
+export function calcMargeAmount(
+  puHt: number,
+  discountPercent: number,
+  purchasePriceHt: number,
+): number | null {
+  if (purchasePriceHt <= 0) return null;
+  return round3(calcNetUnitPriceHt(puHt, discountPercent) - purchasePriceHt);
+}
+
+/** Profit % based on net price after discount, null when purchasePriceHt is 0 */
+export function calcMargePercent(
+  puHt: number,
+  discountPercent: number,
+  purchasePriceHt: number,
+): number | null {
+  if (purchasePriceHt <= 0) return null;
+  const net = calcNetUnitPriceHt(puHt, discountPercent);
+  return Math.round(((net - purchasePriceHt) / purchasePriceHt) * 10000) / 100;
 }
 
 export interface DocumentTotals {
@@ -32,10 +69,13 @@ export function createEmptyLine(): RegisterLine {
     brand: '',
     quantity: 1,
     puHt: 0,
+    purchasePriceHt: 0,
     remisePercent: 0,
     tvaPercent: 19,
     netHt: 0,
     netTtc: 0,
+    margePercent: null,
+    margeAmount: null,
   };
 }
 
@@ -48,7 +88,9 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
   const remiseAmount = round3(grossHt * line.remisePercent / 100);
   const netHt = round3(grossHt - remiseAmount);
   const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
-  return { ...line, netHt, netTtc };
+  const margePercent = calcMargePercent(line.puHt, line.remisePercent, line.purchasePriceHt);
+  const margeAmount = calcMargeAmount(line.puHt, line.remisePercent, line.purchasePriceHt);
+  return { ...line, netHt, netTtc, margePercent, margeAmount };
 }
 
 export function isFilledLine(line: RegisterLine): boolean {

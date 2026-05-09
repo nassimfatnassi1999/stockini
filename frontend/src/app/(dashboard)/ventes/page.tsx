@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, FileText, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { hasPermission } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,11 +15,14 @@ import {
   createEmptyLine,
   generatePlaceholderPdf,
   isFilledLine,
+  MIN_MARGIN_PERCENT,
   type DocumentType,
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
 import { money } from '@/lib/stockini/format';
 import type { Customer, DropdownOption, Sale } from '@/lib/stockini/types';
+
+const PERMISSION_LOW_MARGIN = 'sales.allow_low_margin';
 
 function round3(v: number) {
   return Math.round(v * 1000) / 1000;
@@ -44,6 +48,11 @@ export default function VentesPage() {
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [showHistory, setShowHistory] = useState(true);
+  const [allowLowMargin, setAllowLowMargin] = useState(false);
+
+  useEffect(() => {
+    setAllowLowMargin(hasPermission(PERMISSION_LOW_MARGIN));
+  }, []);
 
   const customersQuery = useQuery<Customer[]>({
     queryKey: ['customers'],
@@ -66,7 +75,16 @@ export default function VentesPage() {
   const filledLines = lines.filter(isFilledLine);
   const totals = calculateDocumentTotals(lines);
   const paidAmountNum = Number(paidAmount) || 0;
-  const canSave = filledLines.length > 0;
+
+  // Lines with missing purchase price or margin below minimum
+  const invalidMarginLines = filledLines.filter(
+    (l) => l.productId !== null && (l.purchasePriceHt <= 0 || (l.margePercent !== null && l.margePercent < MIN_MARGIN_PERCENT)),
+  );
+  const hasMissingPurchasePrice = filledLines.some(
+    (l) => l.productId !== null && l.purchasePriceHt <= 0,
+  );
+  const marginBlocked = !allowLowMargin && invalidMarginLines.length > 0;
+  const canSave = filledLines.length > 0 && !marginBlocked && !hasMissingPurchasePrice;
 
   const resetForm = () => {
     setLines([createEmptyLine()]);
@@ -86,6 +104,19 @@ export default function VentesPage() {
           `La ligne "${missingProduct.designation || missingProduct.reference}" n'est pas liée à un produit du stock`,
         );
       }
+
+      // Margin validation (front-end guard — backend also enforces)
+      if (hasMissingPurchasePrice) {
+        throw new Error(
+          "Vente bloquée : un ou plusieurs produits n'ont pas de prix d'achat défini.",
+        );
+      }
+      if (!allowLowMargin && invalidMarginLines.length > 0) {
+        throw new Error(
+          "Vous n'avez pas le droit de valider cette vente. La marge minimale autorisée est de 20%.",
+        );
+      }
+
       return api
         .post<Sale>('/sales', {
           customerId: customerId || undefined,
@@ -98,6 +129,7 @@ export default function VentesPage() {
             productId: l.productId!,
             quantity: l.quantity,
             unitPrice: round3(l.puHt),
+            discountPercent: l.remisePercent,
           })),
         })
         .then((r) => r.data);
@@ -191,7 +223,23 @@ export default function VentesPage() {
       </div>
 
       {/* Register grid */}
-      <ProductRegisterGrid lines={lines} onLinesChange={setLines} />
+      <ProductRegisterGrid
+        lines={lines}
+        hasLowMarginPermission={allowLowMargin}
+        onLinesChange={setLines}
+      />
+
+      {/* Margin warning banner */}
+      {(marginBlocked || hasMissingPurchasePrice) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+          <span className="mt-0.5 shrink-0 font-bold">⚠</span>
+          <span>
+            {hasMissingPurchasePrice
+              ? "Vente bloquée : un ou plusieurs produits n'ont pas de prix d'achat défini."
+              : "Vous n'avez pas le droit de valider cette vente. La marge minimale autorisée est de 20%."}
+          </span>
+        </div>
+      )}
 
       {/* Payment section + save action */}
       <div className="rounded-lg border border-border/70 bg-white p-4">

@@ -21,8 +21,10 @@ async function main() {
   };
 
   const roles = [
+    // ADMIN: wildcard covers everything, including sales.allow_low_margin
     { name: 'ADMIN', permissions: ['*'] },
     { name: 'STOCK_MANAGER', permissions: ['products:*', 'stock:*', 'alerts:*', 'reports:read'] },
+    // SELLER can sell but NOT override the 20% minimum margin
     { name: 'SELLER', permissions: ['products:read', 'sales:*', 'customers:*', 'payments:*'] },
     { name: 'PURCHASE_MANAGER', permissions: ['products:read', 'purchases:*', 'suppliers:*', 'payments:*'] },
   ];

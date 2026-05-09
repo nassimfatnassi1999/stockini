@@ -11,6 +11,7 @@ import {
 
 interface Props {
   lines: RegisterLine[];
+  hasLowMarginPermission: boolean;
   onLinesChange: (lines: RegisterLine[]) => void;
 }
 
@@ -22,6 +23,8 @@ const HEADERS = [
   { label: 'Marque / Famille', className: 'min-w-[90px]' },
   { label: 'Qté', className: 'min-w-[55px] text-right' },
   { label: 'PU HT', className: 'min-w-[80px] text-right' },
+  { label: 'Marge %', className: 'min-w-[70px] text-right' },
+  { label: 'Marge DT', className: 'min-w-[80px] text-right' },
   { label: 'Remise %', className: 'min-w-[60px] text-right' },
   { label: 'TVA %', className: 'min-w-[55px] text-right' },
   { label: 'Net HT', className: 'min-w-[80px] text-right' },
@@ -36,7 +39,7 @@ function fmt3(value: number): string {
   });
 }
 
-export function ProductRegisterGrid({ lines, onLinesChange }: Props) {
+export function ProductRegisterGrid({ lines, hasLowMarginPermission, onLinesChange }: Props) {
   const totals = calculateDocumentTotals(lines);
 
   const updateLine = (index: number, updated: RegisterLine) => {
@@ -79,6 +82,7 @@ export function ProductRegisterGrid({ lines, onLinesChange }: Props) {
                 key={line.id}
                 line={line}
                 lineNumber={index + 1}
+                hasLowMarginPermission={hasLowMarginPermission}
                 onChange={(updated) => updateLine(index, updated)}
                 onDelete={() => deleteLine(index)}
               />

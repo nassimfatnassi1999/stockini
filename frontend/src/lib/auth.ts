@@ -3,6 +3,7 @@ interface AuthUser {
   fullName?: string;
   email: string;
   role: string;
+  permissions?: string[];
 }
 
 function getStoredUser(): AuthUser | null {
@@ -36,6 +37,18 @@ export function getCurrentUserDisplayName(): string | null {
 
 export function getCurrentUser(): AuthUser | null {
   return getStoredUser();
+}
+
+/**
+ * Returns true when the current session has the given permission.
+ * ADMIN role (wildcard '*') grants all permissions.
+ */
+export function hasPermission(permissionKey: string): boolean {
+  const user = getStoredUser();
+  if (!user) return false;
+  if (user.role === 'ADMIN') return true;
+  const perms = user.permissions ?? [];
+  return perms.includes('*') || perms.includes(permissionKey);
 }
 
 export function setAuthSession(payload: { accessToken: string; refreshToken?: string; user: AuthUser }) {

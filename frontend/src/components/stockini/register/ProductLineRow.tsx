@@ -3,13 +3,18 @@
 import { useRef } from 'react';
 import { Trash2 } from 'lucide-react';
 import { ProductSearchAutocomplete } from './ProductSearchAutocomplete';
-import { recalculateLine } from '@/lib/stockini/register-utils';
+import {
+  recalculateLine,
+  calcDefaultSellingPriceHt,
+  MIN_MARGIN_PERCENT,
+} from '@/lib/stockini/register-utils';
 import type { RegisterLine } from '@/lib/stockini/register-utils';
 import type { Product } from '@/lib/stockini/types';
 
 interface Props {
   line: RegisterLine;
   lineNumber: number;
+  hasLowMarginPermission: boolean;
   onChange: (line: RegisterLine) => void;
   onDelete: () => void;
 }
@@ -26,7 +31,7 @@ const NUM_INPUT =
 const TEXT_INPUT =
   'w-full bg-transparent text-xs outline-none focus:bg-primary/5 px-2 py-1 rounded min-w-0';
 
-export function ProductLineRow({ line, lineNumber, onChange, onDelete }: Props) {
+export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onChange, onDelete }: Props) {
   const qteRef = useRef<HTMLInputElement>(null);
 
   const update = (patch: Partial<RegisterLine>) => {
@@ -34,10 +39,11 @@ export function ProductLineRow({ line, lineNumber, onChange, onDelete }: Props) 
   };
 
   const handleProductSelect = (product: Product) => {
-    const tva = line.tvaPercent || DEFAULT_TVA;
-    // product.salePrice is TTC; derive the HT unit price
-    const salePriceTtc = Number(product.salePrice);
-    const puHt = round3(salePriceTtc / (1 + tva / 100));
+    const purchasePriceHt = round3(Number(product.purchasePrice));
+    // Default PU HT = Prix achat HT × 1.4 (40% markup)
+    const puHt = purchasePriceHt > 0
+      ? calcDefaultSellingPriceHt(purchasePriceHt)
+      : round3(Number(product.salePrice) / (1 + (line.tvaPercent || DEFAULT_TVA) / 100));
     onChange(
       recalculateLine({
         ...line,
@@ -47,6 +53,8 @@ export function ProductLineRow({ line, lineNumber, onChange, onDelete }: Props) 
         location: product.location ?? '',
         brand: product.brand?.name ?? product.category?.name ?? '',
         puHt,
+        purchasePriceHt,
+        remisePercent: 0,
         quantity: Math.max(line.quantity, 1),
       }),
     );
@@ -56,8 +64,36 @@ export function ProductLineRow({ line, lineNumber, onChange, onDelete }: Props) 
   const fmt = (v: number) =>
     v > 0 ? v.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '—';
 
+  const hasProduct = line.productId !== null || line.puHt > 0;
+  const margeIsInvalid =
+    line.margePercent === null
+      ? line.productId !== null
+      : line.margePercent < MIN_MARGIN_PERCENT;
+
+  const margePercentDisplay = line.margePercent === null
+    ? '—'
+    : `${line.margePercent.toLocaleString('fr-TN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
+
+  const margeAmountDisplay = line.margeAmount === null
+    ? '—'
+    : line.margeAmount.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+  const marginTooltip =
+    line.margePercent === null && line.productId !== null
+      ? "Prix d'achat HT manquant — vente bloquée"
+      : line.margePercent !== null && line.margePercent < MIN_MARGIN_PERCENT
+        ? `Marge inférieure au minimum autorisé de ${MIN_MARGIN_PERCENT}%`
+        : undefined;
+
+  const margeColorClass =
+    line.margePercent === null
+      ? line.productId !== null ? 'text-red-600 font-semibold' : 'text-text-muted'
+      : line.margePercent < MIN_MARGIN_PERCENT
+        ? !hasLowMarginPermission ? 'text-red-600 font-semibold bg-red-50' : 'text-orange-500 font-semibold'
+        : 'text-emerald-600 font-semibold';
+
   return (
-    <tr className="h-9 border-b border-border/30 hover:bg-slate-50/80 group">
+    <tr className={`h-9 border-b border-border/30 group ${margeIsInvalid ? 'bg-red-50/30 hover:bg-red-50/50' : 'hover:bg-slate-50/80'}`}>
       {/* N° */}
       <td className={`w-8 text-center text-xs text-text-muted select-none ${CELL}`}>
         {lineNumber}
@@ -118,6 +154,22 @@ export function ProductLineRow({ line, lineNumber, onChange, onDelete }: Props) 
           onChange={(e) => update({ puHt: Math.max(0, Number(e.target.value) || 0) })}
           className={NUM_INPUT}
         />
+      </td>
+
+      {/* Marge % — read-only, auto-calculated */}
+      <td
+        className={`min-w-[70px] px-2 text-xs text-right tabular-nums ${CELL} ${margeColorClass}`}
+        title={marginTooltip}
+      >
+        {hasProduct ? margePercentDisplay : '—'}
+      </td>
+
+      {/* Marge DT — profit amount per unit after discount */}
+      <td
+        className={`min-w-[80px] px-2 text-xs text-right tabular-nums ${CELL} ${margeColorClass}`}
+        title={marginTooltip}
+      >
+        {hasProduct ? margeAmountDisplay : '—'}
       </td>
 
       {/* Remise % */}

@@ -15,6 +15,7 @@ export interface Product {
   purchasePrice: number | string;       // Prix d'achat HT
   purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × 1.19)
   salePrice: number | string;           // Prix de vente (TTC × 1.4)
+  lastSellingPrice?: number | string | null;
   quantity: number;
   minStock: number;
   location?: string | null;
