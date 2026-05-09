@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsPositive, IsString, Min } from 'class-validator';
 import { PaymentMethod, PaymentType } from '@prisma/client';
 
 export class CreatePaymentDto {
@@ -29,6 +29,20 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class PaySaleDto {
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  amount!: number;
+
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
 
   @IsOptional()
   @IsString()

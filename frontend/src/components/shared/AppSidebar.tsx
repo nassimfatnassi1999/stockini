@@ -12,7 +12,6 @@ import {
   Settings,
   ShieldCheck,
   ShoppingCart,
-  Trash2,
   Truck,
   Users,
   Warehouse,
@@ -55,7 +54,6 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Alertes', href: '/alertes', icon: Bell },
       { label: 'Settings', href: '/settings', icon: Settings },
       { label: 'Audit logs', href: '/audit-logs', icon: ShieldCheck },
-      { label: 'Corbeille', href: '/corbeille', icon: Trash2 },
     ],
   },
 ];

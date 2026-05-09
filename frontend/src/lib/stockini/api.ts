@@ -65,6 +65,8 @@ export const stockiniApi = {
   createPayment: (data: Partial<Payment>) => api.post<Payment>('/payments', data).then((r) => r.data),
   updatePayment: (id: string, data: Partial<Payment>) => api.patch<Payment>(`/payments/${id}`, data).then((r) => r.data),
   deletePayment: (id: string) => api.delete(`/payments/${id}`).then((r) => r.data),
+  paySale: (saleId: string, data: { amount: number; method: string; note?: string }) =>
+    api.post<Payment>(`/payments/sales/${saleId}/pay`, data).then((r) => r.data),
   alerts: () => api.get<Alert[]>('/alerts').then((r) => r.data),
   createAlert: (data: Partial<Alert>) => api.post<Alert>('/alerts', data).then((r) => r.data),
   updateAlert: (id: string, data: Partial<Alert>) => api.patch<Alert>(`/alerts/${id}`, data).then((r) => r.data),

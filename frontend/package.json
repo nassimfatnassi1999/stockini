@@ -30,6 +30,7 @@
     "react-hook-form": "^7.51.0",
     "react-router-dom": "^7.14.2",
     "react-signature-canvas": "^1.0.6",
+    "recharts": "^3.8.1",
     "tailwind-merge": "^2.2.2",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.22.4"

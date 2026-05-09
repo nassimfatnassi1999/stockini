@@ -11,7 +11,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
+import { CreatePaymentDto, PaySaleDto, UpdatePaymentDto } from './dto/payment.dto';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard)
@@ -22,6 +22,11 @@ export class PaymentsController {
   @Post()
   create(@Body() dto: CreatePaymentDto) {
     return this.paymentsService.create(dto);
+  }
+
+  @Post('sales/:saleId/pay')
+  paySale(@Param('saleId') saleId: string, @Body() dto: PaySaleDto) {
+    return this.paymentsService.paySale(saleId, dto);
   }
 
   @Get()

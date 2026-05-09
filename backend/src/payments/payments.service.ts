@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { PaymentStatus, PaymentType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { CreatePaymentDto, UpdatePaymentDto } from './dto/payment.dto';
+import { CreatePaymentDto, PaySaleDto, UpdatePaymentDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -53,14 +54,59 @@ export class PaymentsService {
   }
 
   async remove(id: string, userId?: string) {
-    this.logger.log(`DELETE /payments/${id} soft-delete called by ${userId ?? 'unknown'}`);
-    const payment = await this.prisma.payment.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId ?? null },
+    this.logger.log(`DELETE /payments/${id} called by ${userId ?? 'unknown'}`);
+    await this.prisma.payment.delete({ where: { id } });
+    this.logger.log(`Payment ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    return { id };
+  }
+
+  async paySale(saleId: string, dto: PaySaleDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findFirstOrThrow({
+        where: { id: saleId, deletedAt: null },
+      });
+
+      const remaining = Number(sale.remainingAmount);
+
+      if (dto.amount > remaining + 0.001) {
+        throw new BadRequestException(
+          `Le montant ne peut pas dépasser le reste à payer (${remaining.toFixed(3)} DT)`,
+        );
+      }
+
+      const newPaidAmount = Number(sale.paidAmount) + dto.amount;
+      const newRemainingAmount = Math.max(Number(sale.total) - newPaidAmount, 0);
+      const newStatus = this.computePaymentStatus(Number(sale.total), newPaidAmount);
+
+      const payment = await tx.payment.create({
+        data: {
+          reference: await this.references.generate('PAY', 'payment', tx),
+          type: PaymentType.CUSTOMER_PAYMENT,
+          method: dto.method,
+          amount: dto.amount,
+          saleId,
+          customerId: sale.customerId ?? undefined,
+          note: dto.note,
+        },
+        include: { sale: true, customer: true },
+      });
+
+      await tx.sale.update({
+        where: { id: saleId },
+        data: {
+          paidAmount: newPaidAmount,
+          remainingAmount: newRemainingAmount,
+          paymentStatus: newStatus,
+        },
+      });
+
+      return payment;
     });
-    this.logger.log(
-      `Payment ${payment.id} soft-deleted at ${payment.deletedAt?.toISOString() ?? 'null'}`,
-    );
-    return payment;
+  }
+
+  private computePaymentStatus(total: number, paidAmount: number): PaymentStatus {
+    if (paidAmount <= 0) return PaymentStatus.UNPAID;
+    if (paidAmount >= total) return PaymentStatus.PAID;
+    return PaymentStatus.PARTIAL;
   }
 }

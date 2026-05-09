@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ProductRegisterGrid } from '@/components/stockini/register/ProductRegisterGrid';
 import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
-import { SendToTrashDialog } from '@/components/stockini/SendToTrashDialog';
+import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
 import {
   calculateDocumentTotals,
   createEmptyLine,
@@ -177,10 +177,12 @@ export default function VentesPage() {
   const cancelMutation = useMutation({
     mutationFn: (id: string) =>
       api.delete(`/sales/${id}`).then((r) => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+    onSuccess: (_data, id) => {
+      queryClient.setQueryData<Sale[]>(['sales'], (prev) =>
+        prev ? prev.filter((s) => s.id !== id) : prev,
+      );
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
-      toast.success('Vente envoyée à la corbeille — stock restauré');
+      toast.success('Vente supprimée avec succès');
       setDeleteTarget(null);
     },
     onError: (error: unknown) => {
@@ -432,11 +434,11 @@ export default function VentesPage() {
                                 <Eye size={14} />
                               </Button>
                             )}
-                            {canDeleteSale && sale.status !== 'CANCELLED' && (
+                            {canDeleteSale && (
                               <Button
                                 variant="actionDelete"
                                 size="action"
-                                title="Annuler / Supprimer"
+                                title="Supprimer définitivement"
                                 onClick={() => setDeleteTarget(sale)}
                               >
                                 <Trash2 size={14} />
@@ -463,7 +465,7 @@ export default function VentesPage() {
       )}
 
       {deleteTarget && (
-        <SendToTrashDialog
+        <PermanentDeleteDialog
           label={deleteTarget.invoiceNumber}
           isPending={cancelMutation.isPending}
           onConfirm={() => cancelMutation.mutate(deleteTarget.id)}

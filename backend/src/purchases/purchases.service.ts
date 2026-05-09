@@ -185,19 +185,13 @@ export class PurchasesService {
   }
 
   async remove(id: string, userId?: string) {
-    this.logger.log(`DELETE /purchases/${id} soft-delete called by ${userId ?? 'unknown'}`);
-    const purchase = await this.prisma.purchase.update({
-      where: { id },
-      data: {
-        deletedAt: new Date(),
-        deletedBy: userId ?? null,
-        status: PurchaseStatus.CANCELLED,
-      },
+    this.logger.log(`DELETE /purchases/${id} called by ${userId ?? 'unknown'}`);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.payment.deleteMany({ where: { purchaseId: id } });
+      await tx.purchase.delete({ where: { id } });
     });
-    this.logger.log(
-      `Purchase ${purchase.id} soft-deleted at ${purchase.deletedAt?.toISOString() ?? 'null'} with status ${purchase.status}`,
-    );
-    return purchase;
+    this.logger.log(`Purchase ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    return { id };
   }
 
   private paymentStatus(total: number, paidAmount: number) {

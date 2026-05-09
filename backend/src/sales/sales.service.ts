@@ -246,7 +246,7 @@ export class SalesService {
       );
     }
     const userId = user?.id;
-    this.logger.log(`DELETE /sales/${id} soft-delete called by ${userId ?? 'unknown'}`);
+    this.logger.log(`DELETE /sales/${id} called by ${userId ?? 'unknown'}`);
     return this.prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUniqueOrThrow({
         where: { id },
@@ -263,18 +263,10 @@ export class SalesService {
           });
         }
       }
-      const updatedSale = await tx.sale.update({
-        where: { id },
-        data: {
-          status: SaleStatus.CANCELLED,
-          deletedAt: new Date(),
-          deletedBy: userId ?? null,
-        },
-      });
-      this.logger.log(
-        `Sale ${updatedSale.id} soft-deleted at ${updatedSale.deletedAt?.toISOString() ?? 'null'} with status ${updatedSale.status}`,
-      );
-      return updatedSale;
+      await tx.payment.deleteMany({ where: { saleId: id } });
+      await tx.sale.delete({ where: { id } });
+      this.logger.log(`Sale ${id} permanently deleted by ${userId ?? 'unknown'}`);
+      return { id };
     });
   }
 

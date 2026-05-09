@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2, X } from 'lucide-react';
-import { SendToTrashDialog } from '@/components/stockini/SendToTrashDialog';
+import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
 import type { Customer, DropdownOption } from '@/lib/stockini/types';
 
 const CUSTOMER_TYPES = [
@@ -104,14 +104,18 @@ export default function ClientsPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/customers/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
-      toast.success('Client envoyé à la corbeille');
+    mutationFn: (id: string) => api.delete(`/customers/${id}`).then((r) => r.data),
+    onSuccess: (_data, id) => {
+      queryClient.setQueryData<Customer[]>(['customers'], (prev) =>
+        prev ? prev.filter((c) => c.id !== id) : prev,
+      );
+      toast.success('Client supprimé avec succès');
       setTrashTarget(null);
     },
-    onError: () => {
-      toast.error('Échec de la suppression');
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors de la suppression');
+      setTrashTarget(null);
     },
   });
 
@@ -266,7 +270,7 @@ export default function ClientsPage() {
       </div>
 
       {trashTarget && (
-        <SendToTrashDialog
+        <PermanentDeleteDialog
           label={trashTarget.name}
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(trashTarget.id)}

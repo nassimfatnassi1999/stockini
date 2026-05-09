@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -57,14 +57,18 @@ export class CustomersService {
   }
 
   async remove(id: string, userId?: string) {
-    this.logger.log(`DELETE /customers/${id} soft-delete called by ${userId ?? 'unknown'}`);
-    const customer = await this.prisma.customer.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId ?? null },
-    });
-    this.logger.log(
-      `Customer ${customer.id} soft-deleted at ${customer.deletedAt?.toISOString() ?? 'null'}`,
-    );
-    return customer;
+    this.logger.log(`DELETE /customers/${id} called by ${userId ?? 'unknown'}`);
+    const [salesCount, paymentsCount] = await Promise.all([
+      this.prisma.sale.count({ where: { customerId: id } }),
+      this.prisma.payment.count({ where: { customerId: id } }),
+    ]);
+    if (salesCount > 0 || paymentsCount > 0) {
+      throw new BadRequestException(
+        'Ce client est lié à des ventes ou paiements. Suppression refusée.',
+      );
+    }
+    await this.prisma.customer.delete({ where: { id } });
+    this.logger.log(`Customer ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    return { id };
   }
 }

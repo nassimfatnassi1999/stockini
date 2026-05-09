@@ -119,6 +119,7 @@ export interface Payment {
   type: string;
   method: string;
   amount: number | string;
+  note?: string | null;
   createdAt: string;
   customer?: Customer | null;
   supplier?: Supplier | null;

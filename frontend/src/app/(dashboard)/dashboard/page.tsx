@@ -1,3 +1,5 @@
-import { StockiniDashboardPage } from '@/components/stockini/StockiniShell';
+import { AnalyticsDashboard } from '@/components/stockini/AnalyticsDashboard';
 
-export default StockiniDashboardPage;
+export default function DashboardPage() {
+  return <AnalyticsDashboard />;
+}
