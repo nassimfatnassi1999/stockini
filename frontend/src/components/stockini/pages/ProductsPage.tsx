@@ -29,23 +29,23 @@ import { StateRows } from '../shared/StateRows';
 import { StockBadge } from '../shared/StockBadge';
 
 interface ProductFormState {
+  reference: string;
   name: string;
   categoryId: string;
   brandId: string;
   supplierId: string;
   purchasePrice: string;
-  quantity: string;
   minStock: string;
   location: string;
 }
 
 const EMPTY_PRODUCT_FORM: ProductFormState = {
+  reference: '',
   name: '',
   categoryId: '',
   brandId: '',
   supplierId: '',
   purchasePrice: '',
-  quantity: '',
   minStock: '',
   location: '',
 };
@@ -78,13 +78,12 @@ function ProductModal({
 
   const validate = (): boolean => {
     const next: typeof errors = {};
+    if (!form.reference.trim()) next.reference = 'La référence est obligatoire';
     if (!form.name.trim()) next.name = 'La désignation est obligatoire';
     if (!form.categoryId) next.categoryId = 'La catégorie est obligatoire';
     if (!form.brandId) next.brandId = 'La marque est obligatoire';
     if (form.purchasePrice === '' || Number(form.purchasePrice) < 0)
       next.purchasePrice = 'Prix d\'achat HT invalide';
-    if (form.quantity === '' || Number(form.quantity) < 0)
-      next.quantity = 'Quantité invalide';
     if (form.minStock === '' || Number(form.minStock) < 0)
       next.minStock = 'Seuil invalide';
     setErrors(next);
@@ -109,8 +108,9 @@ function ProductModal({
 
         <form onSubmit={handleSubmit} className="grid gap-4 px-5 py-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label>Référence</Label>
-            <Input readOnly placeholder="Générée automatiquement" className="bg-muted/40 cursor-not-allowed text-text-muted" />
+            <Label htmlFor="pf-reference">Référence *</Label>
+            <Input id="pf-reference" value={form.reference} onChange={set('reference')} placeholder="Ex: D/FREIN AV FIESTA 08" required />
+            {errors.reference && <p className="text-xs text-red-600">{errors.reference}</p>}
           </div>
 
           <div className="space-y-1.5">
@@ -204,12 +204,7 @@ function ProductModal({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="pf-qty">Quantité initiale *</Label>
-            <Input id="pf-qty" type="number" min="0" step="1" value={form.quantity} onChange={set('quantity')} required />
-            {errors.quantity && <p className="text-xs text-red-600">{errors.quantity}</p>}
-          </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="pf-min">Seuil minimum *</Label>
             <Input id="pf-min" type="number" min="0" step="1" value={form.minStock} onChange={set('minStock')} required />
             {errors.minStock && <p className="text-xs text-red-600">{errors.minStock}</p>}
@@ -242,12 +237,13 @@ export function ProductsPage() {
   const createMutation = useMutation({
     mutationFn: (form: ProductFormState) =>
       stockiniApi.createProduct({
+        reference: form.reference.trim(),
         name: form.name.trim(),
         categoryId: form.categoryId,
         brandId: form.brandId,
         ...(form.supplierId && { supplierId: form.supplierId }),
         purchasePrice: Number(form.purchasePrice),
-        quantity: Number(form.quantity),
+        quantity: 0,
         minStock: Number(form.minStock),
         ...(form.location.trim() && { location: form.location.trim() }),
       }),
@@ -307,7 +303,7 @@ export function ProductsPage() {
               <StateRows loading={query.isLoading} error={query.error} empty={data.length === 0} colSpan={11} />
               {data.map((product) => (
                 <TableRow key={product.id}>
-                  <TableCell className="font-mono font-semibold">{product.reference ?? product.sku}</TableCell>
+                  <TableCell className="font-mono font-semibold">{product.reference}</TableCell>
                   <TableCell>
                     <Link
                       href={`/produits/${product.id}`}

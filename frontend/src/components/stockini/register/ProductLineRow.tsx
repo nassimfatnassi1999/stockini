@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+import type React from 'react';
 import { Trash2 } from 'lucide-react';
 import { ProductSearchAutocomplete } from './ProductSearchAutocomplete';
 import {
@@ -17,6 +18,7 @@ interface Props {
   hasLowMarginPermission: boolean;
   onChange: (line: RegisterLine) => void;
   onDelete: () => void;
+  containerRef?: React.RefObject<HTMLDivElement>;
 }
 
 const DEFAULT_TVA = 19;
@@ -31,7 +33,7 @@ const NUM_INPUT =
 const TEXT_INPUT =
   'w-full bg-transparent text-xs outline-none focus:bg-primary/5 px-2 py-1 rounded min-w-0';
 
-export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onChange, onDelete }: Props) {
+export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onChange, onDelete, containerRef }: Props) {
   const qteRef = useRef<HTMLInputElement>(null);
 
   const update = (patch: Partial<RegisterLine>) => {
@@ -107,6 +109,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
           onSelect={handleProductSelect}
           placeholder="Référence…"
           className={`${TEXT_INPUT} font-mono`}
+          containerRef={containerRef}
         />
       </td>
 
@@ -118,6 +121,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
           onSelect={handleProductSelect}
           placeholder="Désignation…"
           className={TEXT_INPUT}
+          containerRef={containerRef}
         />
       </td>
 

@@ -304,10 +304,11 @@ async function main() {
   ];
 
   for (const product of productData) {
+    const autoRef = nextReference('PRD');
     await prisma.product.upsert({
       where: { sku: product.sku },
       update: { ...product, deletedAt: null, isActive: true },
-      create: { ...product, reference: nextReference('PRD') },
+      create: { ...product, idProduct: autoRef, reference: product.sku },
     });
   }
 

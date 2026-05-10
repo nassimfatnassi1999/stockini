@@ -7,6 +7,7 @@ export interface Lookup {
 
 export interface Product {
   id: Id;
+  idProduct: string;
   reference: string;
   sku: string;
   barcode?: string | null;

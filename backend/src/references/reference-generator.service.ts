@@ -20,7 +20,7 @@ const TARGETS: Record<ReferenceTarget, { delegate: string; field: string }> = {
   payment: { delegate: 'payment', field: 'reference' },
   customer: { delegate: 'customer', field: 'reference' },
   supplier: { delegate: 'supplier', field: 'reference' },
-  product: { delegate: 'product', field: 'reference' },
+  product: { delegate: 'product', field: 'idProduct' },
 };
 
 // Passager (INDIVIDUAL): CLI-YEAR-001 (3-digit)

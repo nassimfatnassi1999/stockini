@@ -24,9 +24,15 @@ export class ProductsService {
   async create(dto: CreateProductDto) {
     const derivedPrices = this.derivePrices(dto.purchasePrice);
     return this.prisma.$transaction(async (tx) => {
-      const reference = await this.references.generate('PRD', 'product', tx);
+      const idProduct = await this.references.generate('PRD', 'product', tx);
       return tx.product.create({
-        data: { ...dto, ...derivedPrices, reference, sku: reference },
+        data: {
+          ...dto,
+          quantity: 0,
+          ...derivedPrices,
+          idProduct,
+          sku: idProduct,
+        },
         include: this.includeRelations(),
       });
     });
@@ -38,9 +44,11 @@ export class ProductsService {
       ...(query.search
         ? {
             OR: [
+              { reference: { contains: query.search, mode: 'insensitive' } },
+              { name: { contains: query.search, mode: 'insensitive' } },
+              { idProduct: { contains: query.search, mode: 'insensitive' } },
               { sku: { contains: query.search, mode: 'insensitive' } },
               { barcode: { contains: query.search, mode: 'insensitive' } },
-              { name: { contains: query.search, mode: 'insensitive' } },
             ],
           }
         : {}),
@@ -87,9 +95,6 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto) {
-    if (dto.sku !== undefined) {
-      throw new BadRequestException('Product reference cannot be edited');
-    }
     if (dto.quantity !== undefined) {
       const current = await this.prisma.product.findUniqueOrThrow({
         where: { id },

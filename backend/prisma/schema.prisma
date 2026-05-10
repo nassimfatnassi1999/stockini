@@ -92,40 +92,42 @@ model Role {
 }
 
 model Product {
-  id             String          @id @default(cuid())
-  reference      String          @unique
-  sku            String          @unique
-  barcode        String?         @unique
-  name           String
-  description    String?
-  categoryId     String
-  brandId        String
-  supplierId     String?
+  id               String          @id @default(cuid())
+  idProduct        String          @unique
+  reference        String          @unique
+  sku              String          @unique
+  barcode          String?         @unique
+  name             String
+  description      String?
+  categoryId       String
+  brandId          String
+  supplierId       String?
   purchasePrice    Decimal         @db.Decimal(12, 3)
   purchasePriceTtc Decimal         @default(0) @db.Decimal(12, 3)
   salePrice        Decimal         @db.Decimal(12, 3)
   lastSellingPrice Decimal?        @db.Decimal(12, 3)
-  quantity       Int             @default(0)
-  minStock       Int             @default(0)
-  location       String?
-  imageUrl       String?
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
-  deletedBy      String?
-  category       Category        @relation(fields: [categoryId], references: [id])
-  brand          Brand           @relation(fields: [brandId], references: [id])
-  supplier       Supplier?       @relation(fields: [supplierId], references: [id])
-  stockMovements StockMovement[]
-  saleItems      SaleItem[]
-  purchaseItems  PurchaseItem[]
-  alerts         Alert[]
+  quantity         Int             @default(0)
+  minStock         Int             @default(0)
+  location         String?
+  imageUrl         String?
+  isActive         Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+  deletedBy        String?
+  category         Category        @relation(fields: [categoryId], references: [id])
+  brand            Brand           @relation(fields: [brandId], references: [id])
+  supplier         Supplier?       @relation(fields: [supplierId], references: [id])
+  stockMovements   StockMovement[]
+  saleItems        SaleItem[]
+  purchaseItems    PurchaseItem[]
+  alerts           Alert[]
 
   @@index([categoryId])
   @@index([brandId])
   @@index([supplierId])
   @@index([name])
+  @@index([idProduct])
   @@index([reference])
   @@index([deletedAt])
 }

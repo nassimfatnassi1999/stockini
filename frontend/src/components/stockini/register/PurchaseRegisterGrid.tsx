@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import { Plus } from 'lucide-react';
 import { PurchaseLineRow } from './PurchaseLineRow';
 import {
@@ -38,6 +39,7 @@ function fmt3(value: number): string {
 
 export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
   const totals = calculateDocumentTotals(lines);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const updateLine = (index: number, updated: RegisterLine) => {
     const next = lines.map((l, i) => (i === index ? updated : l));
@@ -58,7 +60,11 @@ export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
   };
 
   return (
-    <div className="rounded-lg border border-border/70 bg-white overflow-hidden">
+    <div
+      ref={containerRef}
+      data-product-register="purchases"
+      className="rounded-lg border border-border/70 bg-white overflow-hidden"
+    >
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse" style={{ minWidth: '900px' }}>
           <thead>
@@ -66,7 +72,7 @@ export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
               {HEADERS.map((h, i) => (
                 <th
                   key={i}
-                  className={`px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-text-muted border-r border-border/30 last:border-r-0 ${h.className}`}
+                  className={`px-2 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-700 border-r border-border/30 last:border-r-0 ${h.className}`}
                 >
                   {h.label}
                 </th>
@@ -81,6 +87,7 @@ export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
                 lineNumber={index + 1}
                 onChange={(updated) => updateLine(index, updated)}
                 onDelete={() => deleteLine(index)}
+                containerRef={containerRef}
               />
             ))}
           </tbody>
