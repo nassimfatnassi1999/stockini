@@ -1,6 +1,5 @@
 'use client';
 
-import { useRef } from 'react';
 import { Plus } from 'lucide-react';
 import { PurchaseLineRow } from './PurchaseLineRow';
 import {
@@ -39,7 +38,6 @@ function fmt3(value: number): string {
 
 export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
   const totals = calculateDocumentTotals(lines);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const updateLine = (index: number, updated: RegisterLine) => {
     const next = lines.map((l, i) => (i === index ? updated : l));
@@ -60,11 +58,7 @@ export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
   };
 
   return (
-    <div
-      ref={containerRef}
-      data-product-register="purchases"
-      className="rounded-lg border border-border/70 bg-white overflow-hidden"
-    >
+    <div className="rounded-lg border border-border/70 bg-white overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse" style={{ minWidth: '900px' }}>
           <thead>
@@ -87,7 +81,6 @@ export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
                 lineNumber={index + 1}
                 onChange={(updated) => updateLine(index, updated)}
                 onDelete={() => deleteLine(index)}
-                containerRef={containerRef}
               />
             ))}
           </tbody>

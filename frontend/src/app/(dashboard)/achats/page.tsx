@@ -210,6 +210,7 @@ export default function AchatsPage() {
         quantity: maxQty,
         puHt,
         purchasePriceHt: puHt,
+        defaultMarginPercent: 0,
         remisePercent: 0,
         tvaPercent: 19,
         netHt: 0,

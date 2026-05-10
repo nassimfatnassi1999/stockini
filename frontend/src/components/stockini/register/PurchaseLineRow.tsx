@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef } from 'react';
-import type React from 'react';
 import { Trash2 } from 'lucide-react';
 import { ProductSearchAutocomplete } from './ProductSearchAutocomplete';
 import { recalculateLine } from '@/lib/stockini/register-utils';
@@ -13,7 +12,6 @@ interface Props {
   lineNumber: number;
   onChange: (line: RegisterLine) => void;
   onDelete: () => void;
-  containerRef?: React.RefObject<HTMLDivElement>;
 }
 
 function round3(v: number) {
@@ -26,7 +24,7 @@ const NUM_INPUT =
 const TEXT_INPUT =
   'w-full bg-transparent text-xs outline-none focus:bg-primary/5 px-2 py-1 rounded min-w-0';
 
-export function PurchaseLineRow({ line, lineNumber, onChange, onDelete, containerRef }: Props) {
+export function PurchaseLineRow({ line, lineNumber, onChange, onDelete }: Props) {
   const qteRef = useRef<HTMLInputElement>(null);
 
   const update = (patch: Partial<RegisterLine>) => {
@@ -70,7 +68,6 @@ export function PurchaseLineRow({ line, lineNumber, onChange, onDelete, containe
           onSelect={handleProductSelect}
           placeholder="Référence…"
           className={`${TEXT_INPUT} font-mono`}
-          containerRef={containerRef}
         />
       </td>
 
@@ -82,7 +79,6 @@ export function PurchaseLineRow({ line, lineNumber, onChange, onDelete, containe
           onSelect={handleProductSelect}
           placeholder="Désignation…"
           className={TEXT_INPUT}
-          containerRef={containerRef}
         />
       </td>
 

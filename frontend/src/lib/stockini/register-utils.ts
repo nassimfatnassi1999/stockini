@@ -11,6 +11,8 @@ export interface RegisterLine {
   quantity: number;
   puHt: number;
   purchasePriceHt: number;
+  /** Base margin % before discount (stored per-line, independent of other lines) */
+  defaultMarginPercent: number;
   remisePercent: number;
   tvaPercent: number;
   netHt: number;
@@ -57,6 +59,11 @@ export interface DocumentTotals {
   totalTtc: number;
 }
 
+export interface SaleMargeTotals {
+  margeTotaleDt: number;
+  margeTotalePourcent: number;
+}
+
 export type DocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE';
 
 export function createEmptyLine(): RegisterLine {
@@ -70,6 +77,7 @@ export function createEmptyLine(): RegisterLine {
     quantity: 1,
     puHt: 0,
     purchasePriceHt: 0,
+    defaultMarginPercent: DEFAULT_MARGIN_PERCENT,
     remisePercent: 0,
     tvaPercent: 19,
     netHt: 0,
@@ -83,6 +91,7 @@ function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
+/** For purchases: remise reduces the purchase price directly */
 export function recalculateLine(line: RegisterLine): RegisterLine {
   const grossHt = round3(line.quantity * line.puHt);
   const remiseAmount = round3(grossHt * line.remisePercent / 100);
@@ -91,6 +100,27 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
   const margePercent = calcMargePercent(line.puHt, line.remisePercent, line.purchasePriceHt);
   const margeAmount = calcMargeAmount(line.puHt, line.remisePercent, line.purchasePriceHt);
   return { ...line, netHt, netTtc, margePercent, margeAmount };
+}
+
+/**
+ * For sales: remise reduces the margin, not the price.
+ * margeFinal = max(defaultMarginPercent - remisePercent, 0)
+ * puHt = purchasePriceHt × (1 + margeFinal / 100)
+ */
+export function recalculateSaleLine(line: RegisterLine): RegisterLine {
+  if (line.purchasePriceHt > 0) {
+    const margeFinalePourcent = Math.max(line.defaultMarginPercent - line.remisePercent, 0);
+    const puHt = round3(line.purchasePriceHt * (1 + margeFinalePourcent / 100));
+    const margePercent = Math.round(margeFinalePourcent * 100) / 100;
+    const margeAmount = round3(puHt - line.purchasePriceHt);
+    const netHt = round3(puHt * line.quantity);
+    const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
+    return { ...line, puHt, margePercent, margeAmount, netHt, netTtc };
+  }
+  // No purchase price: use puHt as manually entered
+  const netHt = round3(line.puHt * line.quantity);
+  const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
+  return { ...line, margePercent: null, margeAmount: null, netHt, netTtc };
 }
 
 export function isFilledLine(line: RegisterLine): boolean {
@@ -109,6 +139,23 @@ export function calculateDocumentTotals(lines: RegisterLine[]): DocumentTotals {
   const totalTva = round3(filled.reduce((s, l) => s + round3(l.netHt * l.tvaPercent / 100), 0));
   const totalTtc = round3(totalHt + totalTva);
   return { totalHt, totalRemise, totalTva, totalTtc };
+}
+
+/**
+ * margeTotaleDt  = Σ (margeAmount × quantité)
+ * margeTotalePourcent = margeTotaleDt / Σ (purchasePriceHt × quantité) × 100
+ */
+export function calculateSaleMargeTotals(lines: RegisterLine[]): SaleMargeTotals {
+  const filled = lines.filter(isFilledLine);
+  const margeTotaleDt = round3(
+    filled.reduce((s, l) => s + (l.margeAmount !== null ? round3(l.margeAmount * l.quantity) : 0), 0),
+  );
+  const totalPrixAchat = round3(
+    filled.reduce((s, l) => s + round3(l.purchasePriceHt * l.quantity), 0),
+  );
+  const margeTotalePourcent =
+    totalPrixAchat > 0 ? Math.round((margeTotaleDt / totalPrixAchat) * 10000) / 100 : 0;
+  return { margeTotaleDt, margeTotalePourcent };
 }
 
 const DOC_LABELS: Record<DocumentType, string> = {

@@ -1,10 +1,10 @@
 'use client';
 
-import { useRef } from 'react';
 import { Plus } from 'lucide-react';
 import { ProductLineRow } from './ProductLineRow';
 import {
   calculateDocumentTotals,
+  calculateSaleMargeTotals,
   createEmptyLine,
   isFilledLine,
   type RegisterLine,
@@ -42,7 +42,7 @@ function fmt3(value: number): string {
 
 export function ProductRegisterGrid({ lines, hasLowMarginPermission, onLinesChange }: Props) {
   const totals = calculateDocumentTotals(lines);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const margeTotals = calculateSaleMargeTotals(lines);
 
   const updateLine = (index: number, updated: RegisterLine) => {
     const next = lines.map((l, i) => (i === index ? updated : l));
@@ -62,12 +62,31 @@ export function ProductRegisterGrid({ lines, hasLowMarginPermission, onLinesChan
     onLinesChange([...lines, createEmptyLine()]);
   };
 
+  const filledCount = lines.filter(isFilledLine).length;
+
   return (
-    <div
-      ref={containerRef}
-      data-product-register="sales"
-      className="rounded-lg border border-border/70 bg-white overflow-hidden"
-    >
+    <div className="rounded-lg border border-border/70 bg-white overflow-hidden">
+      {/* Marge totale — above the table, aligned right */}
+      {filledCount > 0 && (
+        <div className="flex justify-end px-4 py-2.5 border-b border-border/30 bg-surface">
+          <div className="text-right">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+              Marge totale
+            </div>
+            <div className="mt-0.5 font-semibold tabular-nums text-emerald-600">
+              {fmt3(margeTotals.margeTotaleDt)} DT
+            </div>
+            <div className="text-xs tabular-nums text-emerald-500">
+              {margeTotals.margeTotalePourcent.toLocaleString('fr-TN', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              %
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse" style={{ minWidth: '960px' }}>
           <thead>
@@ -91,7 +110,6 @@ export function ProductRegisterGrid({ lines, hasLowMarginPermission, onLinesChan
                 hasLowMarginPermission={hasLowMarginPermission}
                 onChange={(updated) => updateLine(index, updated)}
                 onDelete={() => deleteLine(index)}
-                containerRef={containerRef}
               />
             ))}
           </tbody>

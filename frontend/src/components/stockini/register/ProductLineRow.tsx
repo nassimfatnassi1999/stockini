@@ -1,13 +1,12 @@
 'use client';
 
 import { useRef } from 'react';
-import type React from 'react';
 import { Trash2 } from 'lucide-react';
 import { ProductSearchAutocomplete } from './ProductSearchAutocomplete';
 import {
-  recalculateLine,
-  calcDefaultSellingPriceHt,
+  recalculateSaleLine,
   MIN_MARGIN_PERCENT,
+  DEFAULT_MARGIN_PERCENT,
 } from '@/lib/stockini/register-utils';
 import type { RegisterLine } from '@/lib/stockini/register-utils';
 import type { Product } from '@/lib/stockini/types';
@@ -18,7 +17,6 @@ interface Props {
   hasLowMarginPermission: boolean;
   onChange: (line: RegisterLine) => void;
   onDelete: () => void;
-  containerRef?: React.RefObject<HTMLDivElement>;
 }
 
 const DEFAULT_TVA = 19;
@@ -33,21 +31,21 @@ const NUM_INPUT =
 const TEXT_INPUT =
   'w-full bg-transparent text-xs outline-none focus:bg-primary/5 px-2 py-1 rounded min-w-0';
 
-export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onChange, onDelete, containerRef }: Props) {
+export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onChange, onDelete }: Props) {
   const qteRef = useRef<HTMLInputElement>(null);
 
   const update = (patch: Partial<RegisterLine>) => {
-    onChange(recalculateLine({ ...line, ...patch }));
+    onChange(recalculateSaleLine({ ...line, ...patch }));
   };
 
   const handleProductSelect = (product: Product) => {
     const purchasePriceHt = round3(Number(product.purchasePrice));
-    // Default PU HT = Prix achat HT × 1.4 (40% markup)
+    // When no purchase price, derive puHt from salePrice (no margin-based computation)
     const puHt = purchasePriceHt > 0
-      ? calcDefaultSellingPriceHt(purchasePriceHt)
+      ? 0 // will be computed by recalculateSaleLine from defaultMarginPercent
       : round3(Number(product.salePrice) / (1 + (line.tvaPercent || DEFAULT_TVA) / 100));
     onChange(
-      recalculateLine({
+      recalculateSaleLine({
         ...line,
         productId: product.id,
         reference: product.reference,
@@ -56,6 +54,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
         brand: product.brand?.name ?? product.category?.name ?? '',
         puHt,
         purchasePriceHt,
+        defaultMarginPercent: DEFAULT_MARGIN_PERCENT,
         remisePercent: 0,
         quantity: Math.max(line.quantity, 1),
       }),
@@ -109,7 +108,6 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
           onSelect={handleProductSelect}
           placeholder="Référence…"
           className={`${TEXT_INPUT} font-mono`}
-          containerRef={containerRef}
         />
       </td>
 
@@ -121,7 +119,6 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
           onSelect={handleProductSelect}
           placeholder="Désignation…"
           className={TEXT_INPUT}
-          containerRef={containerRef}
         />
       </td>
 
@@ -148,14 +145,24 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
         />
       </td>
 
-      {/* PU HT */}
+      {/* PU HT — computed when purchasePriceHt > 0; editable otherwise */}
       <td className={`min-w-[80px] ${CELL}`}>
         <input
           type="number"
           min={0}
           step={0.001}
           value={line.puHt === 0 ? '' : line.puHt}
-          onChange={(e) => update({ puHt: Math.max(0, Number(e.target.value) || 0) })}
+          onChange={(e) => {
+            const newPuHt = Math.max(0, Number(e.target.value) || 0);
+            if (line.purchasePriceHt > 0) {
+              // Back-calculate defaultMarginPercent so the effective price matches the typed value
+              const impliedMargin = (newPuHt / line.purchasePriceHt - 1) * 100;
+              const newDefaultMargin = Math.max(impliedMargin + line.remisePercent, 0);
+              update({ defaultMarginPercent: newDefaultMargin });
+            } else {
+              update({ puHt: newPuHt });
+            }
+          }}
           className={NUM_INPUT}
         />
       </td>
