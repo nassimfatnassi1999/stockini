@@ -39,16 +39,31 @@ export function getCurrentUser(): AuthUser | null {
   return getStoredUser();
 }
 
+const SUPER_ROLES = ['ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin'];
+
 /**
  * Returns true when the current session has the given permission.
- * ADMIN role (wildcard '*') grants all permissions.
+ * Super/Admin roles bypass all permission checks.
+ * Supports wildcards: '*' (all) and 'module.*' (all within a module).
  */
 export function hasPermission(permissionKey: string): boolean {
   const user = getStoredUser();
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
+  if (SUPER_ROLES.includes(user.role)) return true;
   const perms = user.permissions ?? [];
-  return perms.includes('*') || perms.includes(permissionKey);
+  if (perms.includes('*')) return true;
+  if (perms.includes(permissionKey)) return true;
+  const module = permissionKey.split('.')[0];
+  return perms.includes(`${module}.*`);
+}
+
+export function isAdminRole(): boolean {
+  const user = getStoredUser();
+  return user ? SUPER_ROLES.includes(user.role) : false;
+}
+
+export function canAccess(permissionKey: string): boolean {
+  return hasPermission(permissionKey);
 }
 
 export function setAuthSession(payload: { accessToken: string; refreshToken?: string; user: AuthUser }) {

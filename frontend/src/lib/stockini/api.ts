@@ -7,6 +7,7 @@ import type {
   Payment,
   Product,
   Purchase,
+  PurchaseDetail,
   Sale,
   SaleDetail,
   StockMovement,
@@ -58,8 +59,12 @@ export const stockiniApi = {
   cancelSale: (id: string) => api.patch(`/sales/${id}/cancel`).then((r) => r.data),
   deleteSale: (id: string) => api.delete(`/sales/${id}`).then((r) => r.data),
   purchases: () => api.get<Purchase[]>('/purchases').then((r) => r.data),
+  purchase: (id: string) => api.get<PurchaseDetail>(`/purchases/${id}`).then((r) => r.data),
   createPurchase: (data: unknown) => api.post<Purchase>('/purchases', data).then((r) => r.data),
+  receivePurchase: (id: string, items: Array<{ purchaseItemId: string; quantity: number }>) =>
+    api.patch<Purchase>(`/purchases/${id}/receive`, { items }).then((r) => r.data),
   updatePurchase: (id: string, data: Partial<Purchase>) => api.patch<Purchase>(`/purchases/${id}`, data).then((r) => r.data),
+  cancelPurchase: (id: string) => api.patch(`/purchases/${id}/cancel`).then((r) => r.data),
   deletePurchase: (id: string) => api.delete(`/purchases/${id}`).then((r) => r.data),
   payments: () => api.get<Payment[]>('/payments').then((r) => r.data),
   createPayment: (data: Partial<Payment>) => api.post<Payment>('/payments', data).then((r) => r.data),
@@ -67,6 +72,8 @@ export const stockiniApi = {
   deletePayment: (id: string) => api.delete(`/payments/${id}`).then((r) => r.data),
   paySale: (saleId: string, data: { amount: number; method: string; note?: string }) =>
     api.post<Payment>(`/payments/sales/${saleId}/pay`, data).then((r) => r.data),
+  payPurchase: (purchaseId: string, data: { amount: number; method: string; note?: string }) =>
+    api.post<Payment>(`/payments/purchases/${purchaseId}/pay`, data).then((r) => r.data),
   alerts: () => api.get<Alert[]>('/alerts').then((r) => r.data),
   createAlert: (data: Partial<Alert>) => api.post<Alert>('/alerts', data).then((r) => r.data),
   updateAlert: (id: string, data: Partial<Alert>) => api.patch<Alert>(`/alerts/${id}`, data).then((r) => r.data),

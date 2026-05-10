@@ -3,7 +3,7 @@ import { PaymentStatus, PaymentType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { CreatePaymentDto, PaySaleDto, UpdatePaymentDto } from './dto/payment.dto';
+import { CreatePaymentDto, PayPurchaseDto, PaySaleDto, UpdatePaymentDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -93,6 +93,50 @@ export class PaymentsService {
 
       await tx.sale.update({
         where: { id: saleId },
+        data: {
+          paidAmount: newPaidAmount,
+          remainingAmount: newRemainingAmount,
+          paymentStatus: newStatus,
+        },
+      });
+
+      return payment;
+    });
+  }
+
+  async payPurchase(purchaseId: string, dto: PayPurchaseDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findFirstOrThrow({
+        where: { id: purchaseId, deletedAt: null },
+      });
+
+      const remaining = Number(purchase.remainingAmount);
+
+      if (dto.amount > remaining + 0.001) {
+        throw new BadRequestException(
+          `Le montant ne peut pas dépasser le reste à payer (${remaining.toFixed(3)} DT)`,
+        );
+      }
+
+      const newPaidAmount = Number(purchase.paidAmount) + dto.amount;
+      const newRemainingAmount = Math.max(Number(purchase.total) - newPaidAmount, 0);
+      const newStatus = this.computePaymentStatus(Number(purchase.total), newPaidAmount);
+
+      const payment = await tx.payment.create({
+        data: {
+          reference: await this.references.generate('EXP', 'payment', tx),
+          type: PaymentType.SUPPLIER_PAYMENT,
+          method: dto.method,
+          amount: dto.amount,
+          purchaseId,
+          supplierId: purchase.supplierId,
+          note: dto.note,
+        },
+        include: { purchase: true, supplier: true },
+      });
+
+      await tx.purchase.update({
+        where: { id: purchaseId },
         data: {
           paidAmount: newPaidAmount,
           remainingAmount: newRemainingAmount,

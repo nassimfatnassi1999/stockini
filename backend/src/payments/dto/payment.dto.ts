@@ -49,6 +49,20 @@ export class PaySaleDto {
   note?: string;
 }
 
+export class PayPurchaseDto {
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  amount!: number;
+
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
 export class UpdatePaymentDto {
   @IsOptional()
   @IsEnum(PaymentType)

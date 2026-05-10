@@ -7,13 +7,13 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../auth/decorators';
+import { RequirePermissions } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RbacService } from './rbac.service';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions('permissions.view')
 @Controller('rbac')
 export class RbacController {
   constructor(private readonly rbacService: RbacService) {}
@@ -28,15 +28,13 @@ export class RbacController {
     return this.rbacService.rolePermissions(role);
   }
 
+  @RequirePermissions('permissions.update')
   @Put('roles/:role/permissions')
   updateRolePermissions(
     @Param('role') role: string,
     @Body() body: { permissionCodes: string[] },
   ) {
-    return this.rbacService.updateRolePermissions(
-      role,
-      body.permissionCodes ?? [],
-    );
+    return this.rbacService.updateRolePermissions(role, body.permissionCodes ?? []);
   }
 
   @Get('users/:userId/overrides')
@@ -44,6 +42,7 @@ export class RbacController {
     return this.rbacService.userOverrides(userId);
   }
 
+  @RequirePermissions('permissions.update')
   @Put('users/overrides')
   setUserOverride(
     @Body() body: { userId: string; permissionCode: string; granted: boolean },
@@ -51,6 +50,7 @@ export class RbacController {
     return this.rbacService.setUserOverride(body);
   }
 
+  @RequirePermissions('permissions.update')
   @Delete('users/:userId/overrides/:permissionCode')
   removeUserOverride(
     @Param('userId') userId: string,

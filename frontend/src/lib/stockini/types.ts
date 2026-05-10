@@ -108,9 +108,39 @@ export interface Purchase {
   status: string;
   createdAt: string;
   supplier?: Supplier | null;
-  items?: Array<{ id: Id; quantity: number; receivedQuantity?: number }>;
+  items?: Array<{ id: Id; quantity: number; receivedQuantity?: number; unitCost?: number | string }>;
   deletedAt?: string | null;
   deletedBy?: string | null;
+}
+
+export interface PurchaseItemDetail {
+  id: Id;
+  productId: Id;
+  quantity: number;
+  receivedQuantity: number;
+  unitCost: number | string;
+  total: number | string;
+  product?: {
+    id: Id;
+    reference: string;
+    name: string;
+  } | null;
+}
+
+export interface PurchaseDetail {
+  id: Id;
+  orderNumber: string;
+  subtotal: number | string;
+  discount: number | string;
+  tax: number | string;
+  total: number | string;
+  paidAmount: number | string;
+  remainingAmount: number | string;
+  paymentStatus: string;
+  status: string;
+  createdAt: string;
+  supplier?: Supplier | null;
+  items: PurchaseItemDetail[];
 }
 
 export interface Payment {

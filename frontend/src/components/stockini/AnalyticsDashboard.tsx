@@ -299,6 +299,43 @@ export function AnalyticsDashboard() {
   const purchUnpaid    = useMemo(() => filteredPurch.reduce((a, p) => a + n(p.remainingAmount), 0), [filteredPurch]);
   const activeSuppIds  = useMemo(() => new Set(filteredPurch.map(p => p.supplier?.id).filter(Boolean)), [filteredPurch]);
 
+  // ── Financial summary KPIs ────────────────────────────────────────────────
+  const purchPaid      = purchTotal - purchUnpaid;
+  const benefice       = salesTotal - purchTotal;
+  const margeRate      = salesTotal > 0 ? ((benefice / salesTotal) * 100).toFixed(1) : '0.0';
+  const stockPurchaseValue = n(stockVal?.purchaseValue);
+  const stockSaleValue     = n(stockVal?.saleValue);
+
+  // ── Top clients by revenue ────────────────────────────────────────────────
+  const topClientsData = useMemo(() => {
+    const map: Record<string, { name: string; CA: number; unpaid: number }> = {};
+    filteredSales.forEach(s => {
+      const sAny     = s as unknown as Record<string, unknown>;
+      const customer = sAny.customer as { id?: string; name?: string } | null;
+      const id       = customer?.id ?? String(sAny.customerId ?? 'anon');
+      const name     = String(customer?.name ?? sAny.customerName ?? 'Client divers').substring(0, 22);
+      if (!map[id]) map[id] = { name, CA: 0, unpaid: 0 };
+      map[id].CA     += n(s.total);
+      map[id].unpaid += n(s.remainingAmount);
+    });
+    return Object.values(map).sort((a, b) => b.CA - a.CA).slice(0, 8).reverse();
+  }, [filteredSales]);
+
+  // ── Top fournisseurs by spend ─────────────────────────────────────────────
+  const topSuppliersData = useMemo(() => {
+    const map: Record<string, { name: string; total: number; unpaid: number }> = {};
+    filteredPurch.forEach(p => {
+      const pAny = p as unknown as Record<string, unknown>;
+      const sup  = pAny.supplier as { id?: string; name?: string } | null;
+      const id   = sup?.id ?? 'anon';
+      const name = String(sup?.name ?? 'Fournisseur divers').substring(0, 22);
+      if (!map[id]) map[id] = { name, total: 0, unpaid: 0 };
+      map[id].total  += n(p.total);
+      map[id].unpaid += n(p.remainingAmount);
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 8).reverse();
+  }, [filteredPurch]);
+
   const activeProds    = useMemo(() => products.filter(p => p.isActive),            [products]);
   const ruptureProds   = useMemo(() => products.filter(p => p.quantity <= 0),       [products]);
   const lowProds       = useMemo(() => products.filter(p => p.quantity > 0 && p.quantity <= p.minStock), [products]);
@@ -390,8 +427,8 @@ export function AnalyticsDashboard() {
       {/* ── Top bar: title + period filter ─────────────────────────────────── */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="app-page-title">Dashboard analytique</h1>
-          <p className="app-page-subtitle">Intelligence business en temps réel — Stockini</p>
+          <h1 className="app-page-title">Rapports — Analyse complète</h1>
+          <p className="app-page-subtitle">Vue financière et opérationnelle détaillée — Stockini</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -428,6 +465,23 @@ export function AnalyticsDashboard() {
           )}
         </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          KPI SECTION 0 — SYNTHÈSE FINANCIÈRE
+      ═══════════════════════════════════════════════════════════════════ */}
+      <section>
+        <SectionHead icon={DollarSign} title="Synthèse financière" />
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+          <KpiCard icon={DollarSign}    label="Chiffre d'affaires"    value={money(salesTotal)}          trend={trendPct(salesTotal, prevSalesTotal)}  color="orange" />
+          <KpiCard icon={TrendingUp}    label="Encaissements clients"  value={money(salesPaid)}           color="green" />
+          <KpiCard icon={AlertTriangle} label="Impayé clients"         value={money(salesUnpaid)}                                                       color="red" />
+          <KpiCard icon={TrendingUp}    label="Bénéfice estimé"        value={money(benefice)}            sub={`Marge : ${margeRate}%`}                 color={benefice >= 0 ? 'green' : 'red'} />
+          <KpiCard icon={ShoppingCart}  label="Total achats"           value={money(purchTotal)}          trend={trendPct(purchTotal, prevPurchTotal)}  color="blue" />
+          <KpiCard icon={Truck}         label="Dépenses fournisseurs"  value={money(purchPaid)}           sub={purchTotal > 0 ? `${((purchPaid / purchTotal) * 100).toFixed(0)}% réglé` : undefined} color="teal" />
+          <KpiCard icon={AlertTriangle} label="Impayé fournisseurs"    value={money(purchUnpaid)}                                                       color="orange" />
+          <KpiCard icon={Boxes}         label="Valeur stock (achat)"   value={money(stockPurchaseValue)}  sub={`Vente : ${money(stockSaleValue)}`}      color="purple" />
+        </div>
+      </section>
 
       {/* ═══════════════════════════════════════════════════════════════════
           KPI SECTION 1 — VENTES
@@ -742,6 +796,64 @@ export function AnalyticsDashboard() {
                   </table>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ─── ROW 5: Top Clients + Top Fournisseurs ────────────────────── */}
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+
+          {/* Top clients par CA */}
+          <Card className="shadow-card">
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Users size={14} className="text-accent" /> Top clients par chiffre d'affaires
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <ClientOnly>
+                {topClientsData.length === 0 ? (
+                  <p className="py-10 text-center text-xs text-text-muted">Aucune donnée disponible</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={topClientsData} layout="vertical" margin={{ top: 0, right: 12, bottom: 0, left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" horizontal={false} />
+                      <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: '#5A6A7E' }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Bar dataKey="CA" name="CA" fill="#E67E22" radius={[0, 4, 4, 0]} maxBarSize={18} />
+                      <Bar dataKey="unpaid" name="Impayé" fill="#EF4444" radius={[0, 4, 4, 0]} maxBarSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </ClientOnly>
+            </CardContent>
+          </Card>
+
+          {/* Top fournisseurs par dépenses */}
+          <Card className="shadow-card">
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Truck size={14} className="text-accent" /> Top fournisseurs par dépenses
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <ClientOnly>
+                {topSuppliersData.length === 0 ? (
+                  <p className="py-10 text-center text-xs text-text-muted">Aucune donnée disponible</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={topSuppliersData} layout="vertical" margin={{ top: 0, right: 12, bottom: 0, left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" horizontal={false} />
+                      <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: '#5A6A7E' }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Bar dataKey="total" name="Total achats" fill="#2563EB" radius={[0, 4, 4, 0]} maxBarSize={18} />
+                      <Bar dataKey="unpaid" name="Impayé" fill="#F59E0B" radius={[0, 4, 4, 0]} maxBarSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </ClientOnly>
             </CardContent>
           </Card>
         </div>

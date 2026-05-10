@@ -21,12 +21,42 @@ async function main() {
   };
 
   const roles = [
-    // ADMIN: wildcard covers everything, including sales.allow_low_margin
+    // ADMIN / SUPER_ADMIN: wildcard covers everything
     { name: 'ADMIN', permissions: ['*'] },
-    { name: 'STOCK_MANAGER', permissions: ['products:*', 'stock:*', 'alerts:*', 'reports:read'] },
-    // SELLER can sell but NOT override the 20% minimum margin
-    { name: 'SELLER', permissions: ['products:read', 'sales:*', 'customers:*', 'payments:*'] },
-    { name: 'PURCHASE_MANAGER', permissions: ['products:read', 'purchases:*', 'suppliers:*', 'payments:*'] },
+    { name: 'SUPER_ADMIN', permissions: ['*'] },
+    {
+      name: 'STOCK_MANAGER',
+      permissions: [
+        'dashboard.view',
+        'products.*',
+        'stock.*',
+        'alerts.*',
+        'reports.view',
+        'trash.view', 'trash.restore',
+      ],
+    },
+    {
+      // SELLER can sell but NOT override the 20% minimum margin
+      name: 'SELLER',
+      permissions: [
+        'dashboard.view',
+        'products.view',
+        'sales.view', 'sales.create', 'sales.update', 'sales.view_details',
+        'clients.*',
+        'payments.view', 'payments.create', 'payments.receive_client_payment',
+      ],
+    },
+    {
+      name: 'PURCHASE_MANAGER',
+      permissions: [
+        'dashboard.view',
+        'products.view',
+        'purchases.*',
+        'suppliers.*',
+        'payments.view', 'payments.create',
+        'expenses.*',
+      ],
+    },
   ];
 
   const roleByName = new Map<string, string>();

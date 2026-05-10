@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { hasPermission } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -35,29 +37,71 @@ interface Override {
 }
 
 const ROLES = [
-  { value: 'ADMIN', label: 'Administrateur' },
-  { value: 'STOCK_MANAGER', label: 'Responsable stock' },
-  { value: 'SELLER', label: 'Vendeur' },
+  { value: 'ADMIN',            label: 'Administrateur' },
+  { value: 'STOCK_MANAGER',    label: 'Responsable stock' },
+  { value: 'SELLER',           label: 'Vendeur' },
   { value: 'PURCHASE_MANAGER', label: 'Responsable achats' },
 ];
 
+// Display order for module sections
 const MODULE_ORDER = [
-  'dashboard', 'clients', 'produits', 'ventes', 'achats', 'fournisseurs',
-  'stock', 'paiements', 'rapports', 'alertes', 'settings', 'audit-logs',
-  'users', 'permissions',
+  'dashboard',
+  'clients',
+  'products',
+  'sales',
+  'purchases',
+  'suppliers',
+  'stock',
+  'payments',
+  'expenses',
+  'reports',
+  'alerts',
+  'settings',
+  'audit_logs',
+  'permissions',
+  'users',
+  'trash',
 ];
 
 const MODULE_LABELS: Record<string, string> = {
-  dashboard: 'Tableau de bord', clients: 'Clients', produits: 'Produits',
-  ventes: 'Ventes', achats: 'Achats', fournisseurs: 'Fournisseurs',
-  stock: 'Stock', paiements: 'Paiements', rapports: 'Rapports',
-  alertes: 'Alertes', settings: 'Paramètres', 'audit-logs': 'Audit logs',
-  users: 'Utilisateurs', permissions: 'Permissions',
+  dashboard:   'Tableau de bord',
+  clients:     'Clients',
+  products:    'Produits',
+  sales:       'Ventes',
+  purchases:   'Achats',
+  suppliers:   'Fournisseurs',
+  stock:       'Stock',
+  payments:    'Paiements clients',
+  expenses:    'Dépenses / Paiements fournisseurs',
+  reports:     'Rapports',
+  alerts:      'Alertes',
+  settings:    'Paramètres',
+  audit_logs:  'Audit logs',
+  permissions: 'Permissions',
+  users:       'Utilisateurs',
+  trash:       'Corbeille',
 };
 
 const ACTION_LABELS: Record<string, string> = {
-  read: 'Consulter', create: 'Créer', update: 'Modifier',
-  delete: 'Supprimer', validate: 'Valider',
+  view:                   'Consulter',
+  create:                 'Créer',
+  update:                 'Modifier',
+  delete:                 'Supprimer',
+  create_order:           'Créer commande',
+  create_receipt:         'Créer bon de réception',
+  create_invoice:         'Créer facture',
+  validate_receipt:       'Valider réception',
+  pay_supplier:           'Payer fournisseur',
+  receive_client_payment: 'Encaisser client',
+  adjust:                 'Ajuster stock',
+  transfer:               'Transférer stock',
+  'movements.view':       'Voir mouvements',
+  'financial.view':       'Voir rapports financiers',
+  export:                 'Exporter',
+  allow_low_margin:       'Autoriser marge < 20%',
+  view_details:           'Voir détails',
+  restore:                'Restaurer',
+  permanent_delete:       'Supprimer définitivement',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -70,17 +114,21 @@ function groupByModule(perms: Permission[]): Record<string, Permission[]> {
   }, {});
 }
 
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action;
+}
+
 // ─── Tab: Role Permissions ────────────────────────────────────────────────────
 
 function RolePermissionsTab({ permissions }: { permissions: Permission[] }) {
-  const [selectedRole, setSelectedRole] = useState('admin');
+  const [selectedRole, setSelectedRole] = useState('ADMIN');
   const [roleCodes, setRoleCodes] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const loadRolePerms = useCallback(async (role: string) => {
-    const res = await api.get(`/rbac/roles/${role}/permissions`);
-    setRoleCodes(new Set(res.data.map((p: Permission) => p.code)));
+    const res = await api.get<Permission[]>(`/rbac/roles/${role}/permissions`);
+    setRoleCodes(new Set(res.data.map((p) => p.code)));
   }, []);
 
   useEffect(() => { loadRolePerms(selectedRole); }, [selectedRole, loadRolePerms]);
@@ -89,6 +137,20 @@ function RolePermissionsTab({ permissions }: { permissions: Permission[] }) {
     setRoleCodes((prev) => {
       const next = new Set(prev);
       next.has(code) ? next.delete(code) : next.add(code);
+      return next;
+    });
+    setSaved(false);
+  }
+
+  function toggleModule(moduleCodes: string[]) {
+    const allChecked = moduleCodes.every((c) => roleCodes.has(c));
+    setRoleCodes((prev) => {
+      const next = new Set(prev);
+      if (allChecked) {
+        moduleCodes.forEach((c) => next.delete(c));
+      } else {
+        moduleCodes.forEach((c) => next.add(c));
+      }
       return next;
     });
     setSaved(false);
@@ -127,45 +189,59 @@ function RolePermissionsTab({ permissions }: { permissions: Permission[] }) {
       <Card className="mb-4">
         <CardContent className="py-4 text-sm text-muted-foreground">
           <span className="font-medium text-foreground">Rôle sélectionné :</span>{' '}
-          {ROLES.find((r) => r.value === selectedRole)?.label} — Cochez les permissions accordées par défaut à ce rôle.
+          {ROLES.find((r) => r.value === selectedRole)?.label} — Cochez les permissions accordées à ce rôle.
           Les Super Admin ont toutes les permissions sans restriction.
         </CardContent>
       </Card>
 
       <div className="space-y-4">
-        {MODULE_ORDER.filter((m) => grouped[m]).map((module) => (
-          <Card key={module}>
-            <CardHeader className="py-4">
-              <CardTitle className="text-base">{MODULE_LABELS[module] ?? module}</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {grouped[module].map((perm) => (
-                  <div
-                    key={perm.code}
-                    className="flex items-center gap-3 rounded-md border bg-background px-3 py-2"
-                  >
-                    <Checkbox
-                      checked={roleCodes.has(perm.code)}
-                      onCheckedChange={() => togglePerm(perm.code)}
-                      id={`perm-${perm.code}`}
-                    />
-                    <Label htmlFor={`perm-${perm.code}`} className="text-sm">
-                      {ACTION_LABELS[perm.action] ?? perm.action}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {MODULE_ORDER.filter((m) => grouped[m]).map((module) => {
+          const moduleCodes = grouped[module].map((p) => p.code);
+          const allChecked = moduleCodes.every((c) => roleCodes.has(c));
+          const someChecked = !allChecked && moduleCodes.some((c) => roleCodes.has(c));
+
+          return (
+            <Card key={module}>
+              <CardHeader className="py-3">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    checked={allChecked}
+                    data-state={someChecked ? 'indeterminate' : undefined}
+                    onCheckedChange={() => toggleModule(moduleCodes)}
+                    id={`module-${module}`}
+                    className={someChecked ? 'opacity-60' : ''}
+                  />
+                  <Label htmlFor={`module-${module}`} className="text-base font-semibold cursor-pointer">
+                    {MODULE_LABELS[module] ?? module}
+                  </Label>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {grouped[module].map((perm) => (
+                    <div
+                      key={perm.code}
+                      className="flex items-center gap-3 rounded-md border bg-background px-3 py-2"
+                    >
+                      <Checkbox
+                        checked={roleCodes.has(perm.code)}
+                        onCheckedChange={() => togglePerm(perm.code)}
+                        id={`perm-${perm.code}`}
+                      />
+                      <Label htmlFor={`perm-${perm.code}`} className="text-sm cursor-pointer">
+                        {actionLabel(perm.action)}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <div className="mt-6 flex items-center gap-3">
-        <Button
-          onClick={save}
-          disabled={saving}
-        >
+        <Button onClick={save} disabled={saving}>
           {saving ? 'Enregistrement…' : 'Enregistrer les permissions'}
         </Button>
         {saved && (
@@ -187,13 +263,13 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
-    api.get('/users').then((r) => setUsers(r.data));
+    api.get<User[]>('/users').then((r) => setUsers(r.data));
   }, []);
 
   async function selectUser(userId: string) {
     setSelectedUserId(userId);
     setSelectedUser(users.find((u) => u.id === userId) ?? null);
-    const res = await api.get(`/rbac/users/${userId}/overrides`);
+    const res = await api.get<Override[]>(`/rbac/users/${userId}/overrides`);
     setOverrides(res.data);
     setMsg('');
   }
@@ -202,12 +278,8 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
     if (!selectedUserId) return;
     setSaving(true);
     try {
-      await api.put('/rbac/users/overrides', {
-        userId: selectedUserId,
-        permissionCode: code,
-        granted,
-      });
-      const res = await api.get(`/rbac/users/${selectedUserId}/overrides`);
+      await api.put('/rbac/users/overrides', { userId: selectedUserId, permissionCode: code, granted });
+      const res = await api.get<Override[]>(`/rbac/users/${selectedUserId}/overrides`);
       setOverrides(res.data);
       setMsg('Override appliqué');
     } finally {
@@ -220,7 +292,7 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
     setSaving(true);
     try {
       await api.delete(`/rbac/users/${selectedUserId}/overrides/${encodeURIComponent(code)}`);
-      const res = await api.get(`/rbac/users/${selectedUserId}/overrides`);
+      const res = await api.get<Override[]>(`/rbac/users/${selectedUserId}/overrides`);
       setOverrides(res.data);
       setMsg('Override supprimé — permission héritée du rôle');
     } finally {
@@ -248,7 +320,7 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
           <option value="">-- Choisir un utilisateur --</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.fullName} ({typeof u.role === 'string' ? u.role : u.role.name}) {!u.isActive ? '— inactif' : ''}
+              {u.fullName} ({typeof u.role === 'string' ? u.role : u.role.name}){!u.isActive ? ' — inactif' : ''}
             </option>
           ))}
         </select>
@@ -258,18 +330,20 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
         <>
           <Card className="mb-4">
             <CardContent className="py-4 text-sm text-muted-foreground">
-              Rôle de base : <span className="font-medium text-foreground">{typeof selectedUser.role === 'string' ? selectedUser.role : selectedUser.role.name}</span> —
-              Les overrides ci-dessous écrasent les permissions du rôle pour cet utilisateur uniquement.
-              Un override <span className="font-semibold text-green-700">Forcer Oui</span> accorde la permission même si le rôle ne l'a pas.
-              Un override <span className="font-semibold text-red-700">Forcer Non</span> révoque la permission même si le rôle l'a.
-              Supprimez un override pour revenir au comportement du rôle.
+              Rôle de base :{' '}
+              <span className="font-medium text-foreground">
+                {typeof selectedUser.role === 'string' ? selectedUser.role : selectedUser.role.name}
+              </span>{' '}
+              — Les overrides ci-dessous écrasent les permissions du rôle pour cet utilisateur.
+              <span className="font-semibold text-green-700"> Forcer Oui</span> accorde même si le rôle ne l'a pas.
+              <span className="font-semibold text-red-700"> Forcer Non</span> révoque même si le rôle l'a.
             </CardContent>
           </Card>
 
           <div className="space-y-4">
             {MODULE_ORDER.filter((m) => grouped[m]).map((module) => (
               <Card key={module}>
-                <CardHeader className="py-4">
+                <CardHeader className="py-3">
                   <CardTitle className="text-base">{MODULE_LABELS[module] ?? module}</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -279,10 +353,12 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
                         const ov = overrideMap.get(perm.code);
                         return (
                           <TableRow key={perm.code}>
-                            <TableCell className="w-40 font-medium">
-                              {ACTION_LABELS[perm.action] ?? perm.action}
+                            <TableCell className="w-48 font-medium">
+                              {actionLabel(perm.action)}
                             </TableCell>
-                            <TableCell className="text-muted-foreground">{perm.description}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {perm.description}
+                            </TableCell>
                             <TableCell className="text-right">
                               {ov === undefined ? (
                                 <div className="flex gap-2 justify-end items-center flex-wrap">
@@ -299,7 +375,9 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
                                   <span
                                     className={cn(
                                       'text-xs font-semibold px-2 py-1 rounded-md border',
-                                      ov ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200',
+                                      ov
+                                        ? 'bg-green-50 text-green-700 border-green-200'
+                                        : 'bg-red-50 text-red-700 border-red-200',
                                     )}
                                   >
                                     Override : {ov ? 'Oui' : 'Non'}
@@ -320,32 +398,33 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
             ))}
           </div>
 
-          {msg && (
-            <p className="mt-4 text-sm text-green-700 font-medium">{msg}</p>
-          )}
-          {saving && (
-            <p className="mt-2 text-sm text-muted-foreground">Enregistrement…</p>
-          )}
+          {msg && <p className="mt-4 text-sm text-green-700 font-medium">{msg}</p>}
+          {saving && <p className="mt-2 text-sm text-muted-foreground">Enregistrement…</p>}
         </>
       )}
     </div>
   );
 }
 
-// ─── Page principale ─────────────────────────────────────────────────────────
+// ─── Page principale ──────────────────────────────────────────────────────────
 
 export default function PermissionsAdminPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<'roles' | 'users'>('roles');
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.get('/rbac/permissions')
+    if (!hasPermission('permissions.view')) {
+      router.replace('/dashboard');
+      return;
+    }
+    api.get<Permission[]>('/rbac/permissions')
       .then((r) => setPermissions(r.data))
       .catch(() => setError('Accès refusé ou erreur réseau'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [router]);
 
   if (loading) {
     return (
@@ -380,7 +459,7 @@ export default function PermissionsAdminPage() {
         </p>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'roles' | 'users')}>
         <TabsList>
           <TabsTrigger value="roles">Permissions par rôle</TabsTrigger>
           <TabsTrigger value="users">Exceptions par utilisateur</TabsTrigger>
