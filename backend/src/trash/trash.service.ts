@@ -208,14 +208,9 @@ export class TrashService {
     this.logger.log(`DELETE /trash/${entity}/${id}/permanent called`);
     switch (normalizedEntity) {
       case 'product': {
-        const linked = await this.prisma.saleItem.count({ where: { productId: id } });
-        if (linked > 0) {
-          throw new BadRequestException(
-            'Ce produit est lié à des ventes. Suppression permanente refusée.',
-          );
-        }
-        await this.prisma.product.delete({ where: { id } });
-        break;
+        throw new BadRequestException(
+          "Ce produit est lié à l'historique de stock. Il a été archivé au lieu d'être supprimé.",
+        );
       }
       case 'customer': {
         const sales = await this.prisma.sale.count({ where: { customerId: id } });

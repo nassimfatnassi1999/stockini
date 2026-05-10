@@ -116,14 +116,15 @@ export class ProductsService {
 
   async remove(id: string, userId?: string) {
     this.logger.log(`DELETE /products/${id} called by ${userId ?? 'unknown'}`);
-    const linkedCount = await this.prisma.saleItem.count({ where: { productId: id } });
-    if (linkedCount > 0) {
-      throw new BadRequestException(
-        'Ce produit est lié à des ventes. Suppression refusée.',
-      );
-    }
-    await this.prisma.product.delete({ where: { id } });
-    this.logger.log(`Product ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    await this.prisma.product.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        deletedBy: userId,
+        isActive: false,
+      },
+    });
+    this.logger.log(`Product ${id} archived by ${userId ?? 'unknown'}`);
     return { id };
   }
 
