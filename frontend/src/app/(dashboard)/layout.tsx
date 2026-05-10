@@ -1,8 +1,8 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { isAuthenticated } from '@/lib/auth';
+import { isAuthenticated, setLastRoute } from '@/lib/auth';
 import { AppSidebar } from '@/components/shared/AppSidebar';
 import { AppTopbar } from '@/components/shared/AppTopbar';
 import { Toaster } from '@/components/shared/Toaster';
@@ -11,12 +11,18 @@ import { SidebarProvider } from '@/components/shared/sidebar-context';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    // Vérification côté client comme filet de sécurité supplémentaire.
-    // La protection principale est dans middleware.ts (server-side).
-    if (!isAuthenticated()) router.push('/login');
+    if (!isAuthenticated()) {
+      router.push('/login');
+    }
   }, [router]);
+
+  // Persist the current route so we can restore it after login/refresh
+  useEffect(() => {
+    if (pathname) setLastRoute(pathname);
+  }, [pathname]);
 
   return (
     <SidebarProvider>

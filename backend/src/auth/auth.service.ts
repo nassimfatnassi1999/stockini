@@ -55,6 +55,40 @@ export class AuthService {
     };
   }
 
+  async refreshToken(token: string) {
+    try {
+      const payload = await this.jwtService.verifyAsync<{ sub: string; email: string; role: string }>(token, {
+        secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
+      });
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        include: { role: true },
+      });
+
+      if (!user || !user.isActive) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const newPayload = { sub: user.id, email: user.email, role: user.role.name };
+      const accessToken = await this.jwtService.signAsync(newPayload);
+      const permissions = this.extractPermissions(user.role.permissions);
+
+      return {
+        accessToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role.name,
+          permissions,
+        },
+      };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+  }
+
   async me(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },

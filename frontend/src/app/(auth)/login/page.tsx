@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { api } from '@/lib/api';
-import { setAuthSession } from '@/lib/auth';
+import { clearLastRoute, getLastRoute, setAuthSession } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -33,7 +34,18 @@ export default function LoginPage() {
     try {
       const response = await api.post('/auth/login', data);
       setAuthSession(response.data);
-      router.push('/dashboard');
+
+      const lastRoute = getLastRoute();
+      clearLastRoute();
+
+      if (rememberMe) {
+        // Signal to the session system that "remember me" is active
+        window.localStorage.setItem('remember_me', '1');
+      } else {
+        window.localStorage.removeItem('remember_me');
+      }
+
+      router.push(lastRoute ?? '/dashboard');
     } catch {
       setError('Email ou mot de passe incorrect');
     } finally {
@@ -60,6 +72,19 @@ export default function LoginPage() {
               <Label htmlFor="password">Mot de passe</Label>
               <Input id="password" {...register('password')} type="password" autoComplete="current-password" />
               {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                id="remember-me"
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+              />
+              <Label htmlFor="remember-me" className="cursor-pointer font-normal text-sm">
+                Se souvenir de moi
+              </Label>
             </div>
 
             {error && (

@@ -1,11 +1,24 @@
 import axios from 'axios';
 import { toast } from './toast';
+import { clearAuthSession, setAuthSession } from './auth';
 
 export const api = axios.create({
   baseURL: '/api',
   timeout: 15000,
   withCredentials: false,
 });
+
+// Queue of requests waiting for token refresh to complete
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
+
+function processQueue(error: unknown, token: string | null = null) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error);
+    else resolve(token!);
+  });
+  failedQueue = [];
+}
 
 api.interceptors.request.use((config) => {
   if (typeof window === 'undefined') return config;
@@ -19,13 +32,60 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
+    const originalRequest = error.config as typeof error.config & { _retry?: boolean };
     const status = error.response?.status;
+    const url: string = originalRequest?.url ?? '';
 
-    if (status === 401 && typeof window !== 'undefined' && !error.config?.url?.includes('/auth/login')) {
-      window.localStorage.removeItem('access_token');
-      window.localStorage.removeItem('refresh_token');
-      window.localStorage.removeItem('auth_user');
-      window.location.href = '/login';
+    // Handle 401: attempt silent refresh before logging out
+    if (
+      status === 401 &&
+      typeof window !== 'undefined' &&
+      !originalRequest._retry &&
+      !url.includes('/auth/login') &&
+      !url.includes('/auth/refresh')
+    ) {
+      // If already refreshing, queue this request
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers = originalRequest.headers ?? {};
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      const refreshToken = window.localStorage.getItem('refresh_token');
+      if (!refreshToken) {
+        clearAuthSession();
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
+      try {
+        // Use plain axios to avoid interceptor loop
+        const { data } = await axios.post<{ accessToken: string; user: Parameters<typeof setAuthSession>[0]['user'] }>(
+          '/api/auth/refresh',
+          { refreshToken },
+        );
+
+        setAuthSession({ accessToken: data.accessToken, user: data.user });
+        processQueue(null, data.accessToken);
+
+        originalRequest.headers = originalRequest.headers ?? {};
+        originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        clearAuthSession();
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
     }
 
     if (status === 403) {

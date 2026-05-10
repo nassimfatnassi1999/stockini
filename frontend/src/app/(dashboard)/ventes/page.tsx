@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, Eye, FileText, Printer, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, FileText, Printer, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { hasPermission } from '@/lib/auth';
+import { useDraftSave } from '@/lib/hooks/useDraftSave';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,6 +59,13 @@ const STATUS_COLORS: Record<string, string> = {
   RETURNED: 'border-orange-200 bg-orange-50 text-orange-700',
 };
 
+interface VenteDraft {
+  lines: RegisterLine[];
+  customerId: string;
+  paidAmount: string;
+  paymentMethod: string;
+}
+
 export default function VentesPage() {
   const queryClient = useQueryClient();
   const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
@@ -70,12 +78,46 @@ export default function VentesPage() {
   const [canDeleteSale, setCanDeleteSale] = useState(false);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
+  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
+  const [draftChecked, setDraftChecked] = useState(false);
 
   useEffect(() => {
     setAllowLowMargin(hasPermission(PERMISSION_LOW_MARGIN));
     setCanViewDetails(hasPermission(PERMISSION_VIEW_DETAILS));
     setCanDeleteSale(hasPermission(PERMISSION_DELETE_SALE));
   }, []);
+
+  // Auto-save hook — tracks form state changes
+  const draftData = useMemo<VenteDraft>(
+    () => ({ lines, customerId, paidAmount, paymentMethod }),
+    [lines, customerId, paidAmount, paymentMethod],
+  );
+  const { getDraft, hasDraft, clearDraft } = useDraftSave<VenteDraft>({
+    key: 'sales:vente',
+    data: draftData,
+  });
+
+  // On mount: check for existing draft and prompt user
+  useEffect(() => {
+    if (draftChecked) return;
+    setDraftChecked(true);
+    if (hasDraft()) setShowRestorePrompt(true);
+  }, [draftChecked, hasDraft]);
+
+  const handleRestoreDraft = () => {
+    const draft = getDraft();
+    if (!draft) return;
+    setLines(draft.lines?.length ? draft.lines : [createEmptyLine()]);
+    setCustomerId(draft.customerId ?? '');
+    setPaidAmount(draft.paidAmount ?? '');
+    setPaymentMethod(draft.paymentMethod ?? '');
+    setShowRestorePrompt(false);
+  };
+
+  const handleIgnoreDraft = () => {
+    clearDraft();
+    setShowRestorePrompt(false);
+  };
 
   const customersQuery = useQuery<Customer[]>({
     queryKey: ['customers'],
@@ -113,6 +155,7 @@ export default function VentesPage() {
     setCustomerId('');
     setPaidAmount('');
     setPaymentMethod('');
+    clearDraft();
   };
 
   const createMutation = useMutation({
@@ -159,6 +202,7 @@ export default function VentesPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       toast.success('Vente enregistrée avec succès');
+      clearDraft();
       resetForm();
     },
     onError: (error: unknown) => {
@@ -209,6 +253,24 @@ export default function VentesPage() {
 
   return (
     <div className="space-y-4">
+      {/* Draft restore banner */}
+      {showRestorePrompt && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-amber-800">
+            <RotateCcw size={15} className="shrink-0" />
+            <span>Un brouillon non enregistré a été trouvé. Voulez-vous le restaurer&nbsp;?</span>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleIgnoreDraft}>
+              Ignorer
+            </Button>
+            <Button size="sm" onClick={handleRestoreDraft}>
+              Restaurer
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Page header + PDF action buttons */}
       <div className="flex flex-wrap items-start gap-3 justify-between">
         <div>

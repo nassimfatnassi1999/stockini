@@ -23,6 +23,11 @@ export class UpdateProfileDto {
   prenom?: string;
 }
 
+export class RefreshTokenDto {
+  @IsString()
+  refreshToken!: string;
+}
+
 export class ChangePasswordDto {
   @IsOptional()
   @IsString()

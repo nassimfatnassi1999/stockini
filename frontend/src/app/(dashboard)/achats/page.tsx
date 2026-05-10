@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, ClipboardList, Eye, Package, ReceiptText, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, ClipboardList, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
+import { useDraftSave } from '@/lib/hooks/useDraftSave';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +23,15 @@ import type { DropdownOption, Purchase, Supplier } from '@/lib/stockini/types';
 
 type PurchaseDocType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE';
 type ReceptionMode = 'LIBRE' | 'FROM_COMMANDE';
+
+interface AchatDraft {
+  docType: PurchaseDocType;
+  receptionMode: ReceptionMode;
+  lines: import('@/lib/stockini/register-utils').RegisterLine[];
+  supplierId: string;
+  paidAmount: string;
+  paymentMethod: string;
+}
 
 function round3(v: number) {
   return Math.round(v * 1000) / 1000;
@@ -101,6 +111,8 @@ export default function AchatsPage() {
   const [showHistory, setShowHistory] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
+  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
+  const [draftChecked, setDraftChecked] = useState(false);
 
   const suppliersQuery = useQuery<Supplier[]>({
     queryKey: ['stockini-suppliers'],
@@ -122,6 +134,42 @@ export default function AchatsPage() {
     queryFn: () => stockiniApi.purchase(selectedCommandeId),
     enabled: !!selectedCommandeId && docType === 'BON_RECEPTION' && receptionMode === 'FROM_COMMANDE',
   });
+
+  // Auto-save — disabled in FROM_COMMANDE mode (lines are auto-populated from commande)
+  const draftData = useMemo<AchatDraft>(
+    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod }),
+    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod],
+  );
+  const draftEnabled = receptionMode !== 'FROM_COMMANDE';
+  const { getDraft, hasDraft, clearDraft } = useDraftSave<AchatDraft>({
+    key: 'purchases:achat',
+    data: draftData,
+    enabled: draftEnabled,
+  });
+
+  // Check for existing draft on first render
+  useEffect(() => {
+    if (draftChecked) return;
+    setDraftChecked(true);
+    if (hasDraft()) setShowRestorePrompt(true);
+  }, [draftChecked, hasDraft]);
+
+  const handleRestoreDraft = () => {
+    const draft = getDraft();
+    if (!draft) return;
+    setDocType(draft.docType ?? 'BON_COMMANDE');
+    setReceptionMode(draft.receptionMode ?? 'LIBRE');
+    setLines(draft.lines?.length ? draft.lines : [createEmptyLine()]);
+    setSupplierId(draft.supplierId ?? '');
+    setPaidAmount(draft.paidAmount ?? '');
+    setPaymentMethod(draft.paymentMethod ?? '');
+    setShowRestorePrompt(false);
+  };
+
+  const handleIgnoreDraft = () => {
+    clearDraft();
+    setShowRestorePrompt(false);
+  };
 
   const commandesToReceptionner = (purchasesQuery.data ?? []).filter(
     (p) => p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED',
@@ -213,6 +261,7 @@ export default function AchatsPage() {
     setPaymentMethod('');
     setSelectedCommandeId('');
     setCommandeLineMap({});
+    clearDraft();
   };
 
   const handleDocTypeChange = (type: PurchaseDocType) => {
@@ -313,6 +362,7 @@ export default function AchatsPage() {
             ? 'Bon de réception validé — stock mis à jour'
             : 'Facture enregistrée';
       toast.success(label);
+      clearDraft();
       resetForm();
     },
     onError: (error: unknown) => {
@@ -365,6 +415,24 @@ export default function AchatsPage() {
 
   return (
     <div className="space-y-4">
+      {/* Draft restore banner */}
+      {showRestorePrompt && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-amber-800">
+            <RotateCcw size={15} className="shrink-0" />
+            <span>Un brouillon non enregistré a été trouvé. Voulez-vous le restaurer&nbsp;?</span>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleIgnoreDraft}>
+              Ignorer
+            </Button>
+            <Button size="sm" onClick={handleRestoreDraft}>
+              Restaurer
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Page header + document type buttons */}
       <div className="flex flex-wrap items-start gap-3 justify-between">
         <div>

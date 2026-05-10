@@ -77,3 +77,24 @@ export function clearAuthSession() {
   window.localStorage.removeItem('refresh_token');
   window.localStorage.removeItem('auth_user');
 }
+
+// ── Last route tracking (for post-login redirect) ──────────────────────────
+
+const LAST_ROUTE_KEY = 'app_last_route';
+const IGNORED_ROUTES = ['/login', '/', '/dashboard'];
+
+export function setLastRoute(pathname: string) {
+  if (typeof window === 'undefined') return;
+  if (IGNORED_ROUTES.includes(pathname)) return;
+  window.localStorage.setItem(LAST_ROUTE_KEY, pathname);
+}
+
+export function getLastRoute(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(LAST_ROUTE_KEY);
+}
+
+export function clearLastRoute() {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(LAST_ROUTE_KEY);
+}
