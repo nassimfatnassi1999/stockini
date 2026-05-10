@@ -407,7 +407,6 @@ function ProductModal({
   categoryOptions,
   brandOptions,
   supplierOptions,
-  locationOptions,
   onClose,
   onSubmit,
   saving,
@@ -415,7 +414,6 @@ function ProductModal({
   categoryOptions: Array<{ value: string; label: string }>;
   brandOptions: Array<{ value: string; label: string }>;
   supplierOptions: Array<{ value: string; label: string }>;
-  locationOptions: Array<{ value: string; label: string }>;
   onClose: () => void;
   onSubmit: (form: ProductFormState) => void;
   saving: boolean;
@@ -508,10 +506,12 @@ function ProductModal({
           {/* Emplacement */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-location">Emplacement</Label>
-            <select id="pf-location" value={form.location} onChange={set('location')} className="app-select">
-              <option value="">Sélectionner</option>
-              {locationOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <Input
+              id="pf-location"
+              value={form.location}
+              onChange={set('location')}
+              placeholder="Saisir un emplacement"
+            />
           </div>
 
           {/* Prix d'achat HT — editable */}
@@ -600,7 +600,6 @@ export function ProductsPage() {
   const categories = useQuery({ queryKey: ['stockini-categories'], queryFn: stockiniApi.categories });
   const brands = useQuery({ queryKey: ['stockini-brands'], queryFn: stockiniApi.brands });
   const suppliers = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
-  const locationOptions = useDropdownOptions('stock_locations');
   const data = query.data ?? [];
 
   const createMutation = useMutation({
@@ -613,7 +612,7 @@ export function ProductsPage() {
         purchasePrice: Number(form.purchasePrice),
         quantity: Number(form.quantity),
         minStock: Number(form.minStock),
-        ...(form.location && { location: form.location }),
+        ...(form.location.trim() && { location: form.location.trim() }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
@@ -707,7 +706,6 @@ export function ProductsPage() {
           categoryOptions={(categories.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
           brandOptions={(brands.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
           supplierOptions={(suppliers.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
-          locationOptions={locationOptions}
           onClose={() => setModalOpen(false)}
           onSubmit={(form) => createMutation.mutate(form)}
           saving={createMutation.isPending}

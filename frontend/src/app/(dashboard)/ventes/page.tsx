@@ -19,7 +19,9 @@ import {
   generatePlaceholderPdf,
   isFilledLine,
   MIN_MARGIN_PERCENT,
+  recalculateLine,
   type DocumentType,
+  type DocumentTotals,
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
 import { money } from '@/lib/stockini/format';
@@ -62,14 +64,17 @@ const STATUS_COLORS: Record<string, string> = {
 interface VenteDraft {
   lines: RegisterLine[];
   customerId: string;
+  saleDate: string;
   paidAmount: string;
   paymentMethod: string;
+  totals: DocumentTotals;
 }
 
 export default function VentesPage() {
   const queryClient = useQueryClient();
   const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
   const [customerId, setCustomerId] = useState('');
+  const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [showHistory, setShowHistory] = useState(true);
@@ -87,14 +92,20 @@ export default function VentesPage() {
     setCanDeleteSale(hasPermission(PERMISSION_DELETE_SALE));
   }, []);
 
+  const filledLines = lines.filter(isFilledLine);
+  const totals = calculateDocumentTotals(lines);
+  const paidAmountNum = Number(paidAmount) || 0;
+
   // Auto-save hook — tracks form state changes
   const draftData = useMemo<VenteDraft>(
-    () => ({ lines, customerId, paidAmount, paymentMethod }),
-    [lines, customerId, paidAmount, paymentMethod],
+    () => ({ lines, customerId, saleDate, paidAmount, paymentMethod, totals }),
+    [lines, customerId, saleDate, paidAmount, paymentMethod, totals],
   );
+  const draftEnabled = draftChecked && !showRestorePrompt;
   const { getDraft, hasDraft, clearDraft } = useDraftSave<VenteDraft>({
     key: 'sales:vente',
     data: draftData,
+    enabled: draftEnabled,
   });
 
   // On mount: check for existing draft and prompt user
@@ -106,9 +117,31 @@ export default function VentesPage() {
 
   const handleRestoreDraft = () => {
     const draft = getDraft();
-    if (!draft) return;
-    setLines(draft.lines?.length ? draft.lines : [createEmptyLine()]);
+    if (!draft) {
+      setShowRestorePrompt(false);
+      toast.info('Aucun brouillon à restaurer');
+      return;
+    }
+    console.log('Draft trouvé :', draft);
+    setLines(
+      draft.lines?.length
+        ? draft.lines.map((line) =>
+            recalculateLine({
+              ...createEmptyLine(),
+              ...line,
+              id: line.id || crypto.randomUUID(),
+              productId: line.productId ?? null,
+              quantity: Number(line.quantity) || 0,
+              puHt: Number(line.puHt) || 0,
+              purchasePriceHt: Number(line.purchasePriceHt) || 0,
+              remisePercent: Number(line.remisePercent) || 0,
+              tvaPercent: Number(line.tvaPercent) || 0,
+            }),
+          )
+        : [createEmptyLine()],
+    );
     setCustomerId(draft.customerId ?? '');
+    setSaleDate(draft.saleDate ?? new Date().toISOString());
     setPaidAmount(draft.paidAmount ?? '');
     setPaymentMethod(draft.paymentMethod ?? '');
     setShowRestorePrompt(false);
@@ -137,10 +170,6 @@ export default function VentesPage() {
         .then((r) => r.data),
   });
 
-  const filledLines = lines.filter(isFilledLine);
-  const totals = calculateDocumentTotals(lines);
-  const paidAmountNum = Number(paidAmount) || 0;
-
   const invalidMarginLines = filledLines.filter(
     (l) => l.productId !== null && (l.purchasePriceHt <= 0 || (l.margePercent !== null && l.margePercent < MIN_MARGIN_PERCENT)),
   );
@@ -153,6 +182,7 @@ export default function VentesPage() {
   const resetForm = () => {
     setLines([createEmptyLine()]);
     setCustomerId('');
+    setSaleDate(new Date().toISOString());
     setPaidAmount('');
     setPaymentMethod('');
     clearDraft();
@@ -243,7 +273,7 @@ export default function VentesPage() {
     generatePlaceholderPdf(type);
   };
 
-  const today = new Date().toLocaleDateString('fr-TN', {
+  const today = new Date(saleDate).toLocaleDateString('fr-TN', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',

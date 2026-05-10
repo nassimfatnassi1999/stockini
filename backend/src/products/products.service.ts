@@ -2,7 +2,6 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
-import { SettingsService } from '../settings/settings.service';
 import {
   calcPurchasePriceTtc,
   calcSalePrice,
@@ -20,11 +19,9 @@ export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
-    private readonly settings: SettingsService,
   ) {}
 
   async create(dto: CreateProductDto) {
-    await this.settings.assertActiveOption('stock_locations', dto.location);
     const derivedPrices = this.derivePrices(dto.purchasePrice);
     return this.prisma.$transaction(async (tx) => {
       const reference = await this.references.generate('PRD', 'product', tx);
@@ -90,7 +87,6 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto) {
-    await this.settings.assertActiveOption('stock_locations', dto.location);
     if (dto.sku !== undefined) {
       throw new BadRequestException('Product reference cannot be edited');
     }
