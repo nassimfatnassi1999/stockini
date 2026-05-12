@@ -19,7 +19,7 @@ export function Toaster() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed right-5 top-5 z-[9999] flex w-full max-w-[380px] flex-col gap-2">
+    <div className="pointer-events-none fixed right-5 top-5 z-[9999] flex w-full max-w-[400px] flex-col gap-2">
       {toasts.map((t) => {
         const { icon: Icon, color, bg, border } = CONFIG[t.type];
         return (
@@ -29,9 +29,19 @@ export function Toaster() {
             style={{ background: bg, borderColor: border }}
           >
             <Icon size={16} style={{ color, flexShrink: 0, marginTop: 1 }} />
-            <span className="flex-1 text-[13px] leading-5 text-text-primary">
-              {t.message}
-            </span>
+            <div className="flex-1 min-w-0">
+              <span className="block text-[13px] leading-5 text-text-primary">{t.message}</span>
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={() => { t.action!.onClick(); }}
+                  className="mt-1.5 text-[12px] font-medium underline underline-offset-2 transition-opacity hover:opacity-70"
+                  style={{ color }}
+                >
+                  {t.action.label}
+                </button>
+              )}
+            </div>
             <X
               size={14}
               className="mt-0.5 flex-shrink-0 cursor-pointer"

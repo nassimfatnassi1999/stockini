@@ -1,9 +1,15 @@
 type ToastType = 'success' | 'error' | 'warning' | 'info';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastItem {
   id: string;
   type: ToastType;
   message: string;
+  action?: ToastAction;
 }
 
 type Listener = (toasts: ToastItem[]) => void;
@@ -15,11 +21,11 @@ function notify() {
   listeners.forEach((l) => l([...toasts]));
 }
 
-function add(type: ToastType, message: string) {
+function add(type: ToastType, message: string, action?: ToastAction) {
   const id = `${Date.now()}-${Math.random()}`;
-  toasts = [...toasts, { id, type, message }];
+  toasts = [...toasts, { id, type, message, action }];
   notify();
-  setTimeout(() => remove(id), 4000);
+  setTimeout(() => remove(id), 6000);
 }
 
 function remove(id: string) {
@@ -28,10 +34,10 @@ function remove(id: string) {
 }
 
 export const toast = {
-  success: (message: string) => add('success', message),
-  error: (message: string) => add('error', message),
-  warning: (message: string) => add('warning', message),
-  info: (message: string) => add('info', message),
+  success: (message: string, action?: ToastAction) => add('success', message, action),
+  error: (message: string, action?: ToastAction) => add('error', message, action),
+  warning: (message: string, action?: ToastAction) => add('warning', message, action),
+  info: (message: string, action?: ToastAction) => add('info', message, action),
 };
 
 export function subscribeToasts(listener: Listener): () => void {

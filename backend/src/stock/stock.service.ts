@@ -78,12 +78,7 @@ export class StockService {
         where: { id: dto.productId },
         data: { quantity: dto.newQuantity },
       });
-      await this.ensureStockAlert(
-        tx,
-        dto.productId,
-        dto.newQuantity,
-        product.minStock,
-      );
+      await this.ensureStockAlert(tx, product, dto.newQuantity);
       return movement;
     });
   }
@@ -140,12 +135,7 @@ export class StockService {
       where: { id: input.productId },
       data: { quantity: newQuantity },
     });
-    await this.ensureStockAlert(
-      client,
-      input.productId,
-      newQuantity,
-      product.minStock,
-    );
+    await this.ensureStockAlert(client, product, newQuantity);
     return movement;
   }
 
@@ -173,20 +163,34 @@ export class StockService {
 
   private async ensureStockAlert(
     client: DbClient,
-    productId: string,
+    product: { id: string; name: string; reference: string; minStock: number },
     quantity: number,
-    minStock: number,
   ) {
-    if (quantity > minStock) {
+    if (quantity > product.minStock) {
       return;
     }
 
+    const alertDate = new Date();
+    const alertType = quantity === 0 ? AlertType.OUT_OF_STOCK : AlertType.LOW_STOCK;
     await client.alert.create({
       data: {
-        productId,
-        type: quantity === 0 ? AlertType.OUT_OF_STOCK : AlertType.LOW_STOCK,
-        title: quantity === 0 ? 'Produit en rupture' : 'Stock faible',
-        message: `Le stock du produit est ${quantity}, seuil minimum ${minStock}.`,
+        productId: product.id,
+        designation: product.name,
+        reference: product.reference,
+        currentStock: quantity,
+        minimumStock: product.minStock,
+        type: alertType,
+        title: quantity === 0 ? 'Produit en rupture de stock' : 'Stock faible détecté',
+        message: [
+          `Produit : ${product.name}`,
+          `Référence : ${product.reference}`,
+          `Stock actuel : ${quantity}`,
+          `Seuil minimum : ${product.minStock}`,
+          `Date de l'alerte : ${alertDate.toLocaleString('fr-FR')}`,
+          '',
+          `Alerte : le stock est ${quantity === 0 ? 'épuisé' : 'inférieur ou égal au seuil minimum'}.`,
+        ].join('\n'),
+        createdAt: alertDate,
       },
     });
   }

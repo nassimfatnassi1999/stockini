@@ -6,6 +6,10 @@ export type NotificationItem = {
   type: 'INTERVENTION_TOMORROW' | string;
   title: string;
   message: string;
+  designation?: string | null;
+  reference?: string | null;
+  currentStock?: number | null;
+  minimumStock?: number | null;
   entityType: string;
   entityId: string | null;
   entityRef: string | null;
@@ -18,13 +22,29 @@ export type NotificationItem = {
 };
 
 export async function getNotifications() {
-  const response = await api.get<Array<{ id: string; type: string; title: string; message: string; isRead: boolean; productId?: string | null; createdAt: string }>>('/alerts');
+  const response = await api.get<Array<{
+    id: string;
+    type: string;
+    title: string;
+    message: string;
+    designation?: string | null;
+    reference?: string | null;
+    currentStock?: number | null;
+    minimumStock?: number | null;
+    isRead: boolean;
+    productId?: string | null;
+    createdAt: string;
+  }>>('/alerts');
   return response.data.map((alert) => ({
     id: alert.id,
     userId: null,
     type: alert.type,
     title: alert.title,
     message: alert.message,
+    designation: alert.designation,
+    reference: alert.reference,
+    currentStock: alert.currentStock,
+    minimumStock: alert.minimumStock,
     entityType: 'alert',
     entityId: alert.productId ?? null,
     entityRef: null,

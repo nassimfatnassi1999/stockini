@@ -28,7 +28,9 @@ export class AlertsService {
   }
 
   async update(id: string, dto: UpdateAlertDto) {
-    await this.settings.assertActiveOption('alert_types', dto.type);
+    if (dto.type) {
+      await this.settings.assertActiveOption('alert_types', dto.type);
+    }
     return this.prisma.alert.update({
       where: { id },
       data: dto,

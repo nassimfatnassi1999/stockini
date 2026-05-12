@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, CheckCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCheck, Trash2 } from 'lucide-react';
 import {
   deleteAllNotifications,
   deleteNotification,
@@ -160,6 +160,11 @@ export function NotificationsDropdown() {
             ) : (
               notifications.map((notification) => {
                 const unreadItem = !notification.readAt;
+                const hasStockDetails =
+                  notification.designation ||
+                  notification.reference ||
+                  notification.currentStock != null ||
+                  notification.minimumStock != null;
                 return (
                   <button
                     key={notification.id}
@@ -169,18 +174,32 @@ export function NotificationsDropdown() {
                       unreadItem ? 'bg-orange-50 hover:bg-orange-100' : 'bg-white hover:bg-muted'
                     }`}
                   >
-                    <span
-                      className={`mt-1 h-2 w-2 flex-none rounded-full ${
-                        unreadItem ? 'bg-primary' : 'bg-transparent'
-                      }`}
-                    />
+                    <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-red-50 text-red-600">
+                      <AlertTriangle size={14} />
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-text-primary">
                         {notification.title}
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-text-secondary">
-                        {notification.message}
-                      </span>
+                      {hasStockDetails ? (
+                        <span className="mt-1 grid gap-0.5 text-xs leading-5 text-text-secondary">
+                          {notification.designation && <span>Produit : {notification.designation}</span>}
+                          {notification.reference && <span>Référence : {notification.reference}</span>}
+                          {notification.currentStock !== null && notification.currentStock !== undefined && (
+                            <span className={notification.currentStock <= 0 ? 'font-semibold text-red-700' : 'font-semibold text-orange-700'}>
+                              Stock actuel : {notification.currentStock}
+                            </span>
+                          )}
+                          {notification.minimumStock !== null && notification.minimumStock !== undefined && (
+                            <span>Seuil minimum : {notification.minimumStock}</span>
+                          )}
+                          <span>Alerte : le stock est inférieur au seuil minimum.</span>
+                        </span>
+                      ) : (
+                        <span className="mt-1 block whitespace-pre-line text-xs leading-5 text-text-secondary">
+                          {notification.message}
+                        </span>
+                      )}
                       <span className="mt-1 block text-[11px] font-medium text-text-muted">
                         {formatNotificationDate(notification.createdAt)}
                       </span>

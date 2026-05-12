@@ -1,5 +1,5 @@
 import { AlertType } from '@prisma/client';
-import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class CreateAlertDto {
   @IsEnum(AlertType)
@@ -14,6 +14,22 @@ export class CreateAlertDto {
   @IsOptional()
   @IsString()
   productId?: string;
+
+  @IsOptional()
+  @IsString()
+  designation?: string;
+
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
+  @IsOptional()
+  @IsInt()
+  currentStock?: number;
+
+  @IsOptional()
+  @IsInt()
+  minimumStock?: number;
 }
 
 export class UpdateAlertDto {
@@ -32,6 +48,22 @@ export class UpdateAlertDto {
   @IsOptional()
   @IsString()
   productId?: string;
+
+  @IsOptional()
+  @IsString()
+  designation?: string;
+
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
+  @IsOptional()
+  @IsInt()
+  currentStock?: number;
+
+  @IsOptional()
+  @IsInt()
+  minimumStock?: number;
 
   @IsOptional()
   @IsBoolean()

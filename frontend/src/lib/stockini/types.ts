@@ -160,6 +160,73 @@ export interface Payment {
   deletedBy?: string | null;
 }
 
+export type SalesDocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE';
+export type EmailStatus = 'PENDING' | 'SENT' | 'FAILED';
+export type DocumentStatus = 'GENERATED' | 'SENT' | 'DELETED';
+
+export interface GeneratedDocument {
+  id: Id;
+  invoiceId: Id;
+  clientId?: Id | null;
+  clientName?: string | null;
+  documentType: SalesDocumentType;
+  documentNumber: string;
+  fileName: string;
+  minioBucket: string;
+  minioObjectKey: string;
+  fileSize?: number | null;
+  mimeType: string;
+  totalHt?: number | string | null;
+  totalTva?: number | string | null;
+  totalTtc?: number | string | null;
+  generatedBy?: Id | null;
+  generatedAt: string;
+  status: DocumentStatus;
+  deletedAt?: string | null;
+  emailStatus: EmailStatus;
+  sentAt?: string | null;
+  sentTo?: string | null;
+  sale?: {
+    invoiceNumber: string;
+    subtotal?: number | string | null;
+    tax?: number | string | null;
+    total?: number | string | null;
+    customer?: { name: string; email?: string | null } | null;
+  } | null;
+  generator?: { fullName: string } | null;
+  emailLogs?: DocumentEmailLog[];
+}
+
+export interface DocumentEmailLog {
+  id: Id;
+  documentId: Id;
+  recipientEmail: string;
+  cc?: string | null;
+  bcc?: string | null;
+  subject: string;
+  message?: string | null;
+  sentAt: string;
+  sentBy?: Id | null;
+  status: EmailStatus;
+  errorMessage?: string | null;
+  createdAt: string;
+}
+
+export interface DocumentsListResponse {
+  data: GeneratedDocument[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface EmailPreview {
+  to: string;
+  subject: string;
+  body: string;
+  attachments: Array<{ documentId: Id; fileName: string }>;
+}
+
 export type TrashEntityType = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment';
 
 export interface TrashItem {
@@ -180,6 +247,11 @@ export interface Alert {
   type: string;
   title: string;
   message: string;
+  productId?: Id | null;
+  designation?: string | null;
+  reference?: string | null;
+  currentStock?: number | null;
+  minimumStock?: number | null;
   isRead: boolean;
   createdAt: string;
   product?: Product | null;

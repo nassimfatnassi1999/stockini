@@ -66,6 +66,25 @@ enum AlertType {
   SYSTEM
 }
 
+enum DocumentType {
+  DEVIS
+  BON_COMMANDE
+  BON_LIVRAISON
+  FACTURE
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum DocumentStatus {
+  GENERATED
+  SENT
+  DELETED
+}
+
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
@@ -76,10 +95,12 @@ model User {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   role           Role            @relation(fields: [roleId], references: [id])
-  stockMovements StockMovement[]
-  sales          Sale[]          @relation("SellerSales")
-  purchases      Purchase[]      @relation("CreatorPurchases")
-  auditLogs      AuditLog[]
+  stockMovements     StockMovement[]
+  sales              Sale[]              @relation("SellerSales")
+  purchases          Purchase[]          @relation("CreatorPurchases")
+  auditLogs          AuditLog[]
+  generatedDocuments GeneratedDocument[]
+  documentEmailLogs  DocumentEmailLog[]
 
   @@index([roleId])
 }
@@ -228,8 +249,9 @@ model Sale {
   deletedBy       String?
   customer        Customer?     @relation(fields: [customerId], references: [id])
   seller          User?         @relation("SellerSales", fields: [sellerId], references: [id])
-  items           SaleItem[]
-  payments        Payment[]
+  items               SaleItem[]
+  payments            Payment[]
+  generatedDocuments  GeneratedDocument[]
 
   @@index([customerId])
   @@index([sellerId])
@@ -323,18 +345,77 @@ model Payment {
 }
 
 model Alert {
-  id        String    @id @default(cuid())
-  type      AlertType
-  title     String
-  message   String
-  productId String?
-  isRead    Boolean   @default(false)
-  createdAt DateTime  @default(now())
-  product   Product?  @relation(fields: [productId], references: [id])
+  id           String    @id @default(cuid())
+  type         AlertType
+  title        String
+  message      String
+  productId    String?
+  designation  String?
+  reference    String?
+  currentStock Int?      @map("current_stock")
+  minimumStock Int?      @map("minimum_stock")
+  isRead       Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  product      Product?  @relation(fields: [productId], references: [id])
 
   @@index([type])
   @@index([isRead])
   @@index([createdAt])
+  @@index([productId])
+}
+
+model GeneratedDocument {
+  id             String         @id @default(cuid())
+  invoiceId      String
+  clientId       String?
+  clientName     String?
+  documentType   DocumentType
+  documentNumber String         @unique
+  fileName       String
+  minioBucket    String
+  minioObjectKey String
+  fileSize       Int?
+  mimeType       String         @default("application/pdf")
+  totalHt        Decimal?       @db.Decimal(12, 3)
+  totalTva       Decimal?       @db.Decimal(12, 3)
+  totalTtc       Decimal?       @db.Decimal(12, 3)
+  generatedBy    String?
+  generatedAt    DateTime       @default(now())
+  status         DocumentStatus @default(GENERATED)
+  deletedAt      DateTime?
+  emailStatus    EmailStatus    @default(PENDING)
+  sentAt         DateTime?
+  sentTo         String?
+  sale           Sale           @relation(fields: [invoiceId], references: [id])
+  generator      User?          @relation(fields: [generatedBy], references: [id])
+  emailLogs      DocumentEmailLog[]
+
+  @@index([invoiceId])
+  @@index([clientId])
+  @@index([generatedAt])
+  @@index([emailStatus])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model DocumentEmailLog {
+  id             String            @id @default(cuid())
+  documentId     String
+  recipientEmail String
+  cc             String?
+  bcc            String?
+  subject        String
+  message        String?
+  sentAt         DateTime          @default(now())
+  sentBy         String?
+  status         EmailStatus
+  errorMessage   String?
+  createdAt      DateTime          @default(now())
+  document       GeneratedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sentByUser     User?             @relation(fields: [sentBy], references: [id])
+
+  @@index([documentId])
+  @@index([sentAt])
 }
 
 model AuditLog {

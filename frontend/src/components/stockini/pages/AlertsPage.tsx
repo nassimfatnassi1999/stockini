@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { AlertTriangle, Plus } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, statusLabel } from '@/lib/stockini/format';
@@ -12,9 +13,30 @@ import { CrudModal } from '../shared/CrudModal';
 import { PageHeader } from '../shared/PageHeader';
 import { RowActions } from '../shared/RowActions';
 import { SimpleTable } from '../shared/SimpleTable';
-import { Status } from '../shared/Status';
 import { cleanPayload, emptyForm, useDropdownOptions } from '../shared/form-utils';
 import type { FieldConfig } from '../shared/form-utils';
+
+function stockValueClass(currentStock: number | null, minimumStock: number | null) {
+  if (currentStock === null || minimumStock === null) return 'text-slate-700';
+  if (currentStock <= 0) return 'font-semibold text-red-700';
+  if (currentStock <= minimumStock) return 'font-semibold text-orange-700';
+  return 'text-slate-700';
+}
+
+function AlertStatusBadge({ isRead }: { isRead: boolean }) {
+  return (
+    <Badge
+      className={
+        isRead
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : 'border-red-200 bg-red-50 text-red-700'
+      }
+    >
+      <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${isRead ? 'bg-emerald-500' : 'bg-red-500'}`} />
+      {isRead ? 'Lue' : 'Non lue'}
+    </Badge>
+  );
+}
 
 export function AlertsPage() {
   const queryClient = useQueryClient();
@@ -28,7 +50,9 @@ export function AlertsPage() {
   ];
   const [form, setForm] = useState<Record<string, string | boolean>>(emptyForm(fields));
   const query = useQuery({ queryKey: ['stockini-alerts'], queryFn: stockiniApi.alerts });
-  const data = query.data ?? [];
+  const data = [...(query.data ?? [])].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
   const saveMutation = useMutation({
     mutationFn: () => {
       const payload = cleanPayload(form, fields) as Partial<Alert>;
@@ -62,23 +86,39 @@ export function AlertsPage() {
         subtitle=""
         loading={query.isLoading}
         error={query.error}
-        headers={['Date', 'Type', 'Titre', 'Message', 'Statut', 'Actions']}
-        rows={data.map((alert: Alert) => [
-          dateTime(alert.createdAt),
-          statusLabel(alert.type),
-          alert.title,
-          alert.message,
-          <Status key="read" value={alert.isRead ? 'READ' : 'OPEN'} />,
-          <RowActions
-            key="actions"
-            onEdit={() => {
-              setEditing(alert);
-              setForm({ type: alert.type, title: alert.title, message: alert.message, isRead: alert.isRead });
-            }}
-            onDelete={() => deleteMutation.mutate(alert.id)}
-            deleting={deleteMutation.isPending}
-          />,
-        ])}
+        headers={['Date', 'Type', 'Produit', 'Référence', 'Stock actuel', 'Seuil minimum', 'Message', 'Statut', 'Actions']}
+        rows={data.map((alert: Alert) => {
+          const designation = alert.designation ?? alert.product?.name ?? '-';
+          const reference = alert.reference ?? alert.product?.reference ?? '-';
+          const currentStock = alert.currentStock ?? alert.product?.quantity ?? null;
+          const minimumStock = alert.minimumStock ?? alert.product?.minStock ?? null;
+          const quantityClass = stockValueClass(currentStock, minimumStock);
+
+          return [
+            dateTime(alert.createdAt),
+            <span key="type" className="inline-flex items-center gap-1.5 font-medium text-red-700">
+              <AlertTriangle size={14} />
+              {statusLabel(alert.type)}
+            </span>,
+            <span key="product" className="font-medium text-slate-900">{designation}</span>,
+            <span key="reference" className="font-mono text-xs text-slate-700">{reference}</span>,
+            <span key="currentStock" className={quantityClass}>{currentStock ?? '-'}</span>,
+            <span key="minimumStock" className="font-medium text-slate-700">{minimumStock ?? '-'}</span>,
+            <span key="message" className="block max-w-[340px] whitespace-pre-line text-xs leading-5 text-slate-600">
+              {alert.message}
+            </span>,
+            <AlertStatusBadge key="read" isRead={alert.isRead} />,
+            <RowActions
+              key="actions"
+              onEdit={() => {
+                setEditing(alert);
+                setForm({ type: alert.type, title: alert.title, message: alert.message, isRead: alert.isRead });
+              }}
+              onDelete={() => deleteMutation.mutate(alert.id)}
+              deleting={deleteMutation.isPending}
+            />,
+          ];
+        })}
       />
       {editing && (
         <CrudModal

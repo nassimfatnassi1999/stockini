@@ -4,16 +4,35 @@ services:
     container_name: stockini-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: stockpro
-      POSTGRES_USER: stockpro
-      POSTGRES_PASSWORD: stockpro_password
+      POSTGRES_DB: ${DB_NAME:-stockpro}
+      POSTGRES_USER: ${DB_USER:-stockpro}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-stockpro_password}
     ports:
-      - '5432:5432'
+      - '${DB_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U stockpro -d stockpro']
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-stockpro} -d ${DB_NAME:-stockpro}']
       interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: stockini-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - '${MINIO_PORT:-9000}:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 15s
       timeout: 5s
       retries: 5
 
@@ -23,18 +42,18 @@ services:
       dockerfile: Dockerfile
     container_name: stockini-backend
     restart: unless-stopped
+    env_file: .env
     environment:
-      DATABASE_URL: postgresql://stockpro:stockpro_password@postgres:5432/stockpro?schema=public
-      JWT_SECRET: change_me
-      JWT_REFRESH_SECRET: change_me_refresh
-      JWT_EXPIRES_IN: 15m
-      JWT_REFRESH_EXPIRES_IN: 7d
-      PORT: 3001
-      APP_NAME: Stockini
+      # Surcharge DATABASE_URL avec l'hostname docker interne
+      DATABASE_URL: postgresql://${DB_USER:-stockpro}:${DB_PASSWORD:-stockpro_password}@postgres:${DB_PORT:-5432}/${DB_NAME:-stockpro}?schema=public
+      # Surcharge MinIO endpoint avec l'hostname docker interne
+      MINIO_ENDPOINT: minio
     ports:
-      - '3001:3001'
+      - '${PORT:-3001}:${PORT:-3001}'
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   frontend:
@@ -43,9 +62,9 @@ services:
       dockerfile: Dockerfile
     container_name: stockini-frontend
     restart: unless-stopped
+    env_file: .env
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:3001
-      APP_NAME: Stockini
+      NEXT_PUBLIC_API_URL: http://localhost:${PORT:-3001}
     ports:
       - '3000:3000'
     depends_on:
@@ -53,3 +72,4 @@ services:
 
 volumes:
   postgres_data:
+  minio_data:

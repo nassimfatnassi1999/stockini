@@ -7,6 +7,7 @@ import {
   Bell,
   Boxes,
   CreditCard,
+  FileText,
   LayoutDashboard,
   PackageCheck,
   Receipt,
@@ -58,6 +59,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Stock',       href: '/stock',       icon: Boxes,      permission: 'stock.view' },
       { label: 'Paiements',   href: '/paiements',   icon: CreditCard, permission: 'payments.view' },
+      { label: 'Documents',   href: '/documents',   icon: FileText,   permission: 'sales.view' },
       { label: 'Dépenses',    href: '/depenses',    icon: Receipt,    permission: 'expenses.view' },
       { label: 'Rapports',    href: '/rapports',    icon: BarChart3,  permission: 'reports.view' },
       { label: 'Alertes',     href: '/alertes',     icon: Bell,       permission: 'alerts.view' },

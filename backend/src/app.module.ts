@@ -18,6 +18,7 @@ import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
 import { StockModule } from './stock/stock.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { DocumentsModule } from './documents/documents.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
 
@@ -42,6 +43,7 @@ import { UsersModule } from './users/users.module';
     AuditLogsModule,
     RbacModule,
     TrashModule,
+    DocumentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

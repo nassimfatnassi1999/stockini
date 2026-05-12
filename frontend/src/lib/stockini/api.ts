@@ -3,6 +3,12 @@ import type {
   Alert,
   AuditLog,
   Customer,
+  DocumentEmailLog,
+  DocumentsListResponse,
+  DocumentStatus,
+  EmailPreview,
+  GeneratedDocument,
+  SalesDocumentType,
   DashboardReport,
   Payment,
   Product,
@@ -105,6 +111,58 @@ export const stockiniApi = {
   permanentDeleteTrashItem: (entity: TrashEntityType, id: string) =>
     api.delete(`/trash/${entity}/${id}/permanent`).then((r) => r.data),
   auditLogs: () => api.get<AuditLog[]>('/audit-logs').then((r) => r.data),
+
+  // ── Generated Documents ───────────────────────────────────────────────────
+  generateDocuments: (invoiceIds: string[], documentType: SalesDocumentType) =>
+    api.post<{ documents: GeneratedDocument[] }>('/documents/generate', { invoiceIds, documentType }).then((r) => r.data),
+
+  /** Legacy flat list — used by ventes page GeneratedDocumentsHistory */
+  generatedDocuments: (invoiceId?: string) =>
+    api.get<GeneratedDocument[]>('/documents/generated', { params: invoiceId ? { invoiceId } : undefined }).then((r) => r.data),
+
+  /** Paginated list with rich filters — used by /documents page */
+  listDocuments: (params?: {
+    documentType?: SalesDocumentType;
+    clientId?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    minSize?: number;
+    maxSize?: number;
+    status?: DocumentStatus;
+    page?: number;
+    limit?: number;
+  }) => api.get<DocumentsListResponse>('/documents', { params }).then((r) => r.data),
+
+  documentDetail: (id: string) =>
+    api.get<GeneratedDocument>(`/documents/${id}`).then((r) => r.data),
+
+  updateDocument: (id: string, data: { documentNumber?: string; clientName?: string; status?: DocumentStatus }) =>
+    api.put<GeneratedDocument>(`/documents/${id}`, data).then((r) => r.data),
+
+  documentPresignedUrl: (id: string) =>
+    api.get<{ url: string }>(`/documents/${id}/presigned-url`).then((r) => r.data),
+
+  viewDocumentUrl: (id: string) => `/api/documents/${id}/view`,
+  downloadDocumentUrl: (id: string) => `/api/documents/${id}/download`,
+
+  emailPreview: (documentIds: string[]) =>
+    api.post<EmailPreview>('/documents/email-preview', { documentIds }).then((r) => r.data),
+
+  sendDocumentEmail: (payload: { documentIds: string[]; to: string; cc?: string; bcc?: string; subject: string; body: string }) =>
+    api.post<{ success: boolean; emailStatus: string }>('/documents/send-email', payload).then((r) => r.data),
+
+  sendEmailForDocument: (id: string, payload: { to: string; cc?: string; bcc?: string; subject: string; message?: string }) =>
+    api.post<{ success: boolean; emailStatus: string }>(`/documents/${id}/send-email`, payload).then((r) => r.data),
+
+  documentEmailLogs: (id: string) =>
+    api.get<DocumentEmailLog[]>(`/documents/${id}/email-logs`).then((r) => r.data),
+
+  regenerateDocument: (id: string) =>
+    api.post<GeneratedDocument>(`/documents/${id}/regenerate`).then((r) => r.data),
+
+  deleteGeneratedDocument: (id: string) =>
+    api.delete(`/documents/${id}`).then((r) => r.data),
   categories: () => api.get<Array<{ id: string; name: string; description?: string }>>('/categories').then((r) => r.data),
   createCategory: (data: { name: string; description?: string }) => api.post('/categories', data).then((r) => r.data),
   updateCategory: (id: string, data: { name?: string; description?: string }) => api.patch(`/categories/${id}`, data).then((r) => r.data),

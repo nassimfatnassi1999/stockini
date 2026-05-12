@@ -18,6 +18,8 @@ COMPOSE_SERVICES := $(shell docker compose config --services 2>/dev/null)
 DB_SERVICE := $(if $(filter db,$(COMPOSE_SERVICES)),db,$(if $(filter postgres,$(COMPOSE_SERVICES)),postgres,db))
 PROD_COMPOSE_SERVICES := $(shell docker compose -f docker-compose.prod.yml config --services 2>/dev/null)
 PROD_DB_SERVICE := $(if $(filter db,$(PROD_COMPOSE_SERVICES)),db,$(if $(filter postgres,$(PROD_COMPOSE_SERVICES)),postgres,db))
+MINIO_SERVICE := minio
+MINIO_PORT ?= 9000
 DB_USER ?= stockpro
 DB_NAME ?= stockpro_db
 BACKEND_PORT ?= 3001
@@ -36,7 +38,8 @@ NC := \033[0m
 
 .PHONY: help install install-backend install-frontend dev stop \
 	db-up db-down db-wait db-migrate db-seed db-seed-only db-reset studio \
-	logs logs-db build clean clean-all \
+	minio-up minio-down minio-wait \
+	logs logs-db logs-minio build clean clean-all \
 	prod prod-db prod-build prod-up prod-down prod-logs prod-logs-backend \
 	prod-restart prod-migrate prod-wait prod-clean \
 	env-check deps-check backend-env-check frontend-env-check prod-env-check
@@ -53,6 +56,7 @@ help: ## Afficher cette aide
 	@echo "  Swagger       : http://localhost:$(BACKEND_PORT)/api/docs"
 	@echo "  Frontend      : http://localhost:$(FRONTEND_PORT)"
 	@echo "  Prisma Studio : http://localhost:5555"
+	@echo "  MinIO Console : http://localhost:9001"
 	@echo ""
 	@echo -e "$(YELLOW)Environnement$(NC)"
 	@echo "  Fichier unique: $(ENV_FILE)"
@@ -105,7 +109,7 @@ install-frontend: frontend-env-check ## Installer les dépendances frontend
 	@echo -e "$(BLUE)Installation des dépendances frontend...$(NC)"
 	@cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && npm install
 
-dev: env-check deps-check db-up db-wait db-migrate db-seed ## Lancer backend et frontend en développement
+dev: env-check deps-check db-up minio-up db-wait minio-wait db-migrate db-seed ## Lancer backend et frontend en développement
 	@echo -e "$(GREEN)Démarrage Stockini en développement...$(NC)"
 	@set -a; source "$(ENV_FILE)"; set +a; \
 	initial_port="$${PORT:-$(BACKEND_PORT)}"; \
@@ -146,8 +150,8 @@ dev: env-check deps-check db-up db-wait db-migrate db-seed ## Lancer backend et 
 	(cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$$frontend_port" NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_API_URL="http://localhost:$$backend_port" npm run dev 2>&1 | sed -u 's/^/[frontend] /') & \
 	wait
 
-stop: env-check ## Arrêter les services Docker de développement
-	@echo -e "$(YELLOW)Arrêt des services Docker de développement...$(NC)"
+stop: env-check ## Arrêter PostgreSQL et MinIO (services Docker de développement)
+	@echo -e "$(YELLOW)Arrêt des services Docker de développement (PostgreSQL + MinIO)...$(NC)"
 	@$(COMPOSE) down
 
 db-up: env-check ## Démarrer PostgreSQL
@@ -157,6 +161,21 @@ db-up: env-check ## Démarrer PostgreSQL
 db-down: env-check ## Arrêter PostgreSQL
 	@echo -e "$(YELLOW)Arrêt PostgreSQL...$(NC)"
 	@$(COMPOSE) stop $(DB_SERVICE)
+
+minio-up: env-check ## Démarrer MinIO
+	@echo -e "$(BLUE)Démarrage MinIO...$(NC)"
+	@$(COMPOSE) up -d $(MINIO_SERVICE)
+
+minio-down: env-check ## Arrêter MinIO
+	@echo -e "$(YELLOW)Arrêt MinIO...$(NC)"
+	@$(COMPOSE) stop $(MINIO_SERVICE)
+
+minio-wait: env-check ## Attendre que MinIO soit prêt
+	@echo -e "$(BLUE)Attente de MinIO...$(NC)"
+	@until $(COMPOSE) exec -T $(MINIO_SERVICE) curl -sf http://localhost:$(MINIO_PORT)/minio/health/live >/dev/null 2>&1; do \
+		sleep 2; \
+	done
+	@echo -e "$(GREEN)MinIO est prêt.$(NC)"
 
 db-wait: env-check ## Attendre que PostgreSQL soit prêt
 	@echo -e "$(BLUE)Attente de PostgreSQL...$(NC)"
@@ -198,6 +217,9 @@ logs: env-check ## Afficher tous les logs Docker
 
 logs-db: env-check ## Afficher les logs PostgreSQL
 	@$(COMPOSE) logs -f $(DB_SERVICE)
+
+logs-minio: env-check ## Afficher les logs MinIO
+	@$(COMPOSE) logs -f $(MINIO_SERVICE)
 
 build: backend-env-check frontend-env-check ## Builder backend et frontend
 	@echo -e "$(BLUE)Build backend...$(NC)"
