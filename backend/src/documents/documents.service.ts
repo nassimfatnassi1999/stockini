@@ -25,6 +25,7 @@ const DOC_PREFIXES: Record<DocumentType, string> = {
   BON_COMMANDE: 'BON-COMMANDE',
   BON_LIVRAISON: 'BON-LIVRAISON',
   FACTURE: 'FACTURE',
+  AVOIR: 'AVOIR',
 };
 
 const DOC_FOLDER: Record<DocumentType, string> = {
@@ -32,6 +33,7 @@ const DOC_FOLDER: Record<DocumentType, string> = {
   BON_COMMANDE: 'bon-commande',
   BON_LIVRAISON: 'bon-livraison',
   FACTURE: 'facture',
+  AVOIR: 'avoir',
 };
 
 const INCLUDE_SALE = {
@@ -272,9 +274,9 @@ export class DocumentsService {
 
     if (!docs.length) throw new NotFoundException('Documents introuvables');
 
-    const clientEmails = new Set(docs.map((d) => d.sale.customer?.email ?? '').filter(Boolean));
+    const clientEmails = new Set(docs.map((d) => d.sale?.customer?.email ?? '').filter(Boolean));
     const clientNames = new Set(
-      docs.map((d) => d.clientName ?? d.sale.customer?.name ?? 'Client').filter(Boolean),
+      docs.map((d) => d.clientName ?? d.sale?.customer?.name ?? 'Client').filter(Boolean),
     );
 
     if (clientEmails.size > 1 || clientNames.size > 1) {
@@ -454,6 +456,7 @@ export class DocumentsService {
 
     const companySettings = await this.getCompanySettings();
     const sale = existing.sale;
+    if (!sale) throw new BadRequestException('Aucune vente liée à ce document');
 
     const pdfBuffer = await this.pdf.generateSaleDocument(
       {

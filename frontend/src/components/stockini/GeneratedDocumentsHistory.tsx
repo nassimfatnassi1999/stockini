@@ -21,6 +21,7 @@ const DOC_TYPE_LABELS: Record<SalesDocumentType, string> = {
   BON_COMMANDE: 'Bon de commande',
   BON_LIVRAISON: 'Bon de livraison',
   FACTURE: 'Facture',
+  AVOIR: 'Avoir',
 };
 
 const EMAIL_STATUS_LABELS: Record<string, string> = {

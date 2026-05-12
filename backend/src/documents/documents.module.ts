@@ -10,5 +10,6 @@ import { PdfService } from './pdf.service';
   imports: [SettingsModule],
   controllers: [DocumentsController],
   providers: [DocumentsService, MinioService, PdfService, EmailService],
+  exports: [PdfService, MinioService, DocumentsService],
 })
 export class DocumentsModule {}

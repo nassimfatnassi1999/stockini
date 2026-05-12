@@ -35,6 +35,7 @@ const DOC_TYPE_LABELS: Record<SalesDocumentType, string> = {
   BON_COMMANDE: 'Bon de commande',
   BON_LIVRAISON: 'Bon de livraison',
   FACTURE: 'Facture',
+  AVOIR: 'Avoir',
 };
 
 const DOC_TYPE_COLORS: Record<SalesDocumentType, string> = {
@@ -42,6 +43,7 @@ const DOC_TYPE_COLORS: Record<SalesDocumentType, string> = {
   BON_COMMANDE: 'border-purple-200 bg-purple-50 text-purple-700',
   BON_LIVRAISON: 'border-teal-200 bg-teal-50 text-teal-700',
   FACTURE: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  AVOIR: 'border-red-200 bg-red-50 text-red-700',
 };
 
 const DOC_STATUS_LABELS: Record<DocumentStatus, string> = {

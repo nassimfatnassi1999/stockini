@@ -11,7 +11,8 @@ type ReferenceTarget =
   | 'payment'
   | 'customer'
   | 'supplier'
-  | 'product';
+  | 'product'
+  | 'creditNote';
 
 const TARGETS: Record<ReferenceTarget, { delegate: string; field: string }> = {
   sale: { delegate: 'sale', field: 'invoiceNumber' },
@@ -21,6 +22,7 @@ const TARGETS: Record<ReferenceTarget, { delegate: string; field: string }> = {
   customer: { delegate: 'customer', field: 'reference' },
   supplier: { delegate: 'supplier', field: 'reference' },
   product: { delegate: 'product', field: 'idProduct' },
+  creditNote: { delegate: 'creditNote', field: 'numero' },
 };
 
 // Passager (INDIVIDUAL): CLI-YEAR-001 (3-digit)

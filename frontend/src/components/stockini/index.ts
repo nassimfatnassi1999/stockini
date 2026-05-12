@@ -10,3 +10,4 @@ export { AlertsPage } from './pages/AlertsPage';
 export { SettingsPage } from './pages/SettingsPage';
 export { AuditLogsPage } from './pages/AuditLogsPage';
 export { ReportsPage } from './pages/ReportsPage';
+export { AvoirPage } from './pages/AvoirPage';

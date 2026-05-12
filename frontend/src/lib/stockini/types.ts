@@ -160,7 +160,7 @@ export interface Payment {
   deletedBy?: string | null;
 }
 
-export type SalesDocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE';
+export type SalesDocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE' | 'AVOIR';
 export type EmailStatus = 'PENDING' | 'SENT' | 'FAILED';
 export type DocumentStatus = 'GENERATED' | 'SENT' | 'DELETED';
 
@@ -287,6 +287,63 @@ export interface DropdownOption {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type CreditNoteStatus = 'CREATED' | 'REFUNDED' | 'CANCELLED';
+
+export interface ReturnableItem {
+  saleItemId: Id;
+  productId: Id;
+  product: { id: Id; reference: string; name: string } | null;
+  quantiteSold: number;
+  quantiteDejaRetournee: number;
+  quantiteRetournable: number;
+  unitPrice: number;
+  total: number;
+}
+
+export interface ReturnableItemsResponse {
+  saleId: Id;
+  invoiceNumber: string;
+  customer: { id: Id; name: string } | null;
+  items: ReturnableItem[];
+}
+
+export interface CreditNoteItem {
+  id: Id;
+  creditNoteId: Id;
+  saleItemId?: Id | null;
+  productId: Id;
+  designation: string;
+  quantiteRetournee: number;
+  prixUnitaireHt: number | string;
+  tva: number | string;
+  totalHt: number | string;
+  totalTtc: number | string;
+  motifLigne?: string | null;
+  product?: { id: Id; reference: string; name: string } | null;
+}
+
+export interface CreditNote {
+  id: Id;
+  numero: string;
+  saleId: Id;
+  customerId?: Id | null;
+  dateAvoir: string;
+  subtotal: number | string;
+  tax: number | string;
+  total: number | string;
+  montantRembourse: number | string;
+  motif?: string | null;
+  statut: CreditNoteStatus;
+  createdById?: Id | null;
+  createdAt: string;
+  updatedAt: string;
+  sale?: { invoiceNumber: string; customerId?: Id | null } | null;
+  customer?: { id: Id; name: string; phone?: string | null; email?: string | null; address?: string | null } | null;
+  createdBy?: { id: Id; fullName: string } | null;
+  items: CreditNoteItem[];
+  payments?: Payment[];
 }
 
 export interface DashboardReport {

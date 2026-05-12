@@ -27,6 +27,7 @@ import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
 import { EmailToast } from '@/components/stockini/EmailToast';
 import { GeneratedDocumentsHistory } from '@/components/stockini/GeneratedDocumentsHistory';
+import { AvoirPage } from '@/components/stockini/pages/AvoirPage';
 import {
   calculateDocumentTotals,
   createEmptyLine,
@@ -81,6 +82,8 @@ const STATUS_COLORS: Record<string, string> = {
   RETURNED: 'border-orange-200 bg-orange-50 text-orange-700',
 };
 
+type TabType = SalesDocumentType | 'AVOIR_TAB';
+
 const DOC_TYPES: Array<{ id: SalesDocumentType; label: string; saveLabel: string }> = [
   { id: 'DEVIS', label: 'Devis', saveLabel: 'Enregistrer le devis' },
   { id: 'BON_COMMANDE', label: 'Bon de commande', saveLabel: 'Enregistrer le bon de commande' },
@@ -122,6 +125,7 @@ export default function VentesPage() {
   const [draftChecked, setDraftChecked] = useState(false);
 
   const [documentType, setDocumentType] = useState<SalesDocumentType>('DEVIS');
+  const [activeTab, setActiveTab] = useState<TabType>('DEVIS');
 
   // Multi-selection for invoice history
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
@@ -530,9 +534,9 @@ export default function VentesPage() {
           <button
             key={dt.id}
             type="button"
-            onClick={() => setDocumentType(dt.id)}
+            onClick={() => { setDocumentType(dt.id); setActiveTab(dt.id); }}
             className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-              documentType === dt.id
+              activeTab === dt.id
                 ? 'bg-primary text-white shadow-sm'
                 : 'text-text-secondary hover:bg-muted hover:text-text-primary'
             }`}
@@ -541,7 +545,29 @@ export default function VentesPage() {
             {dt.label}
           </button>
         ))}
+        {/* Avoir tab */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('AVOIR_TAB')}
+          className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === 'AVOIR_TAB'
+              ? 'bg-red-600 text-white shadow-sm'
+              : 'text-text-secondary hover:bg-red-50 hover:text-red-700'
+          }`}
+        >
+          <FileText size={13} />
+          Avoir
+        </button>
       </div>
+
+      {/* Avoir page — rendered when Avoir tab is active */}
+      {activeTab === 'AVOIR_TAB' && (
+        <AvoirPage />
+      )}
+
+      {/* All content below only shown when a document tab is active */}
+      {activeTab !== 'AVOIR_TAB' && (
+      <>
 
       {/* Document header: client + date */}
       <div className="rounded-lg border border-border/70 bg-white p-4">
@@ -893,6 +919,8 @@ export default function VentesPage() {
           onConfirm={() => cancelMutation.mutate(deleteTarget.id)}
           onCancel={() => setDeleteTarget(null)}
         />
+      )}
+      </>
       )}
     </div>
   );

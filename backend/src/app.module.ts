@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { AuthModule } from './auth/auth.module';
+import { AvoirsModule } from './avoirs/avoirs.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CustomersModule } from './customers/customers.module';
@@ -44,6 +45,7 @@ import { UsersModule } from './users/users.module';
     RbacModule,
     TrashModule,
     DocumentsModule,
+    AvoirsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

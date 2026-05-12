@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type {
   Alert,
   AuditLog,
+  CreditNote,
   Customer,
   DocumentEmailLog,
   DocumentsListResponse,
@@ -14,6 +15,7 @@ import type {
   Product,
   Purchase,
   PurchaseDetail,
+  ReturnableItemsResponse,
   Sale,
   SaleDetail,
   StockMovement,
@@ -163,6 +165,23 @@ export const stockiniApi = {
 
   deleteGeneratedDocument: (id: string) =>
     api.delete(`/documents/${id}`).then((r) => r.data),
+  // ── Avoirs (Credit Notes) ─────────────────────────────────────────────────
+  returnableItems: (saleId: string) =>
+    api.get<ReturnableItemsResponse>(`/avoirs/sales/${saleId}/returnable-items`).then((r) => r.data),
+  avoirs: (params?: { customerId?: string; saleId?: string }) =>
+    api.get<CreditNote[]>('/avoirs', { params }).then((r) => r.data),
+  avoir: (id: string) => api.get<CreditNote>(`/avoirs/${id}`).then((r) => r.data),
+  createAvoir: (data: {
+    saleId: string;
+    customerId?: string;
+    motif?: string;
+    paymentMethod?: string;
+    items: Array<{ productId: string; saleItemId?: string; quantiteRetournee: number; motifLigne?: string }>;
+  }) => api.post<CreditNote>('/avoirs', data).then((r) => r.data),
+  avoirsByCustomer: (customerId: string) =>
+    api.get<CreditNote[]>(`/avoirs/clients/${customerId}`).then((r) => r.data),
+  avoirPdfUrl: (id: string) => `/api/avoirs/${id}/pdf`,
+
   categories: () => api.get<Array<{ id: string; name: string; description?: string }>>('/categories').then((r) => r.data),
   createCategory: (data: { name: string; description?: string }) => api.post('/categories', data).then((r) => r.data),
   updateCategory: (id: string, data: { name?: string; description?: string }) => api.patch(`/categories/${id}`, data).then((r) => r.data),
