@@ -1,5 +1,4 @@
--- DropForeignKey
-ALTER TABLE "GeneratedDocument" DROP CONSTRAINT "GeneratedDocument_invoiceId_fkey";
-
--- AddForeignKey
-ALTER TABLE "GeneratedDocument" ADD CONSTRAINT "GeneratedDocument_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Sale"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- This migration was created before the GeneratedDocument table existed.
+-- The FK change (RESTRICT → SET NULL) is handled in 20260512220000_add_avoir_module.
+-- No-op placeholder to preserve migration history.
+SELECT 1;

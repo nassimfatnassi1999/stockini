@@ -72,3 +72,7 @@ ALTER TABLE "CreditNoteItem" ADD CONSTRAINT "CreditNoteItem_productId_fkey" FORE
 ALTER TABLE "CreditNoteItem" ADD CONSTRAINT "CreditNoteItem_saleItemId_fkey" FOREIGN KEY ("saleItemId") REFERENCES "SaleItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "GeneratedDocument" ADD CONSTRAINT "GeneratedDocument_creditNoteId_fkey" FOREIGN KEY ("creditNoteId") REFERENCES "CreditNote"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "Payment" ADD CONSTRAINT "Payment_creditNoteId_fkey" FOREIGN KEY ("creditNoteId") REFERENCES "CreditNote"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Change GeneratedDocument.invoiceId FK from RESTRICT to SET NULL (now that invoiceId is nullable)
+ALTER TABLE "GeneratedDocument" DROP CONSTRAINT "GeneratedDocument_invoiceId_fkey";
+ALTER TABLE "GeneratedDocument" ADD CONSTRAINT "GeneratedDocument_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Sale"("id") ON DELETE SET NULL ON UPDATE CASCADE;
