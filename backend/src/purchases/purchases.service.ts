@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
+  CaisseMovementType,
   PaymentStatus,
   PurchaseStatus,
   StockMovementType,
 } from '@prisma/client';
+import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -23,6 +25,7 @@ export class PurchasesService {
     private readonly stockService: StockService,
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
+    private readonly caisseService: CaisseService,
   ) {}
 
   async create(dto: CreatePurchaseDto, createdById?: string) {
@@ -187,6 +190,36 @@ export class PurchasesService {
   async remove(id: string, userId?: string) {
     this.logger.log(`DELETE /purchases/${id} called by ${userId ?? 'unknown'}`);
     await this.prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findUniqueOrThrow({
+        where: { id },
+        include: { items: true },
+      });
+
+      // Reverse stock for items already received
+      for (const item of purchase.items) {
+        if (item.receivedQuantity > 0) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.SUPPLIER_RETURN,
+            quantity: item.receivedQuantity,
+            reason: 'Purchase deleted — stock reversal',
+            userId,
+          });
+        }
+      }
+
+      // Reverse caisse for amounts already paid
+      const paidAmount = Number(purchase.paidAmount);
+      if (paidAmount > 0) {
+        await this.caisseService.recordMovement(tx, {
+          type: CaisseMovementType.ANNULATION_ACHAT,
+          montant: paidAmount,
+          motif: `Suppression achat ${purchase.orderNumber}`,
+          referenceDoc: purchase.orderNumber,
+          userId,
+        });
+      }
+
       await tx.payment.deleteMany({ where: { purchaseId: id } });
       await tx.purchase.delete({ where: { id } });
     });

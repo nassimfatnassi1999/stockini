@@ -2,6 +2,9 @@ import { api } from '@/lib/api';
 import type {
   Alert,
   AuditLog,
+  CaisseBalance,
+  CaisseMovement,
+  CaisseMovementType,
   CreditNote,
   Customer,
   DocumentEmailLog,
@@ -64,6 +67,7 @@ export const stockiniApi = {
   sale: (id: string) => api.get<SaleDetail>(`/sales/${id}`).then((r) => r.data),
   createSale: (data: unknown) => api.post<Sale>('/sales', data).then((r) => r.data),
   updateSale: (id: string, data: Partial<Sale>) => api.patch<Sale>(`/sales/${id}`, data).then((r) => r.data),
+  validateSale: (id: string) => api.patch(`/sales/${id}/validate`).then((r) => r.data),
   cancelSale: (id: string) => api.patch(`/sales/${id}/cancel`).then((r) => r.data),
   deleteSale: (id: string) => api.delete(`/sales/${id}`).then((r) => r.data),
   purchases: () => api.get<Purchase[]>('/purchases').then((r) => r.data),
@@ -181,6 +185,17 @@ export const stockiniApi = {
   avoirsByCustomer: (customerId: string) =>
     api.get<CreditNote[]>(`/avoirs/clients/${customerId}`).then((r) => r.data),
   avoirPdfUrl: (id: string) => `/api/avoirs/${id}/pdf`,
+
+  // ── Caisse ────────────────────────────────────────────────────────────────
+  caisseBalance: () => api.get<CaisseBalance>('/caisse/balance').then((r) => r.data),
+  caisseHistorique: (type?: CaisseMovementType) =>
+    api.get<CaisseMovement[]>('/caisse/historique', { params: type ? { type } : undefined }).then((r) => r.data),
+  caisseRetrait: (data: { montant: number; motif?: string }) =>
+    api.post<CaisseMovement>('/caisse/retrait', data).then((r) => r.data),
+  caisseDepot: (data: { montant: number; motif?: string }) =>
+    api.post<CaisseMovement>('/caisse/depot', data).then((r) => r.data),
+  caisseSetAllowNegative: (allowNegative: boolean) =>
+    api.patch('/caisse/config', { allowNegative }).then((r) => r.data),
 
   categories: () => api.get<Array<{ id: string; name: string; description?: string }>>('/categories').then((r) => r.data),
   createCategory: (data: { name: string; description?: string }) => api.post('/categories', data).then((r) => r.data),

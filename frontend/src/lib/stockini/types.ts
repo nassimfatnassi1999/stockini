@@ -13,8 +13,9 @@ export interface Product {
   barcode?: string | null;
   name: string;
   description?: string | null;
+  tva: number | string;                 // TVA en % (défaut 19)
   purchasePrice: number | string;       // Prix d'achat HT
-  purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × 1.19)
+  purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × (1 + TVA/100))
   salePrice: number | string;           // Prix de vente (TTC × 1.4)
   lastSellingPrice?: number | string | null;
   quantity: number;
@@ -24,6 +25,32 @@ export interface Product {
   category?: Lookup;
   brand?: Lookup;
   supplier?: Lookup | null;
+}
+
+export type CaisseMovementType =
+  | 'ENCAISSEMENT_VENTE'
+  | 'DECAISSEMENT_ACHAT'
+  | 'DEPOT_MANUEL'
+  | 'RETRAIT_MANUEL'
+  | 'ANNULATION_VENTE'
+  | 'ANNULATION_ACHAT';
+
+export interface CaisseMovement {
+  id: Id;
+  type: CaisseMovementType;
+  montant: number | string;
+  ancienSolde: number | string;
+  nouveauSolde: number | string;
+  motif?: string | null;
+  referenceDoc?: string | null;
+  userId?: string | null;
+  createdAt: string;
+  user?: { id: Id; fullName: string; email: string } | null;
+}
+
+export interface CaisseBalance {
+  solde: number;
+  allowNegative: boolean;
 }
 
 export interface Customer {
@@ -62,6 +89,9 @@ export interface Sale {
   remainingAmount: number | string;
   paymentStatus: string;
   status: string;
+  documentType: SalesDocumentType;
+  stockImpactDone: boolean;
+  reserveStock: boolean;
   createdAt: string;
   customer?: Customer | null;
   items?: Array<{ id: Id; quantity: number }>;

@@ -34,7 +34,9 @@ interface ProductFormState {
   categoryId: string;
   brandId: string;
   supplierId: string;
+  tva: string;
   purchasePrice: string;
+  quantity: string;
   minStock: string;
   location: string;
 }
@@ -45,12 +47,31 @@ const EMPTY_PRODUCT_FORM: ProductFormState = {
   categoryId: '',
   brandId: '',
   supplierId: '',
+  tva: '19',
   purchasePrice: '',
+  quantity: '0',
   minStock: '',
   location: '',
 };
 
+function productToFormState(p: Product): ProductFormState {
+  return {
+    reference: p.reference,
+    name: p.name,
+    categoryId: p.category?.id ?? '',
+    brandId: p.brand?.id ?? '',
+    supplierId: p.supplier?.id ?? '',
+    tva: String(p.tva ?? 19),
+    purchasePrice: String(p.purchasePrice ?? ''),
+    quantity: String(p.quantity ?? 0),
+    minStock: String(p.minStock ?? ''),
+    location: p.location ?? '',
+  };
+}
+
 function ProductModal({
+  mode,
+  initialValues,
   categoryOptions,
   brandOptions,
   supplierOptions,
@@ -58,6 +79,8 @@ function ProductModal({
   onSubmit,
   saving,
 }: {
+  mode: 'create' | 'edit';
+  initialValues?: ProductFormState;
   categoryOptions: Array<{ value: string; label: string }>;
   brandOptions: Array<{ value: string; label: string }>;
   supplierOptions: Array<{ value: string; label: string }>;
@@ -65,12 +88,13 @@ function ProductModal({
   onSubmit: (form: ProductFormState) => void;
   saving: boolean;
 }) {
-  const [form, setForm] = useState<ProductFormState>(EMPTY_PRODUCT_FORM);
+  const [form, setForm] = useState<ProductFormState>(initialValues ?? EMPTY_PRODUCT_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof ProductFormState, string>>>({});
 
   const priceHt = parseFloat(form.purchasePrice) || 0;
-  const priceTtc = roundPrice(calcPurchasePriceTtc(priceHt));
-  const priceSale = roundPrice(calcSalePrice(priceHt));
+  const tvaNum = parseFloat(form.tva) || 19;
+  const priceTtc = roundPrice(calcPurchasePriceTtc(priceHt, tvaNum));
+  const priceSale = roundPrice(calcSalePrice(priceHt, tvaNum));
 
   const set = (field: keyof ProductFormState) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -83,7 +107,11 @@ function ProductModal({
     if (!form.categoryId) next.categoryId = 'La catégorie est obligatoire';
     if (!form.brandId) next.brandId = 'La marque est obligatoire';
     if (form.purchasePrice === '' || Number(form.purchasePrice) < 0)
-      next.purchasePrice = 'Prix d\'achat HT invalide';
+      next.purchasePrice = "Prix d'achat HT invalide";
+    if (form.tva === '' || Number(form.tva) < 0)
+      next.tva = 'TVA invalide';
+    if (form.quantity === '' || Number(form.quantity) < 0)
+      next.quantity = 'Stock actuel invalide';
     if (form.minStock === '' || Number(form.minStock) < 0)
       next.minStock = 'Seuil invalide';
     setErrors(next);
@@ -100,25 +128,30 @@ function ProductModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
       <div className="w-full max-w-xl rounded-lg bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold text-text-primary">Nouveau produit</h2>
+          <h2 className="text-base font-semibold text-text-primary">
+            {mode === 'edit' ? 'Modifier le produit' : 'Nouveau produit'}
+          </h2>
           <button type="button" aria-label="Fermer" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted">
             <X size={16} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="grid gap-4 px-5 py-4 sm:grid-cols-2">
+          {/* Référence */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-reference">Référence *</Label>
             <Input id="pf-reference" value={form.reference} onChange={set('reference')} placeholder="Ex: D/FREIN AV FIESTA 08" required />
             {errors.reference && <p className="text-xs text-red-600">{errors.reference}</p>}
           </div>
 
+          {/* Désignation */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-name">Désignation *</Label>
             <Input id="pf-name" value={form.name} onChange={set('name')} required />
             {errors.name && <p className="text-xs text-red-600">{errors.name}</p>}
           </div>
 
+          {/* Catégorie */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-category">Catégorie *</Label>
             <select id="pf-category" value={form.categoryId} onChange={set('categoryId')} required className="app-select">
@@ -128,6 +161,7 @@ function ProductModal({
             {errors.categoryId && <p className="text-xs text-red-600">{errors.categoryId}</p>}
           </div>
 
+          {/* Marque */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-brand">Marque *</Label>
             <select id="pf-brand" value={form.brandId} onChange={set('brandId')} required className="app-select">
@@ -137,6 +171,7 @@ function ProductModal({
             {errors.brandId && <p className="text-xs text-red-600">{errors.brandId}</p>}
           </div>
 
+          {/* Fournisseur */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-supplier">Fournisseur</Label>
             <select id="pf-supplier" value={form.supplierId} onChange={set('supplierId')} className="app-select">
@@ -145,16 +180,33 @@ function ProductModal({
             </select>
           </div>
 
+          {/* Emplacement */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-location">Emplacement</Label>
-            <Input
-              id="pf-location"
-              value={form.location}
-              onChange={set('location')}
-              placeholder="Saisir un emplacement"
-            />
+            <Input id="pf-location" value={form.location} onChange={set('location')} placeholder="Saisir un emplacement" />
           </div>
 
+          {/* TVA */}
+          <div className="space-y-1.5">
+            <Label htmlFor="pf-tva">TVA *</Label>
+            <div className="relative">
+              <Input
+                id="pf-tva"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                placeholder="19"
+                value={form.tva}
+                onChange={set('tva')}
+                required
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">%</span>
+            </div>
+            {errors.tva && <p className="text-xs text-red-600">{errors.tva}</p>}
+          </div>
+
+          {/* Prix d'achat HT */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-purchase-ht">Prix d'achat HT *</Label>
             <div className="relative">
@@ -173,38 +225,63 @@ function ProductModal({
             {errors.purchasePrice && <p className="text-xs text-red-600">{errors.purchasePrice}</p>}
           </div>
 
+          {/* Prix d'achat TTC — calculé automatiquement */}
           <div className="space-y-1.5">
-            <Label>Prix d'achat TTC <span className="text-xs font-normal text-text-muted">(HT × 1,19)</span></Label>
+            <Label>
+              Prix d'achat TTC{' '}
+              <span className="text-xs font-normal text-text-muted">(HT × (1 + TVA%))</span>
+            </Label>
             <div className="relative">
               <Input
                 type="text"
                 readOnly
+                tabIndex={-1}
                 value={priceHt > 0 ? money(priceTtc) : '—'}
                 className="bg-muted/40 cursor-not-allowed font-mono text-text-secondary"
-                tabIndex={-1}
               />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
             </div>
           </div>
 
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>Prix de vente <span className="text-xs font-normal text-text-muted">(TTC × 1,4)</span></Label>
+          {/* Prix de vente — calculé automatiquement */}
+          <div className="space-y-1.5">
+            <Label>
+              Prix vente{' '}
+              <span className="text-xs font-normal text-text-muted">(TTC × 1,4)</span>
+            </Label>
             <div className="relative">
               <Input
                 type="text"
                 readOnly
+                tabIndex={-1}
                 value={priceHt > 0 ? money(priceSale) : '—'}
                 className="bg-primary/5 cursor-not-allowed font-mono font-semibold text-primary"
-                tabIndex={-1}
               />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
             </div>
-            {priceHt > 0 && (
-              <p className="text-[11px] text-text-muted">
-                {money(priceHt)} HT → {money(priceTtc)} TTC → {money(priceSale)} vente
-              </p>
-            )}
           </div>
 
-          <div className="space-y-1.5 sm:col-span-2">
+          {/* Stock actuel */}
+          <div className="space-y-1.5">
+            <Label htmlFor="pf-quantity">
+              Stock actuel{mode === 'edit' ? <span className="ml-1 text-xs font-normal text-text-muted">(lecture seule)</span> : ' *'}
+            </Label>
+            <Input
+              id="pf-quantity"
+              type="number"
+              min="0"
+              step="1"
+              value={form.quantity}
+              onChange={set('quantity')}
+              readOnly={mode === 'edit'}
+              className={mode === 'edit' ? 'bg-muted/40 cursor-not-allowed' : ''}
+              required={mode === 'create'}
+            />
+            {errors.quantity && <p className="text-xs text-red-600">{errors.quantity}</p>}
+          </div>
+
+          {/* Seuil minimum */}
+          <div className="space-y-1.5">
             <Label htmlFor="pf-min">Seuil minimum *</Label>
             <Input id="pf-min" type="number" min="0" step="1" value={form.minStock} onChange={set('minStock')} required />
             {errors.minStock && <p className="text-xs text-red-600">{errors.minStock}</p>}
@@ -227,12 +304,18 @@ export function ProductsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
+
   const query = useQuery({ queryKey: ['stockini-products', search], queryFn: () => stockiniApi.products(search) });
   const categories = useQuery({ queryKey: ['stockini-categories'], queryFn: stockiniApi.categories });
   const brands = useQuery({ queryKey: ['stockini-brands'], queryFn: stockiniApi.brands });
   const suppliers = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
   const data = query.data ?? [];
+
+  const categoryOptions = (categories.data ?? []).map((item) => ({ value: item.id, label: item.name }));
+  const brandOptions = (brands.data ?? []).map((item) => ({ value: item.id, label: item.name }));
+  const supplierOptions = (suppliers.data ?? []).map((item) => ({ value: item.id, label: item.name }));
 
   const createMutation = useMutation({
     mutationFn: (form: ProductFormState) =>
@@ -242,8 +325,9 @@ export function ProductsPage() {
         categoryId: form.categoryId,
         brandId: form.brandId,
         ...(form.supplierId && { supplierId: form.supplierId }),
+        tva: Number(form.tva) || 19,
         purchasePrice: Number(form.purchasePrice),
-        quantity: 0,
+        quantity: Number(form.quantity) || 0,
         minStock: Number(form.minStock),
         ...(form.location.trim() && { location: form.location.trim() }),
       }),
@@ -251,6 +335,26 @@ export function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       setModalOpen(false);
       toast.success('Produit créé');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, form }: { id: string; form: ProductFormState }) =>
+      stockiniApi.updateProduct(id, {
+        reference: form.reference.trim(),
+        name: form.name.trim(),
+        categoryId: form.categoryId,
+        brandId: form.brandId,
+        ...(form.supplierId ? { supplierId: form.supplierId } : {}),
+        tva: Number(form.tva) || 19,
+        purchasePrice: Number(form.purchasePrice),
+        minStock: Number(form.minStock),
+        ...(form.location.trim() && { location: form.location.trim() }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
+      setEditingProduct(null);
+      toast.success('Produit modifié');
     },
   });
 
@@ -290,7 +394,7 @@ export function ProductsPage() {
                 <TableHead>Désignation</TableHead>
                 <TableHead>Catégorie</TableHead>
                 <TableHead>Marque</TableHead>
-                <TableHead className="text-right">Stock</TableHead>
+                <TableHead className="text-right">Stock / Seuil min</TableHead>
                 <TableHead className="text-right">Achat HT</TableHead>
                 <TableHead className="text-right">Achat TTC</TableHead>
                 <TableHead className="text-right">Prix vente</TableHead>
@@ -315,7 +419,10 @@ export function ProductsPage() {
                   </TableCell>
                   <TableCell>{product.category?.name ?? '-'}</TableCell>
                   <TableCell>{product.brand?.name ?? '-'}</TableCell>
-                  <TableCell className="text-right font-mono">{product.quantity} / {product.minStock}</TableCell>
+                  <TableCell className="text-right font-mono">
+                    <span className="font-semibold">{product.quantity}</span>
+                    <span className="text-text-muted"> / {product.minStock}</span>
+                  </TableCell>
                   <TableCell className="text-right font-mono text-text-secondary">{money(product.purchasePrice)}</TableCell>
                   <TableCell className="text-right font-mono text-text-secondary">{money(product.purchasePriceTtc)}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-primary">{money(product.salePrice)}</TableCell>
@@ -324,7 +431,11 @@ export function ProductsPage() {
                   </TableCell>
                   <TableCell><StockBadge product={product} /></TableCell>
                   <TableCell>
-                    <RowActions onDelete={() => setTrashTarget({ id: product.id, name: product.name })} deleting={deleteMutation.isPending} />
+                    <RowActions
+                      onEdit={() => setEditingProduct(product)}
+                      onDelete={() => setTrashTarget({ id: product.id, name: product.name })}
+                      deleting={deleteMutation.isPending}
+                    />
                   </TableCell>
                 </TableRow>
               ))}
@@ -332,16 +443,34 @@ export function ProductsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Modal création */}
       {modalOpen && (
         <ProductModal
-          categoryOptions={(categories.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
-          brandOptions={(brands.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
-          supplierOptions={(suppliers.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
+          mode="create"
+          categoryOptions={categoryOptions}
+          brandOptions={brandOptions}
+          supplierOptions={supplierOptions}
           onClose={() => setModalOpen(false)}
           onSubmit={(form) => createMutation.mutate(form)}
           saving={createMutation.isPending}
         />
       )}
+
+      {/* Modal modification */}
+      {editingProduct && (
+        <ProductModal
+          mode="edit"
+          initialValues={productToFormState(editingProduct)}
+          categoryOptions={categoryOptions}
+          brandOptions={brandOptions}
+          supplierOptions={supplierOptions}
+          onClose={() => setEditingProduct(null)}
+          onSubmit={(form) => updateMutation.mutate({ id: editingProduct.id, form })}
+          saving={updateMutation.isPending}
+        />
+      )}
+
       {trashTarget && (
         <PermanentDeleteDialog
           label={trashTarget.name}

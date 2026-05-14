@@ -22,13 +22,15 @@ export class ProductsService {
   ) {}
 
   async create(dto: CreateProductDto) {
-    const derivedPrices = this.derivePrices(dto.purchasePrice);
+    const tva = dto.tva ?? 19;
+    const derivedPrices = this.derivePrices(dto.purchasePrice, tva);
     return this.prisma.$transaction(async (tx) => {
       const idProduct = await this.references.generate('PRD', 'product', tx);
       return tx.product.create({
         data: {
           ...dto,
-          quantity: 0,
+          tva,
+          quantity: dto.quantity ?? 0,
           ...derivedPrices,
           idProduct,
           sku: idProduct,
@@ -107,10 +109,13 @@ export class ProductsService {
       }
     }
 
-    const derivedPrices =
-      dto.purchasePrice !== undefined
-        ? this.derivePrices(dto.purchasePrice)
-        : {};
+    let derivedPrices = {};
+    if (dto.purchasePrice !== undefined || dto.tva !== undefined) {
+      const current = await this.prisma.product.findUniqueOrThrow({ where: { id } });
+      const tva = dto.tva ?? Number(current.tva);
+      const priceHt = dto.purchasePrice ?? Number(current.purchasePrice);
+      derivedPrices = this.derivePrices(priceHt, tva);
+    }
 
     return this.prisma.product.update({
       where: { id },
@@ -133,10 +138,10 @@ export class ProductsService {
     return { id };
   }
 
-  private derivePrices(purchasePrice: number) {
+  private derivePrices(purchasePrice: number, tva: number = 19) {
     return {
-      purchasePriceTtc: calcPurchasePriceTtc(purchasePrice),
-      salePrice: calcSalePrice(purchasePrice),
+      purchasePriceTtc: calcPurchasePriceTtc(purchasePrice, tva),
+      salePrice: calcSalePrice(purchasePrice, tva),
     };
   }
 

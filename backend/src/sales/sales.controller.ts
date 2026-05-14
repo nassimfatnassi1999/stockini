@@ -39,6 +39,12 @@ export class SalesController {
     return this.salesService.findOne(id, user);
   }
 
+  @RequirePermissions('sales.update')
+  @Patch(':id/validate')
+  validate(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.salesService.validate(id, user);
+  }
+
   @RequirePermissions('sales.delete')
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser() user?: AuthUser) {

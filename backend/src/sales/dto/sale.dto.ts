@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -8,7 +9,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { PaymentMethod, PaymentStatus, SaleStatus } from '@prisma/client';
+import { DocumentType, PaymentMethod, PaymentStatus, SaleStatus } from '@prisma/client';
 
 export class CreateSaleItemDto {
   @IsString()
@@ -33,6 +34,14 @@ export class CreateSaleItemDto {
 }
 
 export class CreateSaleDto {
+  @IsOptional()
+  @IsEnum(DocumentType)
+  documentType?: DocumentType;
+
+  @IsOptional()
+  @IsBoolean()
+  reserveStock?: boolean;
+
   @IsOptional()
   @IsString()
   customerId?: string;

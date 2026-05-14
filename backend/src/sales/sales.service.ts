@@ -5,11 +5,14 @@ import {
   Logger,
 } from '@nestjs/common';
 import {
+  CaisseMovementType,
+  DocumentType,
   PaymentStatus,
   PaymentType,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
+import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -18,6 +21,12 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CreateSaleDto, UpdateSaleDto } from './dto/sale.dto';
 
 const MIN_MARGIN_PERCENT = 20;
+
+/** Document types that trigger a real stock decrement when validated */
+const STOCK_IMPACTING_TYPES = new Set<DocumentType>([
+  DocumentType.BON_LIVRAISON,
+  DocumentType.FACTURE,
+]);
 
 @Injectable()
 export class SalesService {
@@ -28,37 +37,48 @@ export class SalesService {
     private readonly stockService: StockService,
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
+    private readonly caisseService: CaisseService,
   ) {}
 
   async create(dto: CreateSaleDto, user?: AuthUser) {
     if (!dto.items.length) {
       throw new BadRequestException('Sale must include at least one item');
     }
-    await this.settings.assertActiveOption(
-      'payment_methods',
-      dto.paymentMethod,
-    );
+
+    const documentType = dto.documentType ?? DocumentType.DEVIS;
+    const reserveStock = dto.reserveStock ?? false;
+    const isDevis = documentType === DocumentType.DEVIS;
+
+    // Payment method is only required / checked for real commercial docs
+    if (!isDevis && dto.paymentMethod) {
+      await this.settings.assertActiveOption('payment_methods', dto.paymentMethod);
+    }
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
 
     return this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.references.generate('INV', 'sale', tx);
+      const prefix = this.prefixForDocument(documentType);
+      const invoiceNumber = await this.references.generate(prefix, 'sale', tx);
+
       const productIds = dto.items.map((item) => item.productId);
       const products = await tx.product.findMany({
         where: { id: { in: productIds }, deletedAt: null },
       });
-      const productsById = new Map(
-        products.map((product) => [product.id, product]),
-      );
+      const productsById = new Map(products.map((p) => [p.id, p]));
+
+      // BON_COMMANDE with reserveStock: immediate stock check needed
+      const immediateStockCheck =
+        documentType === DocumentType.BON_COMMANDE && reserveStock;
 
       const items = dto.items.map((item) => {
         const product = productsById.get(item.productId);
         if (!product) {
           throw new BadRequestException(`Product ${item.productId} not found`);
         }
-        if (product.quantity < item.quantity) {
+
+        if (immediateStockCheck && product.quantity < item.quantity) {
           throw new BadRequestException(
-            `Insufficient stock for ${product.name}`,
+            `Stock insuffisant pour ${product.name} (disponible: ${product.quantity})`,
           );
         }
 
@@ -66,19 +86,21 @@ export class SalesService {
         const discountPercent = item.discountPercent ?? 0;
         const netUnitPrice = unitPrice * (1 - discountPercent / 100);
 
-        // Server-side margin check (uses net price after per-line discount)
-        const purchasePriceHt = Number(product.purchasePrice);
-        if (purchasePriceHt <= 0) {
-          throw new BadRequestException(
-            `Le produit "${product.name}" n'a pas de prix d'achat défini. Vente refusée.`,
-          );
-        }
-        const marginPercent =
-          ((netUnitPrice - purchasePriceHt) / purchasePriceHt) * 100;
-        if (marginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
-          throw new BadRequestException(
-            `Vente refusée : vous n'avez pas le droit de vendre avec une marge inférieure à 20% (produit "${product.name}", marge actuelle ${marginPercent.toFixed(2)}%).`,
-          );
+        // Margin check — skipped for devis (preview document)
+        if (!isDevis) {
+          const purchasePriceHt = Number(product.purchasePrice);
+          if (purchasePriceHt <= 0) {
+            throw new BadRequestException(
+              `Le produit "${product.name}" n'a pas de prix d'achat défini. Vente refusée.`,
+            );
+          }
+          const marginPercent =
+            ((netUnitPrice - purchasePriceHt) / purchasePriceHt) * 100;
+          if (marginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
+            throw new BadRequestException(
+              `Vente refusée : marge insuffisante pour "${product.name}" (${marginPercent.toFixed(2)}% < ${MIN_MARGIN_PERCENT}%).`,
+            );
+          }
         }
 
         return {
@@ -93,7 +115,7 @@ export class SalesService {
       const discount = dto.discount ?? 0;
       const tax = dto.tax ?? 0;
       const total = subtotal - discount + tax;
-      const paidAmount = dto.paidAmount ?? 0;
+      const paidAmount = isDevis ? 0 : (dto.paidAmount ?? 0);
       const remainingAmount = Math.max(total - paidAmount, 0);
       const paymentStatus = this.paymentStatus(total, paidAmount);
 
@@ -109,30 +131,39 @@ export class SalesService {
           paidAmount,
           remainingAmount,
           paymentStatus,
-          status: SaleStatus.COMPLETED,
+          status: SaleStatus.DRAFT,
+          documentType,
+          reserveStock,
+          stockImpactDone: false,
           sellerId,
-          items: {
-            create: items,
-          },
+          items: { create: items },
         },
         include: { items: true, customer: true, seller: true, payments: true },
       });
 
-      for (const item of items) {
-        await this.stockService.applyMovement(tx, {
-          productId: item.productId,
-          type: StockMovementType.SALE,
-          quantity: item.quantity,
-          reason: 'Sale',
-          userId: sellerId,
-        });
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { lastSellingPrice: item.unitPrice },
+      // BON_COMMANDE with reserveStock: apply stock immediately
+      if (immediateStockCheck) {
+        for (const item of items) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.SALE,
+            quantity: item.quantity,
+            reason: `${DocumentType.BON_COMMANDE}:${invoiceNumber}`,
+            userId: sellerId,
+          });
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { lastSellingPrice: item.unitPrice },
+          });
+        }
+        await tx.sale.update({
+          where: { id: sale.id },
+          data: { stockImpactDone: true },
         });
       }
 
-      if (paidAmount > 0 && dto.paymentMethod) {
+      // Payment record for non-devis docs with upfront payment
+      if (!isDevis && paidAmount > 0 && dto.paymentMethod) {
         await tx.payment.create({
           data: {
             reference: await this.references.generate('PAY', 'payment', tx),
@@ -147,6 +178,75 @@ export class SalesService {
 
       return tx.sale.findUniqueOrThrow({
         where: { id: sale.id },
+        include: {
+          items: { include: { product: true } },
+          customer: true,
+          seller: true,
+          payments: true,
+        },
+      });
+    });
+  }
+
+  /**
+   * Validate a document: transition DRAFT → COMPLETED and apply stock
+   * decrement for BON_LIVRAISON, FACTURE, and BON_COMMANDE with reserveStock.
+   */
+  async validate(id: string, user?: AuthUser) {
+    const userId = user?.id;
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findUniqueOrThrow({
+        where: { id },
+        include: { items: { include: { product: true } } },
+      });
+
+      if (sale.documentType === DocumentType.DEVIS) {
+        throw new BadRequestException('Un devis ne peut pas être validé');
+      }
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('Impossible de valider un document annulé');
+      }
+      if (sale.status === SaleStatus.COMPLETED) {
+        throw new BadRequestException('Ce document est déjà validé');
+      }
+
+      // Does this validation trigger a stock decrement?
+      const needsStockImpact =
+        (STOCK_IMPACTING_TYPES.has(sale.documentType as DocumentType) ||
+          (sale.documentType === DocumentType.BON_COMMANDE && sale.reserveStock)) &&
+        !sale.stockImpactDone;
+
+      if (needsStockImpact) {
+        for (const item of sale.items) {
+          const product = item.product;
+          if (!product) {
+            throw new BadRequestException(`Produit introuvable (id: ${item.productId})`);
+          }
+          if (product.quantity < item.quantity) {
+            throw new BadRequestException(
+              `Stock insuffisant pour "${product.name}" — disponible: ${product.quantity}, demandé: ${item.quantity}`,
+            );
+          }
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.SALE,
+            quantity: item.quantity,
+            reason: `${sale.documentType}:${sale.invoiceNumber}`,
+            userId,
+          });
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { lastSellingPrice: Number(item.unitPrice) },
+          });
+        }
+      }
+
+      return tx.sale.update({
+        where: { id },
+        data: {
+          status: SaleStatus.COMPLETED,
+          ...(needsStockImpact && { stockImpactDone: true }),
+        },
         include: {
           items: { include: { product: true } },
           customer: true,
@@ -194,15 +294,30 @@ export class SalesService {
         include: { items: true },
       });
       if (sale.status === SaleStatus.CANCELLED) {
-        throw new BadRequestException('Sale is already cancelled');
+        throw new BadRequestException('Document déjà annulé');
       }
 
-      for (const item of sale.items) {
-        await this.stockService.applyMovement(tx, {
-          productId: item.productId,
-          type: StockMovementType.CUSTOMER_RETURN,
-          quantity: item.quantity,
-          reason: 'Sale cancellation',
+      // Reverse stock only if it was actually decremented
+      if (sale.stockImpactDone) {
+        for (const item of sale.items) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.CUSTOMER_RETURN,
+            quantity: item.quantity,
+            reason: `Annulation ${sale.documentType}:${sale.invoiceNumber}`,
+            userId,
+          });
+        }
+      }
+
+      // Always reverse caisse if a payment was collected
+      const paidAmount = Number(sale.paidAmount);
+      if (paidAmount > 0) {
+        await this.caisseService.recordMovement(tx, {
+          type: CaisseMovementType.ANNULATION_VENTE,
+          montant: -paidAmount,
+          motif: `Annulation ${sale.documentType} ${sale.invoiceNumber}`,
+          referenceDoc: sale.invoiceNumber,
           userId,
         });
       }
@@ -217,10 +332,7 @@ export class SalesService {
 
   async update(id: string, dto: UpdateSaleDto) {
     await this.settings.assertActiveOption('sale_statuses', dto.status);
-    await this.settings.assertActiveOption(
-      'payment_statuses',
-      dto.paymentStatus,
-    );
+    await this.settings.assertActiveOption('payment_statuses', dto.paymentStatus);
     const sale = await this.prisma.sale.findUniqueOrThrow({ where: { id } });
     const paidAmount = dto.paidAmount ?? Number(sale.paidAmount);
     return this.prisma.sale.update({
@@ -252,17 +364,30 @@ export class SalesService {
         where: { id },
         include: { items: true },
       });
-      if (sale.status !== SaleStatus.CANCELLED) {
+
+      // Reverse stock only if not already cancelled and stock was impacted
+      if (sale.status !== SaleStatus.CANCELLED && sale.stockImpactDone) {
         for (const item of sale.items) {
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
             type: StockMovementType.CUSTOMER_RETURN,
             quantity: item.quantity,
-            reason: 'Sale deleted',
+            reason: `Suppression ${sale.documentType}:${sale.invoiceNumber}`,
+            userId,
+          });
+        }
+        const paidAmount = Number(sale.paidAmount);
+        if (paidAmount > 0) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.ANNULATION_VENTE,
+            montant: -paidAmount,
+            motif: `Suppression ${sale.documentType} ${sale.invoiceNumber}`,
+            referenceDoc: sale.invoiceNumber,
             userId,
           });
         }
       }
+
       await tx.payment.deleteMany({ where: { saleId: id } });
       await tx.sale.delete({ where: { id } });
       this.logger.log(`Sale ${id} permanently deleted by ${userId ?? 'unknown'}`);
@@ -270,17 +395,23 @@ export class SalesService {
     });
   }
 
+  private prefixForDocument(documentType: DocumentType): string {
+    const map: Record<DocumentType, string> = {
+      DEVIS: 'DEV',
+      BON_COMMANDE: 'BC',
+      BON_LIVRAISON: 'BL',
+      FACTURE: 'FAC',
+      AVOIR: 'AV',
+    };
+    return map[documentType] ?? 'INV';
+  }
+
   private paymentStatus(total: number, paidAmount: number) {
-    if (paidAmount <= 0) {
-      return PaymentStatus.UNPAID;
-    }
-    if (paidAmount < total) {
-      return PaymentStatus.PARTIAL;
-    }
+    if (paidAmount <= 0) return PaymentStatus.UNPAID;
+    if (paidAmount < total) return PaymentStatus.PARTIAL;
     return PaymentStatus.PAID;
   }
 
-  /** Returns true when the user holds a specific permission or the wildcard '*'. */
   private hasPermission(user: AuthUser | undefined, permission: string): boolean {
     if (!user) return false;
     const perms = user.permissions ?? [];

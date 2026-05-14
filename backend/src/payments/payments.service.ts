@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { PaymentStatus, PaymentType } from '@prisma/client';
+import { CaisseMovementType, PaymentStatus, PaymentType } from '@prisma/client';
+import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -13,6 +14,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
+    private readonly caisseService: CaisseService,
   ) {}
 
   async create(dto: CreatePaymentDto) {
@@ -100,6 +102,14 @@ export class PaymentsService {
         },
       });
 
+      await this.caisseService.recordMovement(tx, {
+        type: CaisseMovementType.ENCAISSEMENT_VENTE,
+        montant: dto.amount,
+        motif: `Encaissement vente ${payment.sale?.invoiceNumber ?? saleId}`,
+        referenceDoc: payment.reference,
+        userId: undefined,
+      });
+
       return payment;
     });
   }
@@ -132,7 +142,7 @@ export class PaymentsService {
           supplierId: purchase.supplierId,
           note: dto.note,
         },
-        include: { purchase: true, supplier: true },
+        include: { purchase: { include: { supplier: true } }, supplier: true },
       });
 
       await tx.purchase.update({
@@ -142,6 +152,14 @@ export class PaymentsService {
           remainingAmount: newRemainingAmount,
           paymentStatus: newStatus,
         },
+      });
+
+      await this.caisseService.recordMovement(tx, {
+        type: CaisseMovementType.DECAISSEMENT_ACHAT,
+        montant: -dto.amount,
+        motif: `Paiement fournisseur ${payment.purchase?.supplier?.name ?? purchaseId}`,
+        referenceDoc: payment.reference,
+        userId: undefined,
       });
 
       return payment;

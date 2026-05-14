@@ -4,6 +4,7 @@ import { AlertsModule } from './alerts/alerts.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { CaisseModule } from './caisse/caisse.module';
 import { AuthModule } from './auth/auth.module';
 import { AvoirsModule } from './avoirs/avoirs.module';
 import { BrandsModule } from './brands/brands.module';
@@ -46,6 +47,7 @@ import { UsersModule } from './users/users.module';
     TrashModule,
     DocumentsModule,
     AvoirsModule,
+    CaisseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

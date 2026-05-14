@@ -38,11 +38,25 @@ export class CreateProductDto {
   @IsString()
   supplierId?: string;
 
+  // TVA en % — salePrice and purchasePriceTtc sont dérivés automatiquement
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tva?: number;
+
   // Prix d'achat HT — salePrice and purchasePriceTtc are derived by the service
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   purchasePrice!: number;
+
+  // Stock initial lors de la création (optionnel, défaut 0)
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  quantity?: number;
 
   @Type(() => Number)
   @IsNumber()
@@ -91,6 +105,12 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   supplierId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tva?: number;
 
   // Prix d'achat HT — salePrice and purchasePriceTtc are derived by the service
   @IsOptional()
