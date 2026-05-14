@@ -192,7 +192,7 @@ db-migrate: backend-env-check db-up db-wait ## Appliquer les migrations Prisma
 		cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && npx prisma migrate dev --name init; \
 	else \
 		echo -e "$(BLUE)Application des migrations existantes...$(NC)"; \
-		cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && npx prisma migrate dev; \
+		cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && npx prisma migrate deploy; \
 	fi
 
 db-seed: backend-env-check db-up db-wait ## Lancer le seed Prisma si nécessaire

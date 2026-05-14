@@ -238,11 +238,14 @@ export function SimpleDashboard() {
   const prevRange = useMemo(() => getPrevRange(range), [range]);
 
   // ── Data fetching ─────────────────────────────────────────────────────────
-  const { data: sales = [] }     = useQuery({ queryKey: ['op-sales'],     queryFn: stockiniApi.sales,            staleTime: 30_000 });
-  const { data: purchases = [] } = useQuery({ queryKey: ['op-purchases'], queryFn: stockiniApi.purchases,        staleTime: 30_000 });
+  const { data: salesResp }      = useQuery({ queryKey: ['op-sales'],     queryFn: () => stockiniApi.sales(),     staleTime: 30_000 });
+  const { data: purchasesResp }  = useQuery({ queryKey: ['op-purchases'], queryFn: () => stockiniApi.purchases(), staleTime: 30_000 });
   const { data: products = [] }  = useQuery({ queryKey: ['op-products'],  queryFn: () => stockiniApi.products(), staleTime: 60_000 });
   const { data: alerts = [] }    = useQuery({ queryKey: ['op-alerts'],    queryFn: stockiniApi.alerts,           staleTime: 30_000 });
   const { data: topSelling }     = useQuery({ queryKey: ['op-topsell'],   queryFn: stockiniApi.topSelling,       staleTime: 60_000 });
+
+  const sales:     Sale[]     = Array.isArray(salesResp?.data)     ? salesResp.data     : [];
+  const purchases: Purchase[] = Array.isArray(purchasesResp?.data) ? purchasesResp.data : [];
 
   // ── Filtered slices ───────────────────────────────────────────────────────
   const activeSales   = useMemo(() => sales.filter(s => s.status !== 'CANCELLED'),    [sales]);

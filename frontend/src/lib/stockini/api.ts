@@ -14,6 +14,9 @@ import type {
   GeneratedDocument,
   SalesDocumentType,
   DashboardReport,
+  PaginatedResponse,
+  PurchasesQueryParams,
+  SalesQueryParams,
   Payment,
   Product,
   Purchase,
@@ -28,7 +31,11 @@ import type {
   TrashItem,
 } from './types';
 
-type ProductUpdatePayload = Omit<Partial<Product>, 'quantity'> & { categoryId?: string };
+type ProductUpdatePayload = Omit<Partial<Product>, 'quantity'> & {
+  categoryId?: string;
+  brandId?: string;
+  supplierId?: string;
+};
 
 function normalizeTrashItem(item: TrashItem): TrashItem {
   const entity = item.entity ?? item.entityType ?? item.entity_type;
@@ -63,14 +70,16 @@ export const stockiniApi = {
   createSupplier: (data: Partial<Supplier>) => api.post<Supplier>('/suppliers', data).then((r) => r.data),
   updateSupplier: (id: string, data: Partial<Supplier>) => api.patch<Supplier>(`/suppliers/${id}`, data).then((r) => r.data),
   deleteSupplier: (id: string) => api.delete(`/suppliers/${id}`).then((r) => r.data),
-  sales: () => api.get<Sale[]>('/sales').then((r) => r.data),
+  sales: (params?: SalesQueryParams) => api.get<PaginatedResponse<Sale>>('/sales', { params }).then((r) => r.data),
   sale: (id: string) => api.get<SaleDetail>(`/sales/${id}`).then((r) => r.data),
+  saleNextReference: (documentType: SalesDocumentType) =>
+    api.get<{ reference: string }>('/sales/next-reference', { params: { documentType } }).then((r) => r.data),
   createSale: (data: unknown) => api.post<Sale>('/sales', data).then((r) => r.data),
   updateSale: (id: string, data: Partial<Sale>) => api.patch<Sale>(`/sales/${id}`, data).then((r) => r.data),
   validateSale: (id: string) => api.patch(`/sales/${id}/validate`).then((r) => r.data),
   cancelSale: (id: string) => api.patch(`/sales/${id}/cancel`).then((r) => r.data),
   deleteSale: (id: string) => api.delete(`/sales/${id}`).then((r) => r.data),
-  purchases: () => api.get<Purchase[]>('/purchases').then((r) => r.data),
+  purchases: (params?: PurchasesQueryParams) => api.get<PaginatedResponse<Purchase>>('/purchases', { params }).then((r) => r.data),
   purchase: (id: string) => api.get<PurchaseDetail>(`/purchases/${id}`).then((r) => r.data),
   createPurchase: (data: unknown) => api.post<Purchase>('/purchases', data).then((r) => r.data),
   receivePurchase: (id: string, items: Array<{ purchaseItemId: string; quantity: number }>) =>
@@ -117,6 +126,12 @@ export const stockiniApi = {
   permanentDeleteTrashItem: (entity: TrashEntityType, id: string) =>
     api.delete(`/trash/${entity}/${id}/permanent`).then((r) => r.data),
   auditLogs: () => api.get<AuditLog[]>('/audit-logs').then((r) => r.data),
+  recalculateLastSalePrices: () =>
+    api
+      .post<{ productsUpdated: number; historyRows: number }>(
+        '/admin/recalculate-last-sale-prices',
+      )
+      .then((r) => r.data),
 
   // ── Generated Documents ───────────────────────────────────────────────────
   generateDocuments: (invoiceIds: string[], documentType: SalesDocumentType) =>

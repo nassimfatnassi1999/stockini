@@ -1,14 +1,17 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
+  IsEnum,
   IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { PaymentStatus, PurchaseStatus } from '@prisma/client';
-import { IsEnum } from 'class-validator';
 
 export class CreatePurchaseItemDto {
   @IsString()
@@ -41,12 +44,6 @@ export class CreatePurchaseDto {
   @Min(0)
   tax?: number;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  paidAmount?: number;
-
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreatePurchaseItemDto)
@@ -70,7 +67,39 @@ export class ReceivePurchaseDto {
   items!: ReceivePurchaseItemDto[];
 }
 
+/** Only status changes via PATCH. Financial state managed through /payments/purchases/:id/pay. */
 export class UpdatePurchaseDto {
+  @IsOptional()
+  @IsEnum(PurchaseStatus)
+  status?: PurchaseStatus;
+}
+
+export class PurchasePaginationDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
   @IsOptional()
   @IsEnum(PurchaseStatus)
   status?: PurchaseStatus;
@@ -80,8 +109,6 @@ export class UpdatePurchaseDto {
   paymentStatus?: PaymentStatus;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  paidAmount?: number;
+  @IsString()
+  supplierId?: string;
 }

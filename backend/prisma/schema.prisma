@@ -103,71 +103,80 @@ enum DocumentStatus {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
-  passwordHash   String
-  fullName       String
-  roleId         String
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  role           Role            @relation(fields: [roleId], references: [id])
-  stockMovements     StockMovement[]
-  caisseMovements    CaisseMovement[]
-  sales              Sale[]              @relation("SellerSales")
-  purchases          Purchase[]          @relation("CreatorPurchases")
-  auditLogs          AuditLog[]
-  generatedDocuments GeneratedDocument[]
-  documentEmailLogs  DocumentEmailLog[]
-  creditNotes        CreditNote[]
+  id                    String                @id @default(cuid())
+  email                 String                @unique
+  passwordHash          String
+  fullName              String
+  roleId                String
+  isActive              Boolean               @default(true)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  role                  Role                  @relation(fields: [roleId], references: [id])
+  stockMovements        StockMovement[]
+  caisseMovements       CaisseMovement[]
+  sales                 Sale[]                @relation("SellerSales")
+  purchases             Purchase[]            @relation("CreatorPurchases")
+  auditLogs             AuditLog[]
+  generatedDocuments    GeneratedDocument[]
+  documentEmailLogs     DocumentEmailLog[]
+  creditNotes           CreditNote[]
+  productPriceHistories ProductPriceHistory[]
 
   @@index([roleId])
 }
 
 model Role {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String @id @default(cuid())
+  name        String @unique
   permissions Json
   users       User[]
 }
 
 model Product {
-  id               String          @id @default(cuid())
-  idProduct        String          @unique
-  reference        String          @unique
-  sku              String          @unique
-  barcode          String?         @unique
-  name             String
-  description      String?
-  categoryId       String
-  brandId          String
-  supplierId       String?
-  tva              Decimal         @default(19) @db.Decimal(5, 2)
-  purchasePrice    Decimal         @db.Decimal(12, 3)
-  purchasePriceTtc Decimal         @default(0) @db.Decimal(12, 3)
-  salePrice        Decimal         @db.Decimal(12, 3)
-  lastSellingPrice Decimal?        @db.Decimal(12, 3)
-  quantity         Int             @default(0)
-  minStock         Int             @default(0)
-  location         String?
-  imageUrl         String?
-  isActive         Boolean         @default(true)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  deletedAt        DateTime?
-  deletedBy        String?
-  category         Category        @relation(fields: [categoryId], references: [id])
-  brand            Brand           @relation(fields: [brandId], references: [id])
-  supplier         Supplier?       @relation(fields: [supplierId], references: [id])
-  stockMovements   StockMovement[]
-  saleItems        SaleItem[]
-  purchaseItems    PurchaseItem[]
-  alerts           Alert[]
-  creditNoteItems  CreditNoteItem[]
+  id                        String                @id @default(cuid())
+  idProduct                 String                @unique
+  reference                 String                @unique
+  sku                       String                @unique
+  barcode                   String?               @unique
+  name                      String
+  description               String?
+  categoryId                String
+  brandId                   String
+  supplierId                String?
+  tva                       Decimal               @default(19) @db.Decimal(5, 2)
+  purchasePrice             Decimal               @db.Decimal(12, 3)
+  purchasePriceTtc          Decimal               @default(0) @db.Decimal(12, 3)
+  salePrice                 Decimal               @db.Decimal(12, 3)
+  lastSellingPrice          Decimal?              @db.Decimal(12, 3)
+  lastSaleDate              DateTime?
+  lastSaleDocumentId        String?
+  lastSaleDocumentReference String?
+  lastSaleDocumentType      DocumentType?
+  lastSaleCustomerId        String?
+  quantity                  Int                   @default(0)
+  minStock                  Int                   @default(0)
+  location                  String?
+  imageUrl                  String?
+  isActive                  Boolean               @default(true)
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  deletedAt                 DateTime?
+  deletedBy                 String?
+  category                  Category              @relation(fields: [categoryId], references: [id])
+  brand                     Brand                 @relation(fields: [brandId], references: [id])
+  supplier                  Supplier?             @relation(fields: [supplierId], references: [id])
+  stockMovements            StockMovement[]
+  saleItems                 SaleItem[]
+  purchaseItems             PurchaseItem[]
+  alerts                    Alert[]
+  creditNoteItems           CreditNoteItem[]
+  priceHistories            ProductPriceHistory[]
+  lastSaleCustomer          Customer?             @relation("ProductLastSaleCustomer", fields: [lastSaleCustomerId], references: [id])
 
   @@index([categoryId])
   @@index([brandId])
   @@index([supplierId])
+  @@index([lastSaleCustomerId])
   @@index([name])
   @@index([idProduct])
   @@index([reference])
@@ -188,22 +197,24 @@ model Brand {
 }
 
 model Customer {
-  id            String       @id @default(cuid())
-  reference     String       @unique
-  name          String
-  phone         String?
-  email         String?
-  address       String?
-  type          CustomerType @default(INDIVIDUAL)
-  taxNumber     String?
-  creditBalance Decimal      @default(0) @db.Decimal(12, 3)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  deletedAt     DateTime?
-  deletedBy     String?
-  sales         Sale[]
-  payments      Payment[]
-  creditNotes   CreditNote[]
+  id                    String                @id @default(cuid())
+  reference             String                @unique
+  name                  String
+  phone                 String?
+  email                 String?
+  address               String?
+  type                  CustomerType          @default(INDIVIDUAL)
+  taxNumber             String?
+  creditBalance         Decimal               @default(0) @db.Decimal(12, 3)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  deletedAt             DateTime?
+  deletedBy             String?
+  sales                 Sale[]
+  payments              Payment[]
+  creditNotes           CreditNote[]
+  productLastSales      Product[]             @relation("ProductLastSaleCustomer")
+  productPriceHistories ProductPriceHistory[]
 
   @@index([name])
   @@index([reference])
@@ -211,8 +222,8 @@ model Customer {
 }
 
 model Supplier {
-  id            String      @id @default(cuid())
-  reference     String      @unique
+  id            String     @id @default(cuid())
+  reference     String     @unique
   name          String
   contactPerson String?
   phone         String?
@@ -220,8 +231,8 @@ model Supplier {
   address       String?
   taxNumber     String?
   paymentTerms  String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
   deletedAt     DateTime?
   deletedBy     String?
   products      Product[]
@@ -253,36 +264,39 @@ model StockMovement {
 }
 
 model Sale {
-  id              String        @id @default(cuid())
-  invoiceNumber   String        @unique
-  customerId      String?
-  subtotal        Decimal       @db.Decimal(12, 3)
-  discount        Decimal       @default(0) @db.Decimal(12, 3)
-  tax             Decimal       @default(0) @db.Decimal(12, 3)
-  total           Decimal       @db.Decimal(12, 3)
-  paidAmount      Decimal       @default(0) @db.Decimal(12, 3)
-  remainingAmount Decimal       @default(0) @db.Decimal(12, 3)
-  paymentStatus   PaymentStatus @default(UNPAID)
-  status          SaleStatus    @default(DRAFT)
-  documentType    DocumentType  @default(DEVIS)
-  stockImpactDone Boolean       @default(false)
-  reserveStock    Boolean       @default(false)
-  sellerId        String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  deletedAt       DateTime?
-  deletedBy       String?
-  customer        Customer?     @relation(fields: [customerId], references: [id])
-  seller          User?         @relation("SellerSales", fields: [sellerId], references: [id])
-  items               SaleItem[]
-  payments            Payment[]
-  generatedDocuments  GeneratedDocument[]
-  creditNotes         CreditNote[]
+  id                      String                @id @default(cuid())
+  invoiceNumber           String                @unique
+  customerId              String?
+  subtotal                Decimal               @db.Decimal(12, 3)
+  discount                Decimal               @default(0) @db.Decimal(12, 3)
+  tax                     Decimal               @default(0) @db.Decimal(12, 3)
+  total                   Decimal               @db.Decimal(12, 3)
+  paidAmount              Decimal               @default(0) @db.Decimal(12, 3)
+  remainingAmount         Decimal               @default(0) @db.Decimal(12, 3)
+  paymentStatus           PaymentStatus         @default(UNPAID)
+  status                  SaleStatus            @default(DRAFT)
+  documentType            DocumentType          @default(DEVIS)
+  stockImpactDone         Boolean               @default(false)
+  lastSalePriceImpactDone Boolean               @default(false) @map("last_sale_price_impact_done")
+  reserveStock            Boolean               @default(false)
+  sellerId                String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  deletedAt               DateTime?
+  deletedBy               String?
+  customer                Customer?             @relation(fields: [customerId], references: [id])
+  seller                  User?                 @relation("SellerSales", fields: [sellerId], references: [id])
+  items                   SaleItem[]
+  payments                Payment[]
+  generatedDocuments      GeneratedDocument[]
+  creditNotes             CreditNote[]
+  productPriceHistories   ProductPriceHistory[]
 
   @@index([customerId])
   @@index([sellerId])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([documentType, status, createdAt])
 }
 
 model SaleItem {
@@ -291,6 +305,8 @@ model SaleItem {
   productId       String
   quantity        Int
   unitPrice       Decimal          @db.Decimal(12, 3)
+  discountPercent Decimal          @default(0) @db.Decimal(5, 2)
+  finalUnitPrice  Decimal?         @db.Decimal(12, 3)
   total           Decimal          @db.Decimal(12, 3)
   sale            Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
   product         Product          @relation(fields: [productId], references: [id])
@@ -298,6 +314,30 @@ model SaleItem {
 
   @@index([saleId])
   @@index([productId])
+}
+
+model ProductPriceHistory {
+  id                String       @id @default(cuid())
+  productId         String       @map("product_id")
+  documentId        String       @map("document_id")
+  documentType      DocumentType @map("document_type")
+  documentReference String       @map("document_reference")
+  clientId          String?      @map("client_id")
+  prixVente         Decimal      @map("prix_vente") @db.Decimal(12, 3)
+  dateVente         DateTime     @map("date_vente")
+  userId            String?      @map("user_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  product           Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  document          Sale         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  client            Customer?    @relation(fields: [clientId], references: [id])
+  user              User?        @relation(fields: [userId], references: [id])
+
+  @@unique([productId, documentId])
+  @@index([productId, dateVente])
+  @@index([documentId])
+  @@index([clientId])
+  @@index([userId])
+  @@map("product_price_history")
 }
 
 model Purchase {
@@ -326,6 +366,7 @@ model Purchase {
   @@index([createdById])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([status, createdAt])
 }
 
 model PurchaseItem {
@@ -344,25 +385,26 @@ model PurchaseItem {
 }
 
 model Payment {
-  id           String        @id @default(cuid())
-  reference    String        @unique
-  type         PaymentType
-  method       PaymentMethod
-  amount       Decimal       @db.Decimal(12, 3)
-  saleId       String?
-  purchaseId   String?
-  customerId   String?
-  supplierId   String?
-  creditNoteId String?
-  note         String?
-  createdAt    DateTime      @default(now())
-  deletedAt    DateTime?
-  deletedBy    String?
-  sale         Sale?         @relation(fields: [saleId], references: [id])
-  purchase     Purchase?     @relation(fields: [purchaseId], references: [id])
-  customer     Customer?     @relation(fields: [customerId], references: [id])
-  supplier     Supplier?     @relation(fields: [supplierId], references: [id])
-  creditNote   CreditNote?   @relation(fields: [creditNoteId], references: [id])
+  id             String        @id @default(cuid())
+  reference      String        @unique
+  type           PaymentType
+  method         PaymentMethod
+  amount         Decimal       @db.Decimal(12, 3)
+  cashImpactDone Boolean       @default(false)
+  saleId         String?
+  purchaseId     String?
+  customerId     String?
+  supplierId     String?
+  creditNoteId   String?
+  note           String?
+  createdAt      DateTime      @default(now())
+  deletedAt      DateTime?
+  deletedBy      String?
+  sale           Sale?         @relation(fields: [saleId], references: [id])
+  purchase       Purchase?     @relation(fields: [purchaseId], references: [id])
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  supplier       Supplier?     @relation(fields: [supplierId], references: [id])
+  creditNote     CreditNote?   @relation(fields: [creditNoteId], references: [id])
 
   @@index([saleId])
   @@index([purchaseId])
@@ -395,31 +437,31 @@ model Alert {
 }
 
 model GeneratedDocument {
-  id             String         @id @default(cuid())
+  id             String             @id @default(cuid())
   invoiceId      String?
   creditNoteId   String?
   clientId       String?
   clientName     String?
   documentType   DocumentType
-  documentNumber String         @unique
+  documentNumber String             @unique
   fileName       String
   minioBucket    String
   minioObjectKey String
   fileSize       Int?
-  mimeType       String         @default("application/pdf")
-  totalHt        Decimal?       @db.Decimal(12, 3)
-  totalTva       Decimal?       @db.Decimal(12, 3)
-  totalTtc       Decimal?       @db.Decimal(12, 3)
+  mimeType       String             @default("application/pdf")
+  totalHt        Decimal?           @db.Decimal(12, 3)
+  totalTva       Decimal?           @db.Decimal(12, 3)
+  totalTtc       Decimal?           @db.Decimal(12, 3)
   generatedBy    String?
-  generatedAt    DateTime       @default(now())
-  status         DocumentStatus @default(GENERATED)
+  generatedAt    DateTime           @default(now())
+  status         DocumentStatus     @default(GENERATED)
   deletedAt      DateTime?
-  emailStatus    EmailStatus    @default(PENDING)
+  emailStatus    EmailStatus        @default(PENDING)
   sentAt         DateTime?
   sentTo         String?
-  sale           Sale?          @relation(fields: [invoiceId], references: [id])
-  creditNote     CreditNote?    @relation(fields: [creditNoteId], references: [id])
-  generator      User?          @relation(fields: [generatedBy], references: [id])
+  sale           Sale?              @relation(fields: [invoiceId], references: [id])
+  creditNote     CreditNote?        @relation(fields: [creditNoteId], references: [id])
+  generator      User?              @relation(fields: [generatedBy], references: [id])
   emailLogs      DocumentEmailLog[]
 
   @@index([invoiceId])
@@ -501,23 +543,23 @@ model DropdownOption {
 }
 
 model CreditNote {
-  id               String            @id @default(cuid())
-  numero           String            @unique
+  id               String              @id @default(cuid())
+  numero           String              @unique
   saleId           String
   customerId       String?
-  dateAvoir        DateTime          @default(now())
-  subtotal         Decimal           @db.Decimal(12, 3)
-  tax              Decimal           @default(0) @db.Decimal(12, 3)
-  total            Decimal           @db.Decimal(12, 3)
-  montantRembourse Decimal           @db.Decimal(12, 3)
+  dateAvoir        DateTime            @default(now())
+  subtotal         Decimal             @db.Decimal(12, 3)
+  tax              Decimal             @default(0) @db.Decimal(12, 3)
+  total            Decimal             @db.Decimal(12, 3)
+  montantRembourse Decimal             @db.Decimal(12, 3)
   motif            String?
-  statut           CreditNoteStatus  @default(CREATED)
+  statut           CreditNoteStatus    @default(CREATED)
   createdById      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  sale             Sale              @relation(fields: [saleId], references: [id])
-  customer         Customer?         @relation(fields: [customerId], references: [id])
-  createdBy        User?             @relation(fields: [createdById], references: [id])
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  sale             Sale                @relation(fields: [saleId], references: [id])
+  customer         Customer?           @relation(fields: [customerId], references: [id])
+  createdBy        User?               @relation(fields: [createdById], references: [id])
   items            CreditNoteItem[]
   payments         Payment[]
   documents        GeneratedDocument[]
@@ -529,20 +571,20 @@ model CreditNote {
 }
 
 model CreditNoteItem {
-  id                String      @id @default(cuid())
+  id                String     @id @default(cuid())
   creditNoteId      String
   saleItemId        String?
   productId         String
   designation       String
   quantiteRetournee Int
-  prixUnitaireHt    Decimal     @db.Decimal(12, 3)
-  tva               Decimal     @default(19) @db.Decimal(5, 2)
-  totalHt           Decimal     @db.Decimal(12, 3)
-  totalTtc          Decimal     @db.Decimal(12, 3)
+  prixUnitaireHt    Decimal    @db.Decimal(12, 3)
+  tva               Decimal    @default(19) @db.Decimal(5, 2)
+  totalHt           Decimal    @db.Decimal(12, 3)
+  totalTtc          Decimal    @db.Decimal(12, 3)
   motifLigne        String?
-  creditNote        CreditNote  @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
-  product           Product     @relation(fields: [productId], references: [id])
-  saleItem          SaleItem?   @relation(fields: [saleItemId], references: [id])
+  creditNote        CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  product           Product    @relation(fields: [productId], references: [id])
+  saleItem          SaleItem?  @relation(fields: [saleItemId], references: [id])
 
   @@index([creditNoteId])
   @@index([productId])
@@ -564,6 +606,7 @@ model CaisseMovement {
   @@index([type])
   @@index([createdAt])
   @@index([userId])
+  @@index([type, createdAt])
 }
 
 model CaisseConfig {

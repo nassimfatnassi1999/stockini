@@ -33,7 +33,7 @@ import {
   createEmptyLine,
   isFilledLine,
   MIN_MARGIN_PERCENT,
-  recalculateLine,
+  recalculateSaleLine,
   type DocumentTotals,
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
@@ -43,6 +43,7 @@ import type {
   Customer,
   DropdownOption,
   EmailPreview,
+  PaginatedResponse,
   Sale,
   SaleDetail,
   SalesDocumentType,
@@ -90,6 +91,21 @@ const DOC_TYPES: Array<{ id: SalesDocumentType; label: string; saveLabel: string
   { id: 'BON_LIVRAISON', label: 'Bon de livraison', saveLabel: 'Enregistrer le bon de livraison' },
   { id: 'FACTURE', label: 'Facture', saveLabel: 'Enregistrer la facture' },
 ];
+
+const SALES_DOCUMENT_TYPES = new Set<SalesDocumentType>([
+  'DEVIS',
+  'BON_COMMANDE',
+  'BON_LIVRAISON',
+  'FACTURE',
+  'AVOIR',
+]);
+
+const SALES_API_DOCUMENT_TYPES = new Set<SalesDocumentType>([
+  'DEVIS',
+  'BON_COMMANDE',
+  'BON_LIVRAISON',
+  'FACTURE',
+]);
 
 const PDF_ACTIONS: Array<{ type: SalesDocumentType; label: string }> = [
   { type: 'DEVIS', label: 'Générer devis' },
@@ -180,7 +196,7 @@ export default function VentesPage() {
     setLines(
       draft.lines?.length
         ? draft.lines.map((line) =>
-            recalculateLine({
+            recalculateSaleLine({
               ...createEmptyLine(),
               ...line,
               id: line.id || crypto.randomUUID(),
@@ -211,10 +227,11 @@ export default function VentesPage() {
     queryFn: () => api.get<Customer[]>('/customers').then((r) => r.data),
   });
 
-  const salesQuery = useQuery<Sale[]>({
+  const salesQuery = useQuery<PaginatedResponse<Sale>>({
     queryKey: ['sales'],
-    queryFn: () => api.get<Sale[]>('/sales').then((r) => r.data),
+    queryFn: () => api.get<PaginatedResponse<Sale>>('/sales').then((r) => r.data),
   });
+  const salesList: Sale[] = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
 
   const paymentMethodsQuery = useQuery<DropdownOption[]>({
     queryKey: ['stockini-dropdown-options', 'payment_methods'],
@@ -240,8 +257,9 @@ export default function VentesPage() {
   const hasMissingPurchasePrice = filledLines.some(
     (l) => l.productId !== null && l.purchasePriceHt <= 0,
   );
+  const hasInvalidQuantity = filledLines.some((l) => l.quantity <= 0);
   const marginBlocked = !allowLowMargin && invalidMarginLines.length > 0;
-  const canSave = filledLines.length > 0 && !marginBlocked && !hasMissingPurchasePrice;
+  const canSave = filledLines.length > 0 && !marginBlocked && !hasMissingPurchasePrice && !hasInvalidQuantity;
 
   const resetForm = () => {
     setLines([createEmptyLine()]);
@@ -268,20 +286,39 @@ export default function VentesPage() {
           "Vente bloquée : un ou plusieurs produits n'ont pas de prix d'achat défini.",
         );
       }
+      if (hasInvalidQuantity) {
+        throw new Error('La quantité doit être supérieure à 0 pour chaque ligne.');
+      }
       if (!allowLowMargin && invalidMarginLines.length > 0) {
         throw new Error(
           "Vous n'avez pas le droit de valider cette vente. La marge minimale autorisée est de 20%.",
         );
       }
+      if (!SALES_DOCUMENT_TYPES.has(documentType)) {
+        throw new Error(`Type de document invalide: ${documentType}`);
+      }
+      if (!SALES_API_DOCUMENT_TYPES.has(documentType)) {
+        throw new Error("Les avoirs doivent être créés depuis l'onglet Avoir.");
+      }
+      const paymentAllowed = documentType === 'FACTURE';
+      const submittedPaidAmount = paymentAllowed ? round3(paidAmountNum) : 0;
+      if (!paymentAllowed && paidAmountNum > 0) {
+        throw new Error(`Le type ${documentType} n'accepte pas de paiement à la création.`);
+      }
+      if (submittedPaidAmount > round3(totals.totalTtc) + 0.001) {
+        throw new Error('Le montant payé ne peut pas dépasser le total TTC.');
+      }
+      if (submittedPaidAmount > 0 && !paymentMethod) {
+        throw new Error('Veuillez sélectionner une méthode de paiement.');
+      }
 
       return api
         .post<Sale>('/sales', {
+          documentType,
           customerId: customerId || undefined,
-          discount: round3(totals.totalRemise),
-          tax: round3(totals.totalTva),
-          paidAmount: round3(paidAmountNum),
+          paidAmount: submittedPaidAmount,
           paymentMethod:
-            paidAmountNum > 0 && paymentMethod ? paymentMethod : undefined,
+            submittedPaidAmount > 0 && paymentMethod ? paymentMethod : undefined,
           items: filledLines.map((l) => ({
             productId: l.productId!,
             quantity: l.quantity,
@@ -316,8 +353,8 @@ export default function VentesPage() {
     mutationFn: (id: string) =>
       api.delete(`/sales/${id}`).then((r) => r.data),
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Sale[]>(['sales'], (prev) =>
-        prev ? prev.filter((s) => s.id !== id) : prev,
+      queryClient.setQueryData<PaginatedResponse<Sale>>(['sales'], (prev) =>
+        prev ? { ...prev, data: prev.data.filter((s) => s.id !== id) } : prev,
       );
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       toast.success('Vente supprimée avec succès');
@@ -361,7 +398,7 @@ export default function VentesPage() {
         const preview = await stockiniApi.emailPreview(relevantDocs.map((d) => d.id));
         setEmailPreview(preview);
       } else {
-        const sales = salesQuery.data ?? [];
+        const sales = salesList;
         const selectedSales = sales.filter((s) => invoiceIds.includes(s.id));
         const clientNames = new Set(selectedSales.map((s) => s.customer?.name ?? 'Client comptoir').filter(Boolean));
         const clientEmails = new Set(selectedSales.map((s) => s.customer?.email ?? '').filter(Boolean));
@@ -497,7 +534,7 @@ export default function VentesPage() {
   });
 
   const hasActions = canViewDetails || canDeleteSale;
-  const currentDocConfig = DOC_TYPES.find((d) => d.id === documentType)!;
+  const currentDocConfig = DOC_TYPES.find((d) => d.id === documentType) ?? DOC_TYPES[0];
   const colSpan = 1 + 7 + (hasActions ? 1 : 0) + 1; // extra col for Download
 
   return (
@@ -534,7 +571,14 @@ export default function VentesPage() {
           <button
             key={dt.id}
             type="button"
-            onClick={() => { setDocumentType(dt.id); setActiveTab(dt.id); }}
+	            onClick={() => {
+	              setDocumentType(dt.id);
+	              setActiveTab(dt.id);
+	              if (dt.id !== 'FACTURE') {
+	                setPaidAmount('');
+	                setPaymentMethod('');
+	              }
+	            }}
             className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === dt.id
                 ? 'bg-primary text-white shadow-sm'
@@ -548,7 +592,12 @@ export default function VentesPage() {
         {/* Avoir tab */}
         <button
           type="button"
-          onClick={() => setActiveTab('AVOIR_TAB')}
+	          onClick={() => {
+	            setDocumentType('AVOIR');
+	            setActiveTab('AVOIR_TAB');
+	            setPaidAmount('');
+	            setPaymentMethod('');
+	          }}
           className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === 'AVOIR_TAB'
               ? 'bg-red-600 text-white shadow-sm'
@@ -619,39 +668,43 @@ export default function VentesPage() {
       {/* Payment section + save action */}
       <div className="rounded-lg border border-border/70 bg-white p-4">
         <div className="flex flex-wrap gap-4 items-end justify-between">
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="space-y-1.5">
-              <Label htmlFor="paid-amount">Montant payé (DT)</Label>
-              <Input
-                id="paid-amount"
-                type="number"
-                min={0}
-                step={0.001}
-                value={paidAmount}
-                onChange={(e) => setPaidAmount(e.target.value)}
-                placeholder="0.000"
-                className="w-36"
-              />
-            </div>
-            {paidAmountNum > 0 && (
-              <div className="space-y-1.5">
-                <Label htmlFor="payment-method">Méthode de paiement</Label>
-                <select
-                  id="payment-method"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="app-select"
-                >
-                  <option value="">— Sélectionner —</option>
-                  {(paymentMethodsQuery.data ?? []).map((opt) => (
-                    <option key={opt.id} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
+	          <div className="flex flex-wrap gap-3 items-end">
+	            {documentType === 'FACTURE' && (
+	              <>
+	                <div className="space-y-1.5">
+	                  <Label htmlFor="paid-amount">Montant payé (DT)</Label>
+	                  <Input
+	                    id="paid-amount"
+	                    type="number"
+	                    min={0}
+	                    step={0.001}
+	                    value={paidAmount}
+	                    onChange={(e) => setPaidAmount(e.target.value)}
+	                    placeholder="0.000"
+	                    className="w-36"
+	                  />
+	                </div>
+	                {paidAmountNum > 0 && (
+	                  <div className="space-y-1.5">
+	                    <Label htmlFor="payment-method">Méthode de paiement</Label>
+	                    <select
+	                      id="payment-method"
+	                      value={paymentMethod}
+	                      onChange={(e) => setPaymentMethod(e.target.value)}
+	                      className="app-select"
+	                    >
+	                      <option value="">— Sélectionner —</option>
+	                      {(paymentMethodsQuery.data ?? []).map((opt) => (
+	                        <option key={opt.id} value={opt.value}>
+	                          {opt.label}
+	                        </option>
+	                      ))}
+	                    </select>
+	                  </div>
+	                )}
+	              </>
+	            )}
+	          </div>
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" onClick={resetForm}>
               Réinitialiser
@@ -676,7 +729,7 @@ export default function VentesPage() {
             onClick={() => setShowHistory((v) => !v)}
             className="flex items-center gap-2 text-sm font-semibold text-text-primary hover:text-primary transition-colors"
           >
-            <span>Historique des ventes ({salesQuery.data?.length ?? 0})</span>
+            <span>Historique des ventes ({salesQuery.data?.total ?? salesList.length})</span>
             {showHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
 
@@ -740,14 +793,14 @@ export default function VentesPage() {
                       Chargement…
                     </td>
                   </tr>
-                ) : (salesQuery.data ?? []).length === 0 ? (
+                ) : salesList.length === 0 ? (
                   <tr>
                     <td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-text-muted">
                       Aucune vente enregistrée
                     </td>
                   </tr>
                 ) : (
-                  (salesQuery.data ?? []).map((sale) => {
+                  salesList.map((sale) => {
                     const isSelected = selectedInvoiceIds.includes(sale.id);
                     return (
                       <tr

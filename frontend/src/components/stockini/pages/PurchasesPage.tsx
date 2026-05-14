@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, money, statusLabel } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
-import type { Purchase } from '@/lib/stockini/types';
+import type { PaginatedResponse, Purchase } from '@/lib/stockini/types';
 import { CrudModal } from '../shared/CrudModal';
 import { PageHeader } from '../shared/PageHeader';
 import { RowActions } from '../shared/RowActions';
@@ -32,8 +32,8 @@ export function PurchasesPage() {
     { name: 'paidAmount', label: 'Montant payé', type: 'number' },
   ];
   const [form, setForm] = useState<Record<string, string | boolean>>(emptyForm(fields));
-  const query = useQuery({ queryKey: ['stockini-purchases'], queryFn: stockiniApi.purchases });
-  const data = query.data ?? [];
+  const query = useQuery({ queryKey: ['stockini-purchases'], queryFn: () => stockiniApi.purchases() });
+  const data: Purchase[] = Array.isArray(query.data?.data) ? query.data.data : [];
   const createMutation = useMutation({
     mutationFn: () => {
       const payload = cleanPayload(form, fields);
@@ -53,8 +53,8 @@ export function PurchasesPage() {
   const deleteMutation = useMutation({
     mutationFn: stockiniApi.deletePurchase,
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Purchase[]>(['stockini-purchases'], (prev) =>
-        prev ? prev.filter((p) => p.id !== id) : prev,
+      queryClient.setQueryData<PaginatedResponse<Purchase>>(['stockini-purchases'], (prev) =>
+        prev ? { ...prev, data: prev.data.filter((p) => p.id !== id) } : prev,
       );
       toast.success('Achat supprimé avec succès');
       setTrashTarget(null);

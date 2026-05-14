@@ -50,13 +50,15 @@ export function PaymentsPage() {
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const paymentMethodOptions = useDropdownOptions('payment_methods');
 
-  const salesQuery = useQuery({ queryKey: ['stockini-sales'], queryFn: stockiniApi.sales });
+  const salesQuery = useQuery({ queryKey: ['stockini-sales'], queryFn: () => stockiniApi.sales() });
   const paymentsQuery = useQuery({ queryKey: ['stockini-payments'], queryFn: stockiniApi.payments });
 
-  const unpaidSales = (salesQuery.data ?? []).filter(
+  const salesData = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
+  const unpaidSales = salesData.filter(
     (s) => (s.paymentStatus === 'UNPAID' || s.paymentStatus === 'PARTIAL') && !s.deletedAt,
   );
-  const customerPayments = (paymentsQuery.data ?? []).filter(
+  const paymentsData = Array.isArray(paymentsQuery.data) ? paymentsQuery.data : [];
+  const customerPayments = paymentsData.filter(
     (p) => p.type === 'CUSTOMER_PAYMENT' && !p.deletedAt,
   );
 

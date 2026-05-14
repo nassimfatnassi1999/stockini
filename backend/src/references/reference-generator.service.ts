@@ -100,9 +100,67 @@ export class ReferenceGeneratorService {
   }
 
   /**
-   * Returns the next reference that would be generated for a given type,
+   * Returns the next reference that would be generated for a given prefix/target,
    * without incrementing the counter. Used for form preview only.
    */
+  async peekNextReference(prefix: string, target: ReferenceTarget): Promise<string> {
+    const year = new Date().getFullYear();
+    const [counter, lastSeq] = await Promise.all([
+      this.prisma.referenceCounter.findUnique({
+        where: { prefix_year: { prefix, year } },
+      }),
+      this.findLastExistingSequence(this.prisma, prefix, year, target),
+    ]);
+    const nextSeq = Math.max((counter?.sequence ?? 0) + 1, lastSeq + 1);
+    return this.format(prefix, year, nextSeq);
+  }
+
+  async generateSimple(
+    prefix: string,
+    target: ReferenceTarget,
+    client: ReferenceClient = this.prisma,
+    padding = 3,
+  ) {
+    const counterYear = 0;
+    const counter = await client.referenceCounter.upsert({
+      where: { prefix_year: { prefix, year: counterYear } },
+      update: { sequence: { increment: 1 } },
+      create: { prefix, year: counterYear, sequence: 1 },
+    });
+
+    const lastExistingSequence = await this.findLastExistingSimpleSequence(
+      client,
+      prefix,
+      target,
+    );
+    const sequence = Math.max(counter.sequence, lastExistingSequence + 1);
+
+    if (sequence !== counter.sequence) {
+      await client.referenceCounter.update({
+        where: { prefix_year: { prefix, year: counterYear } },
+        data: { sequence },
+      });
+    }
+
+    return this.formatSimple(prefix, sequence, padding);
+  }
+
+  async peekNextSimpleReference(
+    prefix: string,
+    target: ReferenceTarget,
+    padding = 3,
+  ): Promise<string> {
+    const counterYear = 0;
+    const [counter, lastSeq] = await Promise.all([
+      this.prisma.referenceCounter.findUnique({
+        where: { prefix_year: { prefix, year: counterYear } },
+      }),
+      this.findLastExistingSimpleSequence(this.prisma, prefix, target),
+    ]);
+    const nextSeq = Math.max((counter?.sequence ?? 0) + 1, lastSeq + 1);
+    return this.formatSimple(prefix, nextSeq, padding);
+  }
+
   async peekNextCustomerReference(type: string): Promise<string> {
     const year = new Date().getFullYear();
     const counterKey = CUSTOMER_COUNTER_KEY(type);
@@ -165,7 +223,39 @@ export class ReferenceGeneratorService {
     return Number.isFinite(sequence) ? sequence : 0;
   }
 
+  private async findLastExistingSimpleSequence(
+    client: ReferenceClient,
+    prefix: string,
+    target: ReferenceTarget,
+  ) {
+    const config = TARGETS[target];
+    const referencePrefix = `${prefix}-`;
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const delegate = (client as any)[config.delegate];
+    const rows: Array<Record<string, string | null>> = await delegate.findMany({
+      where: { [config.field]: { startsWith: referencePrefix } },
+      select: { [config.field]: true },
+    });
+
+    return rows.reduce((max, row) => {
+      const value = row[config.field];
+      if (!value || typeof value !== 'string') {
+        return max;
+      }
+      const match = value.match(new RegExp(`^${escapedPrefix}-(\\d+)$`));
+      if (!match) {
+        return max;
+      }
+      const sequence = Number(match[1]);
+      return Number.isFinite(sequence) ? Math.max(max, sequence) : max;
+    }, 0);
+  }
+
   private format(prefix: string, year: number, sequence: number) {
     return `${prefix}-${year}-${String(sequence).padStart(6, '0')}`;
+  }
+
+  private formatSimple(prefix: string, sequence: number, padding: number) {
+    return `${prefix}-${String(sequence).padStart(padding, '0')}`;
   }
 }

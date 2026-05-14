@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   Param,
-  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -13,7 +12,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreatePaymentDto, PayPurchaseDto, PaySaleDto, UpdatePaymentDto } from './dto/payment.dto';
+import { PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -21,22 +20,24 @@ import { PaymentsService } from './payments.service';
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @RequirePermissions('payments.create')
-  @Post()
-  create(@Body() dto: CreatePaymentDto) {
-    return this.paymentsService.create(dto);
-  }
-
   @RequirePermissions('payments.receive_client_payment')
   @Post('sales/:saleId/pay')
-  paySale(@Param('saleId') saleId: string, @Body() dto: PaySaleDto) {
-    return this.paymentsService.paySale(saleId, dto);
+  paySale(
+    @Param('saleId') saleId: string,
+    @Body() dto: PaySaleDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.paymentsService.paySale(saleId, dto, user?.id);
   }
 
   @RequirePermissions('expenses.pay_supplier')
   @Post('purchases/:purchaseId/pay')
-  payPurchase(@Param('purchaseId') purchaseId: string, @Body() dto: PayPurchaseDto) {
-    return this.paymentsService.payPurchase(purchaseId, dto);
+  payPurchase(
+    @Param('purchaseId') purchaseId: string,
+    @Body() dto: PayPurchaseDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.paymentsService.payPurchase(purchaseId, dto, user?.id);
   }
 
   @RequirePermissions('payments.view')
@@ -49,12 +50,6 @@ export class PaymentsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(id);
-  }
-
-  @RequirePermissions('payments.update')
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePaymentDto) {
-    return this.paymentsService.update(id, dto);
   }
 
   @RequirePermissions('payments.delete')

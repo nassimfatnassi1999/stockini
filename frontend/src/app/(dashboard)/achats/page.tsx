@@ -19,7 +19,7 @@ import {
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
 import { money } from '@/lib/stockini/format';
-import type { DropdownOption, Purchase, Supplier } from '@/lib/stockini/types';
+import type { DropdownOption, PaginatedResponse, Purchase, Supplier } from '@/lib/stockini/types';
 
 type PurchaseDocType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE';
 type ReceptionMode = 'LIBRE' | 'FROM_COMMANDE';
@@ -119,10 +119,11 @@ export default function AchatsPage() {
     queryFn: stockiniApi.suppliers,
   });
 
-  const purchasesQuery = useQuery<Purchase[]>({
+  const purchasesQuery = useQuery<PaginatedResponse<Purchase>>({
     queryKey: ['stockini-purchases'],
-    queryFn: stockiniApi.purchases,
+    queryFn: () => stockiniApi.purchases(),
   });
+  const purchasesList: Purchase[] = Array.isArray(purchasesQuery.data?.data) ? purchasesQuery.data.data : [];
 
   const paymentMethodsQuery = useQuery<DropdownOption[]>({
     queryKey: ['stockini-dropdown-options', 'payment_methods'],
@@ -171,7 +172,7 @@ export default function AchatsPage() {
     setShowRestorePrompt(false);
   };
 
-  const commandesToReceptionner = (purchasesQuery.data ?? []).filter(
+  const commandesToReceptionner = purchasesList.filter(
     (p) => p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED',
   );
 
@@ -382,8 +383,8 @@ export default function AchatsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => stockiniApi.deletePurchase(id),
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Purchase[]>(['stockini-purchases'], (prev) =>
-        prev ? prev.filter((p) => p.id !== id) : prev,
+      queryClient.setQueryData<PaginatedResponse<Purchase>>(['stockini-purchases'], (prev) =>
+        prev ? { ...prev, data: prev.data.filter((p) => p.id !== id) } : prev,
       );
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       toast.success('Achat supprimé');
@@ -652,7 +653,7 @@ export default function AchatsPage() {
           onClick={() => setShowHistory((v) => !v)}
           className="w-full flex items-center justify-between px-4 py-3 border-b border-border/70 text-sm font-semibold text-text-primary hover:bg-surface transition-colors"
         >
-          <span>Historique des achats ({purchasesQuery.data?.length ?? 0})</span>
+          <span>Historique des achats ({purchasesQuery.data?.total ?? purchasesList.length})</span>
           {showHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
         {showHistory && (
@@ -686,14 +687,14 @@ export default function AchatsPage() {
                       Chargement…
                     </td>
                   </tr>
-                ) : (purchasesQuery.data ?? []).length === 0 ? (
+                ) : purchasesList.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-4 py-8 text-center text-sm text-text-muted">
                       Aucun achat enregistré
                     </td>
                   </tr>
                 ) : (
-                  (purchasesQuery.data ?? []).map((purchase) => (
+                  purchasesList.map((purchase) => (
                     <tr key={purchase.id} className="hover:bg-muted/40">
                       <td className="px-4 py-3 font-mono font-semibold text-xs">
                         {purchase.orderNumber}

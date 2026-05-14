@@ -1,5 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DocumentStatus, DocumentType, PaymentMethod, PaymentType, StockMovementType } from '@prisma/client';
+import {
+  CaisseMovementType,
+  DocumentStatus,
+  DocumentType,
+  PaymentMethod,
+  PaymentType,
+  SaleStatus,
+  StockMovementType,
+} from '@prisma/client';
+import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { StockService } from '../stock/stock.service';
@@ -31,6 +40,7 @@ export class AvoirsService {
     private readonly pdf: PdfService,
     private readonly minio: MinioService,
     private readonly settings: SettingsService,
+    private readonly caisseService: CaisseService,
   ) {}
 
   async getReturnableItems(saleId: string) {
@@ -90,6 +100,17 @@ export class AvoirsService {
         include: { items: { include: { product: true } } },
       });
       if (!sale) throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
+      if (
+        sale.status !== SaleStatus.COMPLETED ||
+        !([DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]).includes(
+          sale.documentType as DocumentType,
+        ) ||
+        !sale.stockImpactDone
+      ) {
+        throw new BadRequestException(
+          'Un avoir doit être lié à une facture ou un bon de livraison validé avec stock impacté',
+        );
+      }
 
       // Validate customer matches
       if (dto.customerId && sale.customerId && dto.customerId !== sale.customerId) {
@@ -171,7 +192,7 @@ export class AvoirsService {
       const total = subtotal + tax;
       const montantRembourse = total;
 
-      const numero = await this.references.generate('AV', 'creditNote', tx);
+      const numero = await this.references.generateSimple('AV', 'creditNote', tx);
 
       const avoir = await tx.creditNote.create({
         data: {
@@ -215,17 +236,26 @@ export class AvoirsService {
       // Record refund payment (debit caisse)
       if (montantRembourse > 0) {
         const paymentMethod = (dto.paymentMethod as PaymentMethod) ?? PaymentMethod.CASH;
-        await tx.payment.create({
+        const payment = await tx.payment.create({
           data: {
             reference: await this.references.generate('AV-PAY', 'payment', tx),
             type: PaymentType.CREDIT_NOTE_REFUND,
             method: paymentMethod,
             amount: montantRembourse,
+            cashImpactDone: true,
             saleId: dto.saleId,
             customerId: effectiveCustomerId,
             creditNoteId: avoir.id,
             note: `Remboursement avoir ${numero}`,
           },
+        });
+
+        await this.caisseService.recordMovement(tx, {
+          type: CaisseMovementType.ANNULATION_VENTE,
+          montant: -montantRembourse,
+          motif: `Remboursement avoir ${numero}`,
+          referenceDoc: payment.reference,
+          userId: user?.id,
         });
       }
 

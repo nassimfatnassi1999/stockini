@@ -124,8 +124,8 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<LineState[]>([]);
   const [linesLoaded, setLinesLoaded] = useState(false);
 
-  const salesQuery = useQuery({ queryKey: ['stockini-sales'], queryFn: stockiniApi.sales });
-  const sales: Sale[] = salesQuery.data ?? [];
+  const salesQuery = useQuery({ queryKey: ['stockini-sales'], queryFn: () => stockiniApi.sales() });
+  const sales: Sale[] = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
 
   const filteredSales = saleSearch
     ? sales.filter((s) => {

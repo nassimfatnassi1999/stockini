@@ -1,10 +1,16 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { CaisseMovementType, PaymentStatus, PaymentType } from '@prisma/client';
+import {
+  CaisseMovementType,
+  DocumentType,
+  PaymentStatus,
+  PaymentType,
+  SaleStatus,
+} from '@prisma/client';
 import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { CreatePaymentDto, PayPurchaseDto, PaySaleDto, UpdatePaymentDto } from './dto/payment.dto';
+import { PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -16,19 +22,6 @@ export class PaymentsService {
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
   ) {}
-
-  async create(dto: CreatePaymentDto) {
-    await this.settings.assertActiveOption('payment_types', dto.type);
-    await this.settings.assertActiveOption('payment_methods', dto.method);
-    return this.prisma.$transaction(async (tx) =>
-      tx.payment.create({
-        data: {
-          ...dto,
-          reference: await this.references.generate('PAY', 'payment', tx),
-        },
-      }),
-    );
-  }
 
   findAll() {
     return this.prisma.payment.findMany({
@@ -45,28 +38,99 @@ export class PaymentsService {
     });
   }
 
-  async update(id: string, dto: UpdatePaymentDto) {
-    await this.settings.assertActiveOption('payment_types', dto.type);
-    await this.settings.assertActiveOption('payment_methods', dto.method);
-    return this.prisma.payment.update({
-      where: { id },
-      data: dto,
-      include: { sale: true, purchase: true, customer: true, supplier: true },
+  async remove(id: string, userId?: string) {
+    this.logger.log(`DELETE /payments/${id} called by ${userId ?? 'unknown'}`);
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findFirstOrThrow({
+        where: { id, deletedAt: null },
+        include: {
+          sale: { select: { id: true, total: true, invoiceNumber: true } },
+          purchase: { select: { id: true, total: true, orderNumber: true } },
+        },
+      });
+
+      // Reverse caisse if this payment actually hit the caisse
+      if (payment.cashImpactDone) {
+        if (payment.type === PaymentType.CUSTOMER_PAYMENT) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.ANNULATION_VENTE,
+            montant: -Number(payment.amount),
+            motif: `Annulation paiement ${payment.reference}`,
+            referenceDoc: payment.reference,
+            userId,
+          });
+        } else if (payment.type === PaymentType.SUPPLIER_PAYMENT) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.ANNULATION_ACHAT,
+            montant: Number(payment.amount),
+            motif: `Annulation paiement ${payment.reference}`,
+            referenceDoc: payment.reference,
+            userId,
+          });
+        }
+      }
+
+      // Soft delete
+      await tx.payment.update({
+        where: { id },
+        data: { deletedAt: new Date(), deletedBy: userId },
+      });
+
+      // Recalculate sale totals
+      if (payment.saleId && payment.sale) {
+        const agg = await tx.payment.aggregate({
+          where: { saleId: payment.saleId, deletedAt: null },
+          _sum: { amount: true },
+        });
+        const newPaid = Number(agg._sum.amount ?? 0);
+        const saleTotal = Number(payment.sale.total);
+        await tx.sale.update({
+          where: { id: payment.saleId },
+          data: {
+            paidAmount: newPaid,
+            remainingAmount: Math.max(saleTotal - newPaid, 0),
+            paymentStatus: this.computePaymentStatus(saleTotal, newPaid),
+          },
+        });
+      }
+
+      // Recalculate purchase totals
+      if (payment.purchaseId && payment.purchase) {
+        const agg = await tx.payment.aggregate({
+          where: { purchaseId: payment.purchaseId, deletedAt: null },
+          _sum: { amount: true },
+        });
+        const newPaid = Number(agg._sum.amount ?? 0);
+        const purchaseTotal = Number(payment.purchase.total);
+        await tx.purchase.update({
+          where: { id: payment.purchaseId },
+          data: {
+            paidAmount: newPaid,
+            remainingAmount: Math.max(purchaseTotal - newPaid, 0),
+            paymentStatus: this.computePaymentStatus(purchaseTotal, newPaid),
+          },
+        });
+      }
+
+      this.logger.log(`Payment ${id} soft-deleted by ${userId ?? 'unknown'}`);
+      return { id };
     });
   }
 
-  async remove(id: string, userId?: string) {
-    this.logger.log(`DELETE /payments/${id} called by ${userId ?? 'unknown'}`);
-    await this.prisma.payment.delete({ where: { id } });
-    this.logger.log(`Payment ${id} permanently deleted by ${userId ?? 'unknown'}`);
-    return { id };
-  }
-
-  async paySale(saleId: string, dto: PaySaleDto) {
+  async paySale(saleId: string, dto: PaySaleDto, userId?: string) {
     return this.prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findFirstOrThrow({
         where: { id: saleId, deletedAt: null },
       });
+
+      if (sale.documentType === DocumentType.DEVIS || sale.documentType === DocumentType.AVOIR) {
+        throw new BadRequestException(
+          `Le type ${sale.documentType} n'accepte pas de paiement`,
+        );
+      }
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('Impossible de payer un document annulé');
+      }
 
       const remaining = Number(sale.remainingAmount);
 
@@ -80,12 +144,14 @@ export class PaymentsService {
       const newRemainingAmount = Math.max(Number(sale.total) - newPaidAmount, 0);
       const newStatus = this.computePaymentStatus(Number(sale.total), newPaidAmount);
 
+      const payRef = await this.references.generate('PAY', 'payment', tx);
       const payment = await tx.payment.create({
         data: {
-          reference: await this.references.generate('PAY', 'payment', tx),
+          reference: payRef,
           type: PaymentType.CUSTOMER_PAYMENT,
           method: dto.method,
           amount: dto.amount,
+          cashImpactDone: true,
           saleId,
           customerId: sale.customerId ?? undefined,
           note: dto.note,
@@ -106,15 +172,15 @@ export class PaymentsService {
         type: CaisseMovementType.ENCAISSEMENT_VENTE,
         montant: dto.amount,
         motif: `Encaissement vente ${payment.sale?.invoiceNumber ?? saleId}`,
-        referenceDoc: payment.reference,
-        userId: undefined,
+        referenceDoc: payRef,
+        userId,
       });
 
       return payment;
     });
   }
 
-  async payPurchase(purchaseId: string, dto: PayPurchaseDto) {
+  async payPurchase(purchaseId: string, dto: PayPurchaseDto, userId?: string) {
     return this.prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.findFirstOrThrow({
         where: { id: purchaseId, deletedAt: null },
@@ -132,12 +198,14 @@ export class PaymentsService {
       const newRemainingAmount = Math.max(Number(purchase.total) - newPaidAmount, 0);
       const newStatus = this.computePaymentStatus(Number(purchase.total), newPaidAmount);
 
+      const payRef = await this.references.generate('EXP', 'payment', tx);
       const payment = await tx.payment.create({
         data: {
-          reference: await this.references.generate('EXP', 'payment', tx),
+          reference: payRef,
           type: PaymentType.SUPPLIER_PAYMENT,
           method: dto.method,
           amount: dto.amount,
+          cashImpactDone: true,
           purchaseId,
           supplierId: purchase.supplierId,
           note: dto.note,
@@ -158,8 +226,8 @@ export class PaymentsService {
         type: CaisseMovementType.DECAISSEMENT_ACHAT,
         montant: -dto.amount,
         motif: `Paiement fournisseur ${payment.purchase?.supplier?.name ?? purchaseId}`,
-        referenceDoc: payment.reference,
-        userId: undefined,
+        referenceDoc: payRef,
+        userId,
       });
 
       return payment;

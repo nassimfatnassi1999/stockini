@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, money, statusLabel } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
-import type { Sale, SalesDocumentType } from '@/lib/stockini/types';
+import type { PaginatedResponse, Sale, SalesDocumentType } from '@/lib/stockini/types';
 import { CrudModal } from '../shared/CrudModal';
 import { PageHeader } from '../shared/PageHeader';
 import { SimpleTable } from '../shared/SimpleTable';
@@ -29,6 +29,7 @@ const DOC_TYPE_OPTIONS: Array<{ value: SalesDocumentType; label: string }> = [
   { value: 'BON_COMMANDE', label: 'Bon de commande' },
   { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
   { value: 'FACTURE', label: 'Facture' },
+  { value: 'AVOIR', label: 'Avoir' },
 ];
 
 const DOC_TYPE_LABEL: Record<string, string> = {
@@ -36,6 +37,7 @@ const DOC_TYPE_LABEL: Record<string, string> = {
   BON_COMMANDE: 'Bon de commande',
   BON_LIVRAISON: 'Bon de livraison',
   FACTURE: 'Facture',
+  AVOIR: 'Avoir',
 };
 
 const DOC_TYPE_COLOR: Record<string, string> = {
@@ -43,12 +45,13 @@ const DOC_TYPE_COLOR: Record<string, string> = {
   BON_COMMANDE: 'bg-blue-50 text-blue-700 border-blue-200',
   BON_LIVRAISON: 'bg-purple-50 text-purple-700 border-purple-200',
   FACTURE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  AVOIR: 'bg-red-50 text-red-700 border-red-200',
 };
 
 /** Document types where validation triggers stock decrement */
 const VALIDATES_STOCK = new Set<string>(['BON_LIVRAISON', 'FACTURE']);
 
-/** Document types (other than DEVIS) that can be validated (including BC) */
+/** Document types (other than DEVIS) that can be validated */
 const VALIDATABLE = new Set<string>(['BON_COMMANDE', 'BON_LIVRAISON', 'FACTURE']);
 
 // ─── Confirm dialog ──────────────────────────────────────────────────────────
@@ -109,6 +112,18 @@ function ConfirmDialog({
   );
 }
 
+// ─── Enum mapping (exact Prisma values — never use display labels as values) ──
+
+const DOCUMENT_TYPES = {
+  DEVIS: 'DEVIS',
+  BON_COMMANDE: 'BON_COMMANDE',
+  BON_LIVRAISON: 'BON_LIVRAISON',
+  FACTURE: 'FACTURE',
+  AVOIR: 'AVOIR',
+} as const;
+
+const VALID_DOC_TYPES = new Set(Object.values(DOCUMENT_TYPES));
+
 // ─── Filter tabs ─────────────────────────────────────────────────────────────
 
 const FILTER_TABS: Array<{ value: string; label: string }> = [
@@ -118,17 +133,19 @@ const FILTER_TABS: Array<{ value: string; label: string }> = [
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
+type FormState = Record<string, string | boolean>;
+
 export function SalesPage() {
   const queryClient = useQueryClient();
 
-  // form / modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [docTypeFilter, setDocTypeFilter] = useState('');
+  const [activeDocType, setActiveDocType] = useState<SalesDocumentType>(DOCUMENT_TYPES.DEVIS);
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
   const [validateTarget, setValidateTarget] = useState<{ id: string; name: string } | null>(null);
 
-  // data queries
+  // ── Data queries ────────────────────────────────────────────────────────────
   const customers = useQuery({ queryKey: ['stockini-customers'], queryFn: stockiniApi.customers });
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
   const paymentMethodOptions = useDropdownOptions('payment_methods');
@@ -140,9 +157,9 @@ export function SalesPage() {
   const customerOptions = (customers.data ?? []).map((c) => ({ value: c.id, label: c.name }));
   const productOptions = (products.data ?? []).map((p) => ({ value: p.id, label: p.name }));
 
-  // ── Form fields (depend on selected documentType) ──────────────────────────
+  // ── Form fields ─────────────────────────────────────────────────────────────
   const buildFields = (docType: string): FieldConfig[] => {
-    const withPayment = docType !== 'DEVIS';
+    const withPayment = docType === 'FACTURE';
     const withReserve = docType === 'BON_COMMANDE';
 
     const base: FieldConfig[] = [
@@ -198,7 +215,7 @@ export function SalesPage() {
     return base;
   };
 
-  const initialForm = (docType = 'DEVIS') => ({
+  const makeInitialForm = (docType: SalesDocumentType): FormState => ({
     ...emptyForm(buildFields(docType)),
     documentType: docType,
     discountPercent: '0',
@@ -206,13 +223,26 @@ export function SalesPage() {
     reserveStock: false,
   });
 
-  const [form, setForm] = useState<Record<string, string | boolean>>(initialForm());
+  const [form, setForm] = useState<FormState>(() => makeInitialForm('DEVIS'));
 
-  const currentDocType = String(form.documentType || 'DEVIS');
+  // Derived from form — always in sync, no separate state needed
+  const currentDocType = String(form.documentType || 'DEVIS') as SalesDocumentType;
   const fields = buildFields(currentDocType);
 
-  // ── Calculation ────────────────────────────────────────────────────────────
-  const getSaleCalculation = (f: Record<string, string | boolean>) => {
+  // ── Reference preview ────────────────────────────────────────────────────────
+  const nextRefQuery = useQuery({
+    queryKey: ['stockini-sale-next-reference', currentDocType],
+    queryFn: () => stockiniApi.saleNextReference(currentDocType),
+    enabled: modalOpen,
+    staleTime: 0,
+  });
+
+  const referencePreview = nextRefQuery.isLoading
+    ? 'Chargement…'
+    : (nextRefQuery.data?.reference ?? '');
+
+  // ── Calculation ──────────────────────────────────────────────────────────────
+  const getSaleCalculation = (f: FormState) => {
     const product = (products.data ?? []).find((p) => p.id === f.productId);
     const unitPrice = numberValue(product?.salePrice);
     const quantity = numberValue(f.quantity);
@@ -223,51 +253,96 @@ export function SalesPage() {
     return { discountAmount, discountPercent, grossTotal, paidAmount, product, quantity };
   };
 
+  // ── Form update handler ──────────────────────────────────────────────────────
+  // FIX: do NOT call setState inside another setState's updater (React anti-pattern).
+  // Each branch directly calls setForm with the complete next state.
   const updateForm = (name: string, value: string | boolean) => {
+    if (name === 'documentType') {
+      const newDocType = value as SalesDocumentType;
+      setActiveDocType(newDocType);
+      setForm(makeInitialForm(newDocType));
+      return;
+    }
+
     setForm((current) => {
       const next = { ...current, [name]: value };
-
-      // When doc type changes, reset form preserving new docType
-      if (name === 'documentType') {
-        return initialForm(String(value));
-      }
-
-      // Recalculate paid amount when product/quantity/discount change
       if (['productId', 'quantity', 'discountPercent'].includes(name)) {
         const { paidAmount } = getSaleCalculation(next);
         next.paidAmount = formatCalculatedAmount(paidAmount);
       }
-
       return next;
     });
   };
 
-  // ── Data query ─────────────────────────────────────────────────────────────
-  const query = useQuery({ queryKey: ['stockini-sales'], queryFn: stockiniApi.sales });
-  const data: Sale[] = (query.data ?? []).filter(
+  // ── Helper: open modal ───────────────────────────────────────────────────────
+  // FIX: initialize form from the active filter tab so "Nouveau" under "Facture"
+  // pre-selects Facture instead of defaulting to DEVIS.
+  const openModal = () => {
+    const docType = (docTypeFilter as SalesDocumentType) || DOCUMENT_TYPES.DEVIS;
+    setActiveDocType(docType);
+    setForm(makeInitialForm(docType));
+    queryClient.invalidateQueries({ queryKey: ['stockini-sale-next-reference'] });
+    setModalOpen(true);
+  };
+
+  // ── Data query ───────────────────────────────────────────────────────────────
+  const query = useQuery({ queryKey: ['stockini-sales'], queryFn: () => stockiniApi.sales() });
+  const salesData: Sale[] = Array.isArray(query.data?.data) ? query.data.data : [];
+  const data: Sale[] = salesData.filter(
     (s) => !docTypeFilter || s.documentType === docTypeFilter,
   );
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
-    mutationFn: () => {
-      const payload = cleanPayload(form, fields);
-      const calc = getSaleCalculation(form);
-      return stockiniApi.createSale({
-        documentType: payload.documentType,
-        reserveStock: payload.reserveStock ?? false,
-        customerId: payload.customerId,
-        discount: Number(calc.discountAmount.toFixed(3)),
-        paidAmount: currentDocType !== 'DEVIS' ? Number(calc.paidAmount.toFixed(3)) : 0,
-        paymentMethod: currentDocType !== 'DEVIS' ? payload.paymentMethod : undefined,
-        items: [{ productId: payload.productId, quantity: payload.quantity }],
-      });
+    mutationFn: (submitForm: FormState) => {
+      // Step 1: Extract documentType ONLY from the snapshot passed as argument — never from closure
+      const docType = String(submitForm.documentType ?? '') as SalesDocumentType;
+
+      // Step 2: Strict guard — block before any API call
+      const allowed: SalesDocumentType[] = ['DEVIS', 'BON_COMMANDE', 'BON_LIVRAISON', 'FACTURE', 'AVOIR'];
+      if (!allowed.includes(docType)) {
+        throw new Error(`Invalid documentType before API: ${JSON.stringify(docType)}`);
+      }
+
+      const acceptsPayment = docType === 'FACTURE';
+      if (docType === 'AVOIR') {
+        throw new Error("Les avoirs doivent être créés depuis le module Avoirs.");
+      }
+      const submitFields = buildFields(docType);
+      const payload = cleanPayload(submitForm, submitFields);
+      const calc = getSaleCalculation(submitForm);
+
+      // Send paymentMethod only when non-empty — empty string fails @IsEnum on backend
+      const paymentMethodValue = String(payload.paymentMethod ?? '').trim() || undefined;
+      const productTva = numberValue(calc.product?.tva);
+      const unitPriceHt =
+        productTva > -100 ? numberValue(calc.product?.salePrice) / (1 + productTva / 100) : 0;
+
+      const finalPayload = {
+        documentType: docType,
+        reserveStock: Boolean(payload.reserveStock),
+        customerId: String(payload.customerId ?? ''),
+        paidAmount: acceptsPayment ? Number(calc.paidAmount.toFixed(3)) : 0,
+        paymentMethod: acceptsPayment ? paymentMethodValue : undefined,
+        items: [
+          {
+            productId: String(payload.productId),
+            quantity: Number(payload.quantity),
+            unitPrice: Number(unitPriceHt.toFixed(3)),
+            discountPercent: Number(calc.discountPercent.toFixed(3)),
+          },
+        ],
+      };
+
+      return stockiniApi.createSale(finalPayload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-sale-next-reference'] });
       setModalOpen(false);
-      setForm(initialForm());
+      setActiveDocType(DOCUMENT_TYPES.DEVIS);
+      setForm(makeInitialForm(DOCUMENT_TYPES.DEVIS));
       toast.success('Document enregistré');
     },
     onError: (err: unknown) => {
@@ -309,8 +384,8 @@ export function SalesPage() {
   const deleteMutation = useMutation({
     mutationFn: stockiniApi.deleteSale,
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Sale[]>(['stockini-sales'], (prev) =>
-        prev ? prev.filter((s) => s.id !== id) : prev,
+      queryClient.setQueryData<PaginatedResponse<Sale>>(['stockini-sales'], (prev) =>
+        prev ? { ...prev, data: prev.data.filter((s) => s.id !== id) } : prev,
       );
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       toast.success('Document supprimé');
@@ -323,12 +398,20 @@ export function SalesPage() {
     },
   });
 
-  // ── Form submit ────────────────────────────────────────────────────────────
+  // ── Form submit ──────────────────────────────────────────────────────────────
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const calc = getSaleCalculation(form);
 
-    if (!form.customerId) {
+    // activeDocType and form.documentType are always kept in sync via updateForm/openModal
+    const snapshot: FormState = { ...form, documentType: activeDocType as string };
+    const docType = String(snapshot.documentType ?? '') as SalesDocumentType;
+    const calc = getSaleCalculation(snapshot);
+
+    if (!VALID_DOC_TYPES.has(docType)) {
+      toast.error('Type de document invalide. Veuillez sélectionner un type valide.');
+      return;
+    }
+    if (!snapshot.customerId) {
       toast.error('Veuillez sélectionner un client.');
       return;
     }
@@ -344,30 +427,29 @@ export function SalesPage() {
       window.alert('La remise ne peut pas dépasser 30%.');
       return;
     }
-    if (currentDocType !== 'DEVIS') {
+    if (docType === 'AVOIR') {
+      toast.error("Les avoirs doivent être créés depuis le module Avoirs.");
+      return;
+    }
+    if (docType === 'FACTURE') {
       const expected = formatCalculatedAmount(calc.paidAmount);
-      if (String(form.paidAmount) !== expected) {
+      if (String(snapshot.paidAmount) !== expected) {
         toast.error('Le montant payé calculé est incorrect.');
         return;
       }
     }
-    createMutation.mutate();
+
+    // FIX: pass the snapshot explicitly so mutationFn always uses the current form
+    createMutation.mutate(snapshot);
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
       {/* Header */}
       <div className="mb-4 flex items-end justify-between gap-3">
         <PageHeader title="Ventes" subtitle="Devis, commandes, livraisons et factures." />
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => {
-            setForm(initialForm());
-            setModalOpen(true);
-          }}
-        >
+        <Button type="button" size="sm" onClick={openModal}>
           <Plus size={14} />
           Nouveau
         </Button>
@@ -402,9 +484,8 @@ export function SalesPage() {
         error={query.error}
         headers={['Type', 'Référence', 'Client', 'Date', 'Articles', 'Total', 'Paiement', 'Statut', 'Actions']}
         rows={data.map((sale: Sale) => {
-          const docType = sale.documentType ?? 'FACTURE';
-          const canValidate =
-            sale.status === 'DRAFT' && VALIDATABLE.has(docType);
+          const docType = sale.documentType;
+          const canValidate = sale.status === 'DRAFT' && VALIDATABLE.has(docType);
           const canCancel = sale.status === 'COMPLETED';
 
           return [
@@ -445,9 +526,7 @@ export function SalesPage() {
                 <button
                   type="button"
                   title="Valider ce document"
-                  onClick={() =>
-                    setValidateTarget({ id: sale.id, name: sale.invoiceNumber })
-                  }
+                  onClick={() => setValidateTarget({ id: sale.id, name: sale.invoiceNumber })}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 transition-colors hover:bg-emerald-100"
                 >
                   <Check size={13} />
@@ -457,9 +536,7 @@ export function SalesPage() {
                 <button
                   type="button"
                   title="Annuler ce document"
-                  onClick={() =>
-                    setCancelTarget({ id: sale.id, name: sale.invoiceNumber })
-                  }
+                  onClick={() => setCancelTarget({ id: sale.id, name: sale.invoiceNumber })}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-amber-300 bg-amber-50 text-amber-700 transition-colors hover:bg-amber-100"
                 >
                   <Ban size={13} />
@@ -468,9 +545,7 @@ export function SalesPage() {
               <button
                 type="button"
                 title="Supprimer"
-                onClick={() =>
-                  setTrashTarget({ id: sale.id, name: sale.invoiceNumber })
-                }
+                onClick={() => setTrashTarget({ id: sale.id, name: sale.invoiceNumber })}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:bg-red-100"
               >
                 <Trash2 size={13} />
@@ -485,7 +560,7 @@ export function SalesPage() {
         <CrudModal
           title={`Nouveau — ${DOC_TYPE_LABEL[currentDocType] ?? currentDocType}`}
           fields={fields}
-          form={form}
+          form={{ ...form, referencePreview }}
           onChange={updateForm}
           onClose={() => setModalOpen(false)}
           onSubmit={handleSubmit}
@@ -504,7 +579,7 @@ export function SalesPage() {
                 <span className="font-semibold">{validateTarget.name}</span> ?
               </p>
               {VALIDATES_STOCK.has(
-                (query.data ?? []).find((s) => s.id === validateTarget.id)?.documentType ?? '',
+                salesData.find((s) => s.id === validateTarget.id)?.documentType ?? '',
               ) && (
                 <p className="mt-1 text-xs text-amber-600">
                   Le stock sera diminué pour chaque article.
@@ -527,8 +602,7 @@ export function SalesPage() {
           body={
             <>
               <p>
-                Annuler{' '}
-                <span className="font-semibold">{cancelTarget.name}</span> ?
+                Annuler <span className="font-semibold">{cancelTarget.name}</span> ?
               </p>
               <p className="mt-1 text-xs text-amber-600">
                 Si le stock avait été décrémenté, il sera rétabli.

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -6,14 +7,16 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
+import { DocumentType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateSaleDto, UpdateSaleDto } from './dto/sale.dto';
+import { CreateSaleDto, SalePaginationDto, UpdateSaleDto } from './dto/sale.dto';
 import { SalesService } from './sales.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -29,8 +32,20 @@ export class SalesController {
 
   @RequirePermissions('sales.view')
   @Get()
-  findAll() {
-    return this.salesService.findAll();
+  findAll(@Query() query: SalePaginationDto) {
+    return this.salesService.findAll(query);
+  }
+
+  @RequirePermissions('sales.view')
+  @Get('next-reference')
+  getNextReference(@Query('documentType') documentType: string) {
+    const validTypes = Object.values(DocumentType) as string[];
+    if (!documentType || !validTypes.includes(documentType)) {
+      throw new BadRequestException(
+        `Type de document invalide. Valeurs acceptées: ${validTypes.join(', ')}`,
+      );
+    }
+    return this.salesService.getNextReference(documentType as DocumentType);
   }
 
   @RequirePermissions('sales.view_details')
@@ -53,8 +68,8 @@ export class SalesController {
 
   @RequirePermissions('sales.update')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateSaleDto) {
-    return this.salesService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateSaleDto, @CurrentUser() user?: AuthUser) {
+    return this.salesService.update(id, dto, user);
   }
 
   @RequirePermissions('sales.delete')

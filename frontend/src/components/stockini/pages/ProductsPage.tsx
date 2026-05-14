@@ -18,7 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { stockiniApi } from '@/lib/stockini/api';
-import { money } from '@/lib/stockini/format';
+import { dateTime, money } from '@/lib/stockini/format';
 import { calcPurchasePriceTtc, calcSalePrice, roundPrice } from '@/lib/stockini/pricing';
 import { toast } from '@/lib/toast';
 import type { Product } from '@/lib/stockini/types';
@@ -67,6 +67,23 @@ function productToFormState(p: Product): ProductFormState {
     minStock: String(p.minStock ?? ''),
     location: p.location ?? '',
   };
+}
+
+function lastSaleTooltip(product: Product): string | undefined {
+  if (product.lastSellingPrice == null) return undefined;
+
+  return [
+    product.lastSaleDocumentType
+      ? `Type: ${product.lastSaleDocumentType.replace(/_/g, ' ')}`
+      : null,
+    product.lastSaleDocumentReference
+      ? `Document: ${product.lastSaleDocumentReference}`
+      : null,
+    product.lastSaleDate ? `Date: ${dateTime(product.lastSaleDate)}` : null,
+    product.lastSaleCustomer?.name ? `Client: ${product.lastSaleCustomer.name}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n') || undefined;
 }
 
 function ProductModal({
@@ -427,7 +444,11 @@ export function ProductsPage() {
                   <TableCell className="text-right font-mono text-text-secondary">{money(product.purchasePriceTtc)}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-primary">{money(product.salePrice)}</TableCell>
                   <TableCell className="text-right font-mono text-text-secondary">
-                    {product.lastSellingPrice != null ? money(product.lastSellingPrice) : '—'}
+                    {product.lastSellingPrice != null ? (
+                      <span title={lastSaleTooltip(product)}>{money(product.lastSellingPrice)}</span>
+                    ) : (
+                      '—'
+                    )}
                   </TableCell>
                   <TableCell><StockBadge product={product} /></TableCell>
                   <TableCell>

@@ -10,5 +10,6 @@ import { SalesService } from './sales.service';
   imports: [StockModule, ReferencesModule, SettingsModule, CaisseModule],
   controllers: [SalesController],
   providers: [SalesService],
+  exports: [SalesService],
 })
 export class SalesModule {}

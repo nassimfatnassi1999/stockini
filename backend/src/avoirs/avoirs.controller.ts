@@ -44,15 +44,15 @@ export class AvoirsController {
   }
 
   @RequirePermissions('sales.view')
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.avoirsService.findOne(id);
-  }
-
-  @RequirePermissions('sales.view')
   @Get('clients/:customerId')
   findByCustomer(@Param('customerId') customerId: string) {
     return this.avoirsService.findByCustomer(customerId);
+  }
+
+  @RequirePermissions('sales.view')
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.avoirsService.findOne(id);
   }
 
   @RequirePermissions('sales.view')

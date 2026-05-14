@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   CaisseMovementType,
   PaymentStatus,
+  Prisma,
   PurchaseStatus,
   StockMovementType,
 } from '@prisma/client';
@@ -12,6 +13,7 @@ import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import {
   CreatePurchaseDto,
+  PurchasePaginationDto,
   ReceivePurchaseDto,
   UpdatePurchaseDto,
 } from './dto/purchase.dto';
@@ -43,8 +45,8 @@ export class PurchasesService {
     const discount = dto.discount ?? 0;
     const tax = dto.tax ?? 0;
     const total = subtotal - discount + tax;
-    const paidAmount = dto.paidAmount ?? 0;
 
+    // All purchases start UNPAID — payments go through /payments/purchases/:id/pay
     return this.prisma.$transaction(async (tx) =>
       tx.purchase.create({
         data: {
@@ -54,9 +56,9 @@ export class PurchasesService {
           discount,
           tax,
           total,
-          paidAmount,
-          remainingAmount: Math.max(total - paidAmount, 0),
-          paymentStatus: this.paymentStatus(total, paidAmount),
+          paidAmount: 0,
+          remainingAmount: total,
+          paymentStatus: PaymentStatus.UNPAID,
           status: PurchaseStatus.ORDERED,
           createdById,
           items: { create: items },
@@ -66,12 +68,42 @@ export class PurchasesService {
     );
   }
 
-  findAll() {
-    return this.prisma.purchase.findMany({
-      where: { deletedAt: null },
-      include: { supplier: true, items: true, payments: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(query?: PurchasePaginationDto) {
+    const page = query?.page ?? 1;
+    const limit = Math.min(query?.limit ?? 20, 100);
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.PurchaseWhereInput = {
+      deletedAt: null,
+      ...(query?.status && { status: query.status }),
+      ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
+      ...(query?.supplierId && { supplierId: query.supplierId }),
+      ...((query?.dateFrom || query?.dateTo) && {
+        createdAt: {
+          ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
+          ...(query.dateTo && { lte: new Date(query.dateTo) }),
+        },
+      }),
+      ...(query?.search && {
+        OR: [
+          { orderNumber: { contains: query.search, mode: 'insensitive' } },
+          { supplier: { name: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.purchase.findMany({
+        where,
+        include: { supplier: true, items: true, payments: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.purchase.count({ where }),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   findOne(id: string) {
@@ -125,7 +157,7 @@ export class PurchasesService {
           productId: purchaseItem.productId,
           type: StockMovementType.PURCHASE_RECEPTION,
           quantity: item.quantity,
-          reason: 'Purchase reception',
+          reason: `Réception achat ${purchase.orderNumber}`,
           userId,
         });
       }
@@ -154,31 +186,71 @@ export class PurchasesService {
     });
   }
 
-  cancel(id: string) {
-    return this.prisma.purchase.update({
-      where: { id },
-      data: { status: PurchaseStatus.CANCELLED },
+  cancel(id: string, userId?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findUniqueOrThrow({
+        where: { id },
+        include: {
+          items: true,
+          payments: { where: { deletedAt: null } },
+        },
+      });
+
+      if (purchase.status === PurchaseStatus.CANCELLED) {
+        throw new BadRequestException('Achat déjà annulé');
+      }
+
+      // Reverse stock for all received items
+      for (const item of purchase.items) {
+        if (item.receivedQuantity > 0) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.SUPPLIER_RETURN,
+            quantity: item.receivedQuantity,
+            reason: `Annulation achat ${purchase.orderNumber}`,
+            userId,
+          });
+        }
+      }
+
+      // Reverse caisse per payment and soft-delete each payment
+      for (const payment of purchase.payments) {
+        if (payment.cashImpactDone) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.ANNULATION_ACHAT,
+            montant: Number(payment.amount),
+            motif: `Annulation achat ${purchase.orderNumber} — paiement ${payment.reference}`,
+            referenceDoc: purchase.orderNumber,
+            userId,
+          });
+        }
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { deletedAt: new Date(), deletedBy: userId },
+        });
+      }
+
+      return tx.purchase.update({
+        where: { id },
+        data: {
+          status: PurchaseStatus.CANCELLED,
+          paidAmount: 0,
+          remainingAmount: purchase.total,
+          paymentStatus: PaymentStatus.UNPAID,
+        },
+        include: { supplier: true, items: { include: { product: true } }, payments: true },
+      });
     });
   }
 
   async update(id: string, dto: UpdatePurchaseDto) {
+    if (dto.status === PurchaseStatus.CANCELLED) {
+      return this.cancel(id);
+    }
     await this.settings.assertActiveOption('purchase_statuses', dto.status);
-    await this.settings.assertActiveOption(
-      'payment_statuses',
-      dto.paymentStatus,
-    );
-    const purchase = await this.prisma.purchase.findUniqueOrThrow({
-      where: { id },
-    });
-    const paidAmount = dto.paidAmount ?? Number(purchase.paidAmount);
     return this.prisma.purchase.update({
       where: { id },
-      data: {
-        status: dto.status,
-        paymentStatus: dto.paymentStatus,
-        paidAmount,
-        remainingAmount: Math.max(Number(purchase.total) - paidAmount, 0),
-      },
+      data: { status: dto.status },
       include: {
         supplier: true,
         items: { include: { product: true } },
@@ -192,7 +264,10 @@ export class PurchasesService {
     await this.prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.findUniqueOrThrow({
         where: { id },
-        include: { items: true },
+        include: {
+          items: true,
+          payments: { where: { deletedAt: null } },
+        },
       });
 
       // Reverse stock for items already received
@@ -202,22 +277,25 @@ export class PurchasesService {
             productId: item.productId,
             type: StockMovementType.SUPPLIER_RETURN,
             quantity: item.receivedQuantity,
-            reason: 'Purchase deleted — stock reversal',
+            reason: `Suppression achat ${purchase.orderNumber}`,
             userId,
           });
         }
       }
 
-      // Reverse caisse for amounts already paid
-      const paidAmount = Number(purchase.paidAmount);
-      if (paidAmount > 0) {
-        await this.caisseService.recordMovement(tx, {
-          type: CaisseMovementType.ANNULATION_ACHAT,
-          montant: paidAmount,
-          motif: `Suppression achat ${purchase.orderNumber}`,
-          referenceDoc: purchase.orderNumber,
-          userId,
-        });
+      // Reverse caisse per active payment
+      if (purchase.status !== PurchaseStatus.CANCELLED) {
+        for (const payment of purchase.payments) {
+          if (payment.cashImpactDone) {
+            await this.caisseService.recordMovement(tx, {
+              type: CaisseMovementType.ANNULATION_ACHAT,
+              montant: Number(payment.amount),
+              motif: `Suppression achat ${purchase.orderNumber} — paiement ${payment.reference}`,
+              referenceDoc: purchase.orderNumber,
+              userId,
+            });
+          }
+        }
       }
 
       await tx.payment.deleteMany({ where: { purchaseId: id } });
@@ -228,12 +306,8 @@ export class PurchasesService {
   }
 
   private paymentStatus(total: number, paidAmount: number) {
-    if (paidAmount <= 0) {
-      return PaymentStatus.UNPAID;
-    }
-    if (paidAmount < total) {
-      return PaymentStatus.PARTIAL;
-    }
+    if (paidAmount <= 0) return PaymentStatus.UNPAID;
+    if (paidAmount < total) return PaymentStatus.PARTIAL;
     return PaymentStatus.PAID;
   }
 }

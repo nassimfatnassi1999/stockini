@@ -18,6 +18,11 @@ export interface Product {
   purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × (1 + TVA/100))
   salePrice: number | string;           // Prix de vente (TTC × 1.4)
   lastSellingPrice?: number | string | null;
+  lastSaleDate?: string | null;
+  lastSaleDocumentId?: string | null;
+  lastSaleDocumentReference?: string | null;
+  lastSaleDocumentType?: SalesDocumentType | null;
+  lastSaleCustomerId?: string | null;
   quantity: number;
   minStock: number;
   location?: string | null;
@@ -25,6 +30,7 @@ export interface Product {
   category?: Lookup;
   brand?: Lookup;
   supplier?: Lookup | null;
+  lastSaleCustomer?: Customer | null;
 }
 
 export type CaisseMovementType =
@@ -91,6 +97,7 @@ export interface Sale {
   status: string;
   documentType: SalesDocumentType;
   stockImpactDone: boolean;
+  lastSalePriceImpactDone?: boolean;
   reserveStock: boolean;
   createdAt: string;
   customer?: Customer | null;
@@ -104,6 +111,8 @@ export interface SaleItemDetail {
   productId: Id;
   quantity: number;
   unitPrice: number | string;
+  discountPercent?: number | string;
+  finalUnitPrice?: number | string | null;
   total: number | string;
   product?: {
     id: Id;
@@ -384,4 +393,35 @@ export interface DashboardReport {
   salesTotal: number | string;
   paidTotal: number | string;
   unpaidSales: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface SalesQueryParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  documentType?: string;
+  paymentStatus?: string;
+  customerId?: string;
+}
+
+export interface PurchasesQueryParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  paymentStatus?: string;
+  supplierId?: string;
 }

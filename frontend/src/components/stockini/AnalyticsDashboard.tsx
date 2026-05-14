@@ -270,8 +270,10 @@ export function AnalyticsDashboard() {
   const { data: stockVal }            = useQuery({ queryKey: ['db-stockval'],   queryFn: stockiniApi.stockValue, staleTime: 60_000 });
   const { data: topSelling }          = useQuery({ queryKey: ['db-topsell'],    queryFn: stockiniApi.topSelling, staleTime: 60_000 });
   const { data: products = [] }       = useQuery({ queryKey: ['db-products'],   queryFn: () => stockiniApi.products(), staleTime: 60_000 });
-  const { data: sales = [] }          = useQuery({ queryKey: ['db-sales'],      queryFn: stockiniApi.sales,      staleTime: 30_000 });
-  const { data: purchases = [] }      = useQuery({ queryKey: ['db-purchases'],  queryFn: stockiniApi.purchases,  staleTime: 30_000 });
+  const { data: salesResp }           = useQuery({ queryKey: ['db-sales'],      queryFn: () => stockiniApi.sales(),     staleTime: 30_000 });
+  const { data: purchasesResp }       = useQuery({ queryKey: ['db-purchases'],  queryFn: () => stockiniApi.purchases(), staleTime: 30_000 });
+  const sales:     Sale[]     = Array.isArray(salesResp?.data)     ? salesResp.data     : [];
+  const purchases: Purchase[] = Array.isArray(purchasesResp?.data) ? purchasesResp.data : [];
   const { data: customers = [] }      = useQuery({ queryKey: ['db-customers'],  queryFn: stockiniApi.customers,  staleTime: 60_000 });
   const { data: alerts = [] }         = useQuery({ queryKey: ['db-alerts'],     queryFn: stockiniApi.alerts,     staleTime: 30_000 });
   const { data: movements = [] }      = useQuery({ queryKey: ['db-movements'],  queryFn: stockiniApi.movements,  staleTime: 30_000 });

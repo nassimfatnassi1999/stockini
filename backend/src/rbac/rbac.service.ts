@@ -13,6 +13,9 @@ const ALL_PERMISSIONS: PermissionDef[] = [
   // ── Dashboard ─────────────────────────────────────────────────────────────
   { code: 'dashboard.view', module: 'dashboard', action: 'view', description: 'Consulter le tableau de bord' },
 
+  // ── Admin ────────────────────────────────────────────────────────────────
+  { code: 'admin.recalculate_last_sale_prices', module: 'admin', action: 'recalculate_last_sale_prices', description: 'Recalculer les derniers prix de vente produits' },
+
   // ── Clients ───────────────────────────────────────────────────────────────
   { code: 'clients.view',   module: 'clients', action: 'view',   description: 'Consulter les clients' },
   { code: 'clients.create', module: 'clients', action: 'create', description: 'Créer un client' },

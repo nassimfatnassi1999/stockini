@@ -150,6 +150,7 @@ export class ProductsService {
       category: true,
       brand: true,
       supplier: true,
+      lastSaleCustomer: true,
     } as const;
   }
 }

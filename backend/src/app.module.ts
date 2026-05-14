@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AlertsModule } from './alerts/alerts.module';
+import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
@@ -48,6 +49,7 @@ import { UsersModule } from './users/users.module';
     DocumentsModule,
     AvoirsModule,
     CaisseModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

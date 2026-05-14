@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,6 +16,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreatePurchaseDto,
+  PurchasePaginationDto,
   ReceivePurchaseDto,
   UpdatePurchaseDto,
 } from './dto/purchase.dto';
@@ -33,8 +35,8 @@ export class PurchasesController {
 
   @RequirePermissions('purchases.view')
   @Get()
-  findAll() {
-    return this.purchasesService.findAll();
+  findAll(@Query() query: PurchasePaginationDto) {
+    return this.purchasesService.findAll(query);
   }
 
   @RequirePermissions('purchases.view')
@@ -55,8 +57,8 @@ export class PurchasesController {
 
   @RequirePermissions('purchases.update')
   @Patch(':id/cancel')
-  cancel(@Param('id') id: string) {
-    return this.purchasesService.cancel(id);
+  cancel(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.purchasesService.cancel(id, user?.id);
   }
 
   @RequirePermissions('purchases.update')
