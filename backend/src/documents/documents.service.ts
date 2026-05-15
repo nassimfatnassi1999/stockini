@@ -618,11 +618,31 @@ export class DocumentsService {
       map[r.key] = r.value;
     });
     return {
-      name: map['company_name'] ?? map['nom_entreprise'],
-      address: map['company_address'] ?? map['adresse'],
-      phone: map['company_phone'] ?? map['telephone'],
-      email: map['company_email'] ?? map['email'],
-      taxNumber: map['tax_number'] ?? map['matricule_fiscal'],
+      name:
+        map['company_name'] ??
+        map['nom_entreprise'] ??
+        process.env.COMPANY_NAME ??
+        'Moumna spare part',
+      address:
+        map['company_address'] ??
+        map['adresse'] ??
+        process.env.COMPANY_ADDRESS ??
+        undefined,
+      phone:
+        map['company_phone'] ??
+        map['telephone'] ??
+        process.env.COMPANY_PHONE ??
+        undefined,
+      email:
+        map['company_email'] ??
+        map['email'] ??
+        process.env.COMPANY_EMAIL ??
+        undefined,
+      taxNumber:
+        map['tax_number'] ??
+        map['matricule_fiscal'] ??
+        process.env.COMPANY_TAX_ID ??
+        undefined,
     };
   }
 }
