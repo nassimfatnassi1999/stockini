@@ -382,6 +382,9 @@ export class DocumentsService {
       }),
     );
 
+    let emailStatus: EmailStatus = EmailStatus.SENT;
+    let errorMessage: string | undefined;
+
     try {
       await this.email.send({
         to: dto.to,
@@ -401,19 +404,36 @@ export class DocumentsService {
           sentTo: dto.to,
         },
       });
-
-      return { success: true, emailStatus: EmailStatus.SENT };
     } catch (err) {
-      const errMsg = (err as Error).message;
-      this.logger.error(`Email send failed: ${errMsg}`);
+      emailStatus = EmailStatus.FAILED;
+      errorMessage = (err as Error).message;
+      this.logger.error(`Email send failed: ${errorMessage}`);
 
       await this.prisma.generatedDocument.updateMany({
         where: { id: { in: dto.documentIds } },
         data: { emailStatus: EmailStatus.FAILED },
       });
-
-      throw new BadRequestException(`Échec de l'envoi email : ${errMsg}`);
     }
+
+    await this.prisma.documentEmailLog.createMany({
+      data: dto.documentIds.map((documentId) => ({
+        documentId,
+        recipientEmail: dto.to,
+        cc: dto.cc,
+        bcc: dto.bcc,
+        subject: dto.subject,
+        message: dto.body,
+        sentBy: user?.id,
+        status: emailStatus,
+        errorMessage,
+      })),
+    });
+
+    if (emailStatus === EmailStatus.FAILED) {
+      throw new BadRequestException(`Échec de l'envoi email : ${errorMessage}`);
+    }
+
+    return { success: true, emailStatus };
   }
 
   // ─── Per-document email (from Documents page) ────────────────────────────────

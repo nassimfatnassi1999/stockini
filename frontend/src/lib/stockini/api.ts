@@ -169,8 +169,11 @@ export const stockiniApi = {
   documentPresignedUrl: (id: string) =>
     api.get<{ url: string }>(`/documents/${id}/presigned-url`).then((r) => r.data),
 
-  viewDocumentUrl: (id: string) => `/api/documents/${id}/view`,
-  downloadDocumentUrl: (id: string) => `/api/documents/${id}/download`,
+  viewDocument: (id: string): Promise<Blob> =>
+    api.get(`/documents/${id}/view`, { responseType: 'blob' }).then((r) => r.data as Blob),
+
+  downloadDocument: (id: string): Promise<Blob> =>
+    api.get(`/documents/${id}/download`, { responseType: 'blob' }).then((r) => r.data as Blob),
 
   emailPreview: (documentIds: string[]) =>
     api.post<EmailPreview>('/documents/email-preview', { documentIds }).then((r) => r.data),

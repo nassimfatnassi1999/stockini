@@ -125,7 +125,7 @@ export class DocumentsController {
   }
 
   @Get(':id/email-logs')
-  @RequirePermissions('documents.view')
+  @RequirePermissions('documents.view_history')
   getEmailLogs(@Param('id') id: string) {
     return this.svc.getEmailLogs(id);
   }

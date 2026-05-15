@@ -396,6 +396,10 @@ export default function DocumentsPage() {
   const [maxSize, setMaxSize] = useState('');
   const [page, setPage] = useState(1);
 
+  // Per-document action loading
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
   // Modals
   const [editDoc, setEditDoc] = useState<GeneratedDocument | null>(null);
   const [emailDoc, setEmailDoc] = useState<GeneratedDocument | null>(null);
@@ -432,18 +436,53 @@ export default function DocumentsPage() {
     onError: () => { toast.error('Erreur lors de la suppression'); setDeleteDoc(null); },
   });
 
-  const handleView = useCallback((doc: GeneratedDocument) => {
-    window.open(stockiniApi.viewDocumentUrl(doc.id), '_blank');
-  }, []);
+  const handleView = useCallback(async (doc: GeneratedDocument) => {
+    if (viewingId) return;
+    setViewingId(doc.id);
+    try {
+      const blob = await stockiniApi.viewDocument(doc.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 401 || status === 403) {
+        toast.error('Accès refusé — permission ou session invalide');
+      } else if (status === 404) {
+        toast.error('Document introuvable dans le stockage');
+      } else {
+        toast.error('Impossible d\'ouvrir le document');
+      }
+    } finally {
+      setViewingId(null);
+    }
+  }, [viewingId]);
 
-  const handleDownload = useCallback((doc: GeneratedDocument) => {
-    const url = stockiniApi.downloadDocumentUrl(doc.id);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = doc.fileName;
-    a.click();
-    toast.success('Téléchargement démarré');
-  }, []);
+  const handleDownload = useCallback(async (doc: GeneratedDocument) => {
+    if (downloadingId) return;
+    setDownloadingId(doc.id);
+    try {
+      const blob = await stockiniApi.downloadDocument(doc.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      toast.success('Téléchargement terminé');
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 401 || status === 403) {
+        toast.error('Accès refusé — permission ou session invalide');
+      } else if (status === 404) {
+        toast.error('Document introuvable dans le stockage');
+      } else {
+        toast.error('Échec du téléchargement');
+      }
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [downloadingId]);
 
   const resetFilters = () => {
     setSearch('');
@@ -661,18 +700,24 @@ export default function DocumentsPage() {
                             variant="actionView"
                             size="action"
                             title="Voir le PDF"
+                            disabled={viewingId === doc.id}
                             onClick={() => handleView(doc)}
                           >
-                            <Eye size={13} />
+                            {viewingId === doc.id
+                              ? <Loader2 size={13} className="animate-spin" />
+                              : <Eye size={13} />}
                           </Button>
                           {can('documents.download') && (
                             <Button
                               variant="actionView"
                               size="action"
                               title="Télécharger"
+                              disabled={downloadingId === doc.id}
                               onClick={() => handleDownload(doc)}
                             >
-                              <Download size={13} />
+                              {downloadingId === doc.id
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <Download size={13} />}
                             </Button>
                           )}
                           {can('documents.update') && (
@@ -695,7 +740,7 @@ export default function DocumentsPage() {
                               <Mail size={13} />
                             </Button>
                           )}
-                          {can('documents.email') && (
+                          {can('documents.view_history') && (
                             <Button
                               variant="actionView"
                               size="action"

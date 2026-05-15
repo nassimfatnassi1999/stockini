@@ -70,12 +70,18 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
     onError: () => toast.error('Erreur lors de la régénération'),
   });
 
-  const handleDownload = (id: string, fileName: string) => {
-    const url = stockiniApi.downloadDocumentUrl(id);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
+  const handleDownload = async (id: string, fileName: string) => {
+    try {
+      const blob = await stockiniApi.downloadDocument(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      toast.error('Échec du téléchargement');
+    }
   };
 
   const handleView = async (id: string) => {
