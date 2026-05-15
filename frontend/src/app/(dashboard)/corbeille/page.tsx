@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
-import { hasPermission } from '@/lib/auth';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
 import { RotateCcw, Trash2 } from 'lucide-react';
@@ -43,11 +44,12 @@ function formatDate(iso: string): string {
 
 export default function CorbeillePage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [permanentTarget, setPermanentTarget] = useState<TrashItem | null>(null);
 
-  const canRestore = hasPermission('trash.restore');
-  const canPermanentDelete = hasPermission('trash.permanent_delete');
+  const canRestore = can('trash.restore');
+  const canPermanentDelete = can('trash.permanent_delete');
 
   const entity = activeTab === 'all' ? undefined : activeTab;
 
@@ -91,6 +93,7 @@ export default function CorbeillePage() {
   const items = trashQuery.data ?? [];
 
   return (
+    <PermissionGuard permission="trash.view">
     <div className="space-y-4">
       {/* Header */}
       <div>
@@ -232,5 +235,6 @@ export default function CorbeillePage() {
         />
       )}
     </div>
+    </PermissionGuard>
   );
 }

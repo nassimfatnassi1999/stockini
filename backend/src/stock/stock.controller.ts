@@ -4,7 +4,11 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
-import { StockAdjustmentDto, StockChangeDto } from './dto/stock.dto';
+import {
+  ResetInventoryDto,
+  StockAdjustmentDto,
+  StockChangeDto,
+} from './dto/stock.dto';
 import { StockService } from './stock.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -34,5 +38,15 @@ export class StockController {
   @Get('movements')
   history(@Query('productId') productId?: string) {
     return this.stockService.history(productId);
+  }
+
+  /** Admin-only: zero out all product quantities in a single transaction */
+  @RequirePermissions('stock.reset')
+  @Post('reset-inventory')
+  resetInventory(
+    @Body() dto: ResetInventoryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.stockService.resetInventory(dto, user.id);
   }
 }

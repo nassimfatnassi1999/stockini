@@ -111,7 +111,9 @@ export class ProductsService {
 
     let derivedPrices = {};
     if (dto.purchasePrice !== undefined || dto.tva !== undefined) {
-      const current = await this.prisma.product.findUniqueOrThrow({ where: { id } });
+      const current = await this.prisma.product.findUniqueOrThrow({
+        where: { id },
+      });
       const tva = dto.tva ?? Number(current.tva);
       const priceHt = dto.purchasePrice ?? Number(current.purchasePrice);
       derivedPrices = this.derivePrices(priceHt, tva);

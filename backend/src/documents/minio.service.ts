@@ -17,7 +17,10 @@ export class MinioService implements OnModuleInit {
       accessKey: this.config.get<string>('MINIO_ACCESS_KEY', 'minioadmin'),
       secretKey: this.config.get<string>('MINIO_SECRET_KEY', 'minioadmin'),
     });
-    this.bucket = this.config.get<string>('MINIO_BUCKET', 'generated-documents');
+    this.bucket = this.config.get<string>(
+      'MINIO_BUCKET',
+      'generated-documents',
+    );
   }
 
   async onModuleInit() {

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CaisseMovementType,
   DocumentStatus,
@@ -20,7 +24,9 @@ import { CreateAvoirDto } from './dto/avoir.dto';
 
 const AVOIR_INCLUDE = {
   sale: { select: { invoiceNumber: true, customerId: true } },
-  customer: { select: { id: true, name: true, phone: true, email: true, address: true } },
+  customer: {
+    select: { id: true, name: true, phone: true, email: true, address: true },
+  },
   createdBy: { select: { id: true, fullName: true } },
   items: {
     include: {
@@ -48,7 +54,9 @@ export class AvoirsService {
       where: { id: saleId, deletedAt: null },
       include: {
         items: {
-          include: { product: { select: { id: true, reference: true, name: true } } },
+          include: {
+            product: { select: { id: true, reference: true, name: true } },
+          },
         },
         customer: { select: { id: true, name: true } },
       },
@@ -72,25 +80,29 @@ export class AvoirsService {
       saleId: sale.id,
       invoiceNumber: sale.invoiceNumber,
       customer: sale.customer,
-      items: sale.items.map((item) => {
-        const alreadyReturned = returnedMap.get(item.id) ?? 0;
-        return {
-          saleItemId: item.id,
-          productId: item.productId,
-          product: item.product,
-          quantiteSold: item.quantity,
-          quantiteDejaRetournee: alreadyReturned,
-          quantiteRetournable: item.quantity - alreadyReturned,
-          unitPrice: Number(item.unitPrice),
-          total: Number(item.total),
-        };
-      }).filter((i) => i.quantiteRetournable > 0),
+      items: sale.items
+        .map((item) => {
+          const alreadyReturned = returnedMap.get(item.id) ?? 0;
+          return {
+            saleItemId: item.id,
+            productId: item.productId,
+            product: item.product,
+            quantiteSold: item.quantity,
+            quantiteDejaRetournee: alreadyReturned,
+            quantiteRetournable: item.quantity - alreadyReturned,
+            unitPrice: Number(item.unitPrice),
+            total: Number(item.total),
+          };
+        })
+        .filter((i) => i.quantiteRetournable > 0),
     };
   }
 
   async create(dto: CreateAvoirDto, user?: AuthUser) {
     if (!dto.items.length) {
-      throw new BadRequestException('Un avoir doit inclure au moins un article');
+      throw new BadRequestException(
+        'Un avoir doit inclure au moins un article',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -99,12 +111,13 @@ export class AvoirsService {
         where: { id: dto.saleId, deletedAt: null },
         include: { items: { include: { product: true } } },
       });
-      if (!sale) throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
+      if (!sale)
+        throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
       if (
         sale.status !== SaleStatus.COMPLETED ||
-        !([DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]).includes(
-          sale.documentType as DocumentType,
-        ) ||
+        !(
+          [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+        ).includes(sale.documentType) ||
         !sale.stockImpactDone
       ) {
         throw new BadRequestException(
@@ -113,15 +126,23 @@ export class AvoirsService {
       }
 
       // Validate customer matches
-      if (dto.customerId && sale.customerId && dto.customerId !== sale.customerId) {
-        throw new BadRequestException('Le client ne correspond pas à la facture');
+      if (
+        dto.customerId &&
+        sale.customerId &&
+        dto.customerId !== sale.customerId
+      ) {
+        throw new BadRequestException(
+          'Le client ne correspond pas à la facture',
+        );
       }
 
       const effectiveCustomerId = dto.customerId ?? sale.customerId;
 
       // Map saleItems by id and by productId for lookup
       const saleItemsById = new Map(sale.items.map((i) => [i.id, i]));
-      const saleItemsByProductId = new Map(sale.items.map((i) => [i.productId, i]));
+      const saleItemsByProductId = new Map(
+        sale.items.map((i) => [i.productId, i]),
+      );
 
       // Check already-returned quantities
       const existingReturns = await tx.creditNoteItem.groupBy({
@@ -133,7 +154,10 @@ export class AvoirsService {
         },
       });
       const returnedMap = new Map(
-        existingReturns.map((r) => [r.saleItemId, r._sum.quantiteRetournee ?? 0]),
+        existingReturns.map((r) => [
+          r.saleItemId,
+          r._sum.quantiteRetournee ?? 0,
+        ]),
       );
 
       // Validate each item
@@ -150,7 +174,7 @@ export class AvoirsService {
       }> = [];
 
       for (const dtoItem of dto.items) {
-        let saleItem = dtoItem.saleItemId
+        const saleItem = dtoItem.saleItemId
           ? saleItemsById.get(dtoItem.saleItemId)
           : saleItemsByProductId.get(dtoItem.productId);
 
@@ -188,11 +212,18 @@ export class AvoirsService {
       }
 
       const subtotal = resolvedItems.reduce((s, i) => s + i.totalHt, 0);
-      const tax = resolvedItems.reduce((s, i) => s + (i.totalTtc - i.totalHt), 0);
+      const tax = resolvedItems.reduce(
+        (s, i) => s + (i.totalTtc - i.totalHt),
+        0,
+      );
       const total = subtotal + tax;
       const montantRembourse = total;
 
-      const numero = await this.references.generateSimple('AV', 'creditNote', tx);
+      const numero = await this.references.generateSimple(
+        'AV',
+        'creditNote',
+        tx,
+      );
 
       const avoir = await tx.creditNote.create({
         data: {
@@ -235,7 +266,8 @@ export class AvoirsService {
 
       // Record refund payment (debit caisse)
       if (montantRembourse > 0) {
-        const paymentMethod = (dto.paymentMethod as PaymentMethod) ?? PaymentMethod.CASH;
+        const paymentMethod =
+          (dto.paymentMethod as PaymentMethod) ?? PaymentMethod.CASH;
         const payment = await tx.payment.create({
           data: {
             reference: await this.references.generate('AV-PAY', 'payment', tx),
@@ -294,7 +326,10 @@ export class AvoirsService {
     });
   }
 
-  async generatePdf(id: string, user?: AuthUser): Promise<{ buffer: Buffer; fileName: string }> {
+  async generatePdf(
+    id: string,
+    user?: AuthUser,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
     const avoir = await this.prisma.creditNote.findUnique({
       where: { id },
       include: {
@@ -347,16 +382,29 @@ export class AvoirsService {
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const objectKey = `documents/ventes/avoir/${year}/${month}/${fileName}`;
 
-    await this.minio.putObject(this.minio.bucket, objectKey, pdfBuffer, 'application/pdf');
+    await this.minio.putObject(
+      this.minio.bucket,
+      objectKey,
+      pdfBuffer,
+      'application/pdf',
+    );
 
     const existing = await this.prisma.generatedDocument.findFirst({
-      where: { creditNoteId: id, documentType: DocumentType.AVOIR, status: { not: DocumentStatus.DELETED } },
+      where: {
+        creditNoteId: id,
+        documentType: DocumentType.AVOIR,
+        status: { not: DocumentStatus.DELETED },
+      },
     });
 
     if (existing) {
       await this.prisma.generatedDocument.update({
         where: { id: existing.id },
-        data: { fileSize: pdfBuffer.length, generatedAt: now, status: DocumentStatus.GENERATED },
+        data: {
+          fileSize: pdfBuffer.length,
+          generatedAt: now,
+          status: DocumentStatus.GENERATED,
+        },
       });
     } else {
       await this.prisma.generatedDocument.create({
@@ -385,7 +433,9 @@ export class AvoirsService {
   private async getCompanySettings() {
     const rows = await this.settings.findAll();
     const map: Record<string, string> = {};
-    rows.forEach((r) => { map[r.key] = r.value; });
+    rows.forEach((r) => {
+      map[r.key] = r.value;
+    });
     return {
       name: map['company_name'] ?? map['nom_entreprise'],
       address: map['company_address'] ?? map['adresse'],

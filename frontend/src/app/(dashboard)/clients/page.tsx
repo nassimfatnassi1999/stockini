@@ -10,6 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2, X } from 'lucide-react';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { Can } from '@/components/shared/Can';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import type { Customer, DropdownOption } from '@/lib/stockini/types';
 
 const CUSTOMER_TYPES = [
@@ -48,6 +51,7 @@ function typeLabel(type: string): string {
 
 export default function ClientsPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<CreateCustomerForm>(EMPTY_FORM);
@@ -150,6 +154,7 @@ export default function ClientsPage() {
   };
 
   return (
+    <PermissionGuard permission="clients.view">
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-start justify-between">
@@ -159,14 +164,16 @@ export default function ClientsPage() {
             {customers.length} client{customers.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setShowModal(true)}
-          className="gap-1.5"
-        >
-          <Plus size={14} />
-          Nouveau client
-        </Button>
+        <Can permission="clients.create">
+          <Button
+            size="sm"
+            onClick={() => setShowModal(true)}
+            className="gap-1.5"
+          >
+            <Plus size={14} />
+            Nouveau client
+          </Button>
+        </Can>
       </div>
 
       {/* Search */}
@@ -252,14 +259,16 @@ export default function ClientsPage() {
                       {formatCurrency(customer.creditBalance)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        aria-label={`Supprimer ${customer.name}`}
-                        onClick={() => setTrashTarget({ id: customer.id, name: customer.name })}
-                        className="app-action-button app-action-delete"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      {can('clients.delete') && (
+                        <button
+                          type="button"
+                          aria-label={`Supprimer ${customer.name}`}
+                          onClick={() => setTrashTarget({ id: customer.id, name: customer.name })}
+                          className="app-action-button app-action-delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -414,5 +423,6 @@ export default function ClientsPage() {
         </div>
       )}
     </div>
+    </PermissionGuard>
   );
 }

@@ -25,36 +25,80 @@ async function main() {
     { name: 'ADMIN', permissions: ['*'] },
     { name: 'SUPER_ADMIN', permissions: ['*'] },
     {
+      // Responsable stock — gestion physique du stock, produits, alertes, rapports stock
       name: 'STOCK_MANAGER',
       permissions: [
         'dashboard.view',
-        'products.*',
-        'stock.*',
-        'alerts.*',
-        'reports.view',
+        // Produits
+        'products.view', 'products.create', 'products.update',
+        'products.import', 'products.export',
+        'products.view_margin',
+        // Stock
+        'stock.view', 'stock.adjust', 'stock.transfer',
+        'stock.movements.view', 'stock.export',
+        // Alertes
+        'alerts.view', 'alerts.create', 'alerts.update', 'alerts.delete', 'alerts.mark_read',
+        // Rapports stock
+        'reports.view', 'reports.stock_stats', 'reports.export',
+        // Corbeille limitée
         'trash.view', 'trash.restore',
+        // Documentation
+        'documentation.view',
       ],
     },
     {
-      // SELLER can sell but NOT override the 20% minimum margin
+      // Vendeur — ventes, clients, documents, paiements clients, caisse
       name: 'SELLER',
       permissions: [
         'dashboard.view',
+        // Clients
+        'clients.view', 'clients.create', 'clients.update', 'clients.view_history',
+        // Produits (consultation uniquement)
         'products.view',
-        'sales.view', 'sales.create', 'sales.update', 'sales.view_details',
-        'clients.*',
+        // Stock (consultation uniquement)
+        'stock.view', 'stock.movements.view',
+        // Ventes
+        'sales.view', 'sales.create', 'sales.update', 'sales.delete',
+        'sales.view_details', 'sales.cancel', 'sales.print', 'sales.view_history',
+        // Documents
+        'documents.view', 'documents.create', 'documents.download',
+        'documents.email', 'documents.view_history',
+        // Paiements clients
         'payments.view', 'payments.create', 'payments.receive_client_payment',
+        // Caisse (consultation + opérations)
+        'caisse.view', 'caisse.operate',
+        // Alertes (consultation)
+        'alerts.view', 'alerts.mark_read',
+        // Documentation
+        'documentation.view',
       ],
     },
     {
+      // Responsable achats — fournisseurs, achats, stock réception, paiements fournisseurs
       name: 'PURCHASE_MANAGER',
       permissions: [
         'dashboard.view',
-        'products.view',
-        'purchases.*',
-        'suppliers.*',
+        // Produits (consultation)
+        'products.view', 'products.view_margin',
+        // Stock (consultation + ajustement réception)
+        'stock.view', 'stock.adjust', 'stock.movements.view', 'stock.export',
+        // Fournisseurs
+        'suppliers.view', 'suppliers.create', 'suppliers.update', 'suppliers.export',
+        // Achats
+        'purchases.view', 'purchases.create_order', 'purchases.create_receipt',
+        'purchases.create_invoice', 'purchases.update', 'purchases.validate_receipt',
+        'purchases.cancel', 'purchases.export',
+        // Documents
+        'documents.view', 'documents.create', 'documents.download', 'documents.email',
+        // Paiements
         'payments.view', 'payments.create',
-        'expenses.*',
+        // Dépenses / Paiements fournisseurs
+        'expenses.view', 'expenses.create', 'expenses.update', 'expenses.pay_supplier',
+        'expenses.export',
+        // Rapports achats
+        'reports.view', 'reports.purchases_stats', 'reports.stock_stats', 'reports.export',
+        // Documentation
+        'documentation.view',
       ],
     },
   ];

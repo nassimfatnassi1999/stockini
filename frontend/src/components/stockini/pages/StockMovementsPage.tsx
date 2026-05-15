@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Filter, Plus, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, Filter, Plus, RotateCcw, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Can } from '@/components/shared/Can';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, statusLabel } from '@/lib/stockini/format';
@@ -21,6 +23,111 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
+
+// ─── Reset Inventory Modal ─────────────────────────────────────────────────────
+
+interface ResetModalProps {
+  onClose: () => void;
+  onConfirm: (adminPassword: string) => void;
+  isPending: boolean;
+}
+
+function ResetInventoryModal({ onClose, onConfirm, isPending }: ResetModalProps) {
+  const [password, setPassword]         = useState('');
+  const [confirmText, setConfirmText]   = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const isValid = confirmText === 'RESET STOCK' && password.length > 0;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isValid) return;
+    onConfirm(password);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl">
+        {/* Header */}
+        <div className="flex items-start gap-3 border-b border-border p-5">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100">
+            <AlertTriangle size={18} className="text-red-600" />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-bold text-text-primary">Remise à zéro du stock</h2>
+            <p className="mt-0.5 text-[12px] text-text-secondary">Action irréversible — administrateur requis</p>
+          </div>
+        </div>
+
+        {/* Warning */}
+        <div className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
+          <p className="text-[12px] font-medium text-red-700">
+            Cette action va remettre <strong>tous les stocks à 0</strong>.
+            Action irréversible.
+          </p>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+          <div className="space-y-1.5">
+            <label className="text-[12px] font-semibold text-text-primary">
+              Mot de passe administrateur
+            </label>
+            <input
+              ref={inputRef}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              placeholder="••••••••"
+              className="h-9 w-full rounded-md border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40"
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[12px] font-semibold text-text-primary">
+              Tapez <code className="rounded bg-red-100 px-1 text-red-700">RESET STOCK</code> pour confirmer
+            </label>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="RESET STOCK"
+              className="h-9 w-full rounded-md border border-border bg-white px-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {confirmText.length > 0 && confirmText !== 'RESET STOCK' && (
+              <p className="text-[11px] text-red-500">Le texte ne correspond pas.</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isPending}
+              className="h-9 rounded-md border border-border bg-white px-4 text-[12px] font-medium text-text-secondary hover:bg-muted disabled:opacity-50"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              disabled={!isValid || isPending}
+              className="h-9 rounded-md bg-red-600 px-4 text-[12px] font-semibold text-white hover:bg-red-700 disabled:opacity-40"
+            >
+              {isPending ? 'En cours…' : 'Confirmer la remise à zéro'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 const MOVEMENT_TYPE_OPTIONS = [
   { value: '', label: 'Tous les types' },
@@ -69,10 +176,12 @@ function countActiveFilters(f: Filters): number {
 }
 
 export function StockMovementsPage() {
-  const queryClient = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const queryClient  = useQueryClient();
+  const { can } = usePermissions();
+  const [modalOpen, setModalOpen]         = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen]     = useState(false);
+  const [filters, setFilters]             = useState<Filters>(DEFAULT_FILTERS);
 
   const products = useQuery({ queryKey: ['stockini-products'], queryFn: () => stockiniApi.products() });
   const operationOptions = useDropdownOptions('stock_operation_types');
@@ -86,6 +195,20 @@ export function StockMovementsPage() {
   ];
   const [form, setForm] = useState<Record<string, string | boolean>>(emptyForm(fields));
   const query = useQuery({ queryKey: ['stockini-movements'], queryFn: stockiniApi.movements });
+
+  const resetMutation = useMutation({
+    mutationFn: (adminPassword: string) =>
+      stockiniApi.resetInventory({ adminPassword, confirmationText: 'RESET STOCK' }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
+      setResetModalOpen(false);
+      toast.success(result.message);
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erreur lors de la remise à zéro');
+    },
+  });
 
   const allData: StockMovement[] = query.data ?? [];
 
@@ -166,10 +289,25 @@ export function StockMovementsPage() {
     <>
       <div className="mb-4 flex items-end justify-between gap-3">
         <PageHeader title="Stock" subtitle="Historique des entrées, sorties, corrections et réceptions." />
-        <Button type="button" size="sm" onClick={() => setModalOpen(true)}>
-          <Plus size={14} />
-          Mouvement
-        </Button>
+        <div className="flex items-center gap-2">
+          <Can permission="stock.reset">
+            <button
+              type="button"
+              onClick={() => setResetModalOpen(true)}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 text-[12px] font-medium text-red-600 hover:bg-red-100"
+              title="Inventaire — Remise à zéro stock"
+            >
+              <RotateCcw size={13} />
+              Remise à zéro
+            </button>
+          </Can>
+          <Can permission="stock.adjust">
+            <Button type="button" size="sm" onClick={() => setModalOpen(true)}>
+              <Plus size={14} />
+              Mouvement
+            </Button>
+          </Can>
+        </div>
       </div>
 
       <Card className="shadow-card">
@@ -358,7 +496,7 @@ export function StockMovementsPage() {
         </CardContent>
       </Card>
 
-      {modalOpen && (
+      {modalOpen && can('stock.adjust') && (
         <CrudModal
           title="Nouveau mouvement stock"
           fields={fields}
@@ -370,6 +508,14 @@ export function StockMovementsPage() {
             createMutation.mutate();
           }}
           saving={createMutation.isPending}
+        />
+      )}
+
+      {resetModalOpen && can('stock.reset') && (
+        <ResetInventoryModal
+          onClose={() => setResetModalOpen(false)}
+          onConfirm={(adminPassword) => resetMutation.mutate(adminPassword)}
+          isPending={resetMutation.isPending}
         />
       )}
     </>

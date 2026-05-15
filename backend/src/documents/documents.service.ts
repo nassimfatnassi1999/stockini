@@ -4,7 +4,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { DocumentType, DocumentStatus, EmailStatus, Prisma } from '@prisma/client';
+import {
+  DocumentType,
+  DocumentStatus,
+  EmailStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from './minio.service';
@@ -76,7 +81,9 @@ export class DocumentsService {
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
       if (dto.documentType === DocumentType.AVOIR) {
-        throw new BadRequestException('Les avoirs doivent être générés depuis le module Avoirs');
+        throw new BadRequestException(
+          'Les avoirs doivent être générés depuis le module Avoirs',
+        );
       }
       if (sale.documentType !== dto.documentType) {
         throw new BadRequestException(
@@ -85,7 +92,11 @@ export class DocumentsService {
       }
 
       const existing = await this.prisma.generatedDocument.findFirst({
-        where: { invoiceId, documentType: dto.documentType, status: { not: DocumentStatus.DELETED } },
+        where: {
+          invoiceId,
+          documentType: dto.documentType,
+          status: { not: DocumentStatus.DELETED },
+        },
       });
       if (existing) {
         results.push(existing);
@@ -128,7 +139,12 @@ export class DocumentsService {
         companySettings,
       );
 
-      await this.minio.putObject(this.minio.bucket, objectKey, pdfBuffer, 'application/pdf');
+      await this.minio.putObject(
+        this.minio.bucket,
+        objectKey,
+        pdfBuffer,
+        'application/pdf',
+      );
 
       const doc = await this.prisma.generatedDocument.create({
         data: {
@@ -176,14 +192,25 @@ export class DocumentsService {
       where.OR = [
         { documentNumber: { contains: query.search, mode: 'insensitive' } },
         { clientName: { contains: query.search, mode: 'insensitive' } },
-        { sale: { invoiceNumber: { contains: query.search, mode: 'insensitive' } } },
-        { sale: { customer: { name: { contains: query.search, mode: 'insensitive' } } } },
+        {
+          sale: {
+            invoiceNumber: { contains: query.search, mode: 'insensitive' },
+          },
+        },
+        {
+          sale: {
+            customer: { name: { contains: query.search, mode: 'insensitive' } },
+          },
+        },
       ];
     }
 
     if (query.dateFrom || query.dateTo) {
       where.generatedAt = {};
-      if (query.dateFrom) (where.generatedAt as Prisma.DateTimeFilter).gte = new Date(query.dateFrom);
+      if (query.dateFrom)
+        (where.generatedAt as Prisma.DateTimeFilter).gte = new Date(
+          query.dateFrom,
+        );
       if (query.dateTo) {
         const end = new Date(query.dateTo);
         end.setHours(23, 59, 59, 999);
@@ -193,8 +220,10 @@ export class DocumentsService {
 
     if (query.minSize !== undefined || query.maxSize !== undefined) {
       where.fileSize = {};
-      if (query.minSize !== undefined) (where.fileSize as Prisma.IntFilter).gte = query.minSize;
-      if (query.maxSize !== undefined) (where.fileSize as Prisma.IntFilter).lte = query.maxSize;
+      if (query.minSize !== undefined)
+        (where.fileSize as Prisma.IntFilter).gte = query.minSize;
+      if (query.maxSize !== undefined)
+        (where.fileSize as Prisma.IntFilter).lte = query.maxSize;
     }
 
     const [total, data] = await this.prisma.$transaction([
@@ -242,7 +271,9 @@ export class DocumentsService {
     return this.prisma.generatedDocument.update({
       where: { id },
       data: {
-        ...(dto.documentNumber !== undefined && { documentNumber: dto.documentNumber }),
+        ...(dto.documentNumber !== undefined && {
+          documentNumber: dto.documentNumber,
+        }),
         ...(dto.clientName !== undefined && { clientName: dto.clientName }),
         ...(dto.status !== undefined && { status: dto.status }),
       },
@@ -253,16 +284,28 @@ export class DocumentsService {
   // ─── Presigned URL ───────────────────────────────────────────────────────────
 
   async getPresignedUrl(id: string): Promise<{ url: string }> {
-    const doc = await this.prisma.generatedDocument.findUniqueOrThrow({ where: { id } });
-    const url = await this.minio.presignedGetUrl(doc.minioBucket, doc.minioObjectKey);
+    const doc = await this.prisma.generatedDocument.findUniqueOrThrow({
+      where: { id },
+    });
+    const url = await this.minio.presignedGetUrl(
+      doc.minioBucket,
+      doc.minioObjectKey,
+    );
     return { url };
   }
 
   // ─── Download buffer ─────────────────────────────────────────────────────────
 
-  async getDownloadBuffer(id: string): Promise<{ buffer: Buffer; fileName: string }> {
-    const doc = await this.prisma.generatedDocument.findUniqueOrThrow({ where: { id } });
-    const buffer = await this.minio.getObject(doc.minioBucket, doc.minioObjectKey);
+  async getDownloadBuffer(
+    id: string,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const doc = await this.prisma.generatedDocument.findUniqueOrThrow({
+      where: { id },
+    });
+    const buffer = await this.minio.getObject(
+      doc.minioBucket,
+      doc.minioObjectKey,
+    );
     return { buffer, fileName: doc.fileName };
   }
 
@@ -282,9 +325,13 @@ export class DocumentsService {
 
     if (!docs.length) throw new NotFoundException('Documents introuvables');
 
-    const clientEmails = new Set(docs.map((d) => d.sale?.customer?.email ?? '').filter(Boolean));
+    const clientEmails = new Set(
+      docs.map((d) => d.sale?.customer?.email ?? '').filter(Boolean),
+    );
     const clientNames = new Set(
-      docs.map((d) => d.clientName ?? d.sale?.customer?.name ?? 'Client').filter(Boolean),
+      docs
+        .map((d) => d.clientName ?? d.sale?.customer?.name ?? 'Client')
+        .filter(Boolean),
     );
 
     if (clientEmails.size > 1 || clientNames.size > 1) {
@@ -300,7 +347,10 @@ export class DocumentsService {
       to: clientEmail,
       subject: `Documents commerciaux - ${clientName}`,
       body: `Bonjour ${clientName},\n\nVeuillez trouver en pièces jointes les documents demandés.\n\nCordialement.`,
-      attachments: docs.map((d) => ({ documentId: d.id, fileName: d.fileName })),
+      attachments: docs.map((d) => ({
+        documentId: d.id,
+        fileName: d.fileName,
+      })),
     };
   }
 
@@ -308,7 +358,9 @@ export class DocumentsService {
 
   async sendEmail(dto: SendEmailDto, user?: AuthUser) {
     if (!dto.to) {
-      throw new BadRequestException("Ce client n'a pas d'adresse email enregistrée.");
+      throw new BadRequestException(
+        "Ce client n'a pas d'adresse email enregistrée.",
+      );
     }
 
     const docs = await this.prisma.generatedDocument.findMany({
@@ -318,8 +370,15 @@ export class DocumentsService {
 
     const attachments = await Promise.all(
       docs.map(async (doc) => {
-        const buffer = await this.minio.getObject(doc.minioBucket, doc.minioObjectKey);
-        return { filename: doc.fileName, content: buffer, contentType: 'application/pdf' };
+        const buffer = await this.minio.getObject(
+          doc.minioBucket,
+          doc.minioObjectKey,
+        );
+        return {
+          filename: doc.fileName,
+          content: buffer,
+          contentType: 'application/pdf',
+        };
       }),
     );
 
@@ -359,9 +418,13 @@ export class DocumentsService {
 
   // ─── Per-document email (from Documents page) ────────────────────────────────
 
-  async sendEmailForDocument(id: string, dto: SendDocumentEmailDto, user?: AuthUser) {
+  async sendEmailForDocument(
+    id: string,
+    dto: SendDocumentEmailDto,
+    user?: AuthUser,
+  ) {
     if (!dto.to) {
-      throw new BadRequestException("Adresse email du destinataire manquante.");
+      throw new BadRequestException('Adresse email du destinataire manquante.');
     }
 
     const doc = await this.prisma.generatedDocument.findFirst({
@@ -373,7 +436,10 @@ export class DocumentsService {
     let errorMessage: string | undefined;
 
     try {
-      const buffer = await this.minio.getObject(doc.minioBucket, doc.minioObjectKey);
+      const buffer = await this.minio.getObject(
+        doc.minioBucket,
+        doc.minioObjectKey,
+      );
 
       await this.email.send({
         to: dto.to,
@@ -381,7 +447,13 @@ export class DocumentsService {
         bcc: dto.bcc,
         subject: dto.subject,
         body: dto.message ?? '',
-        attachments: [{ filename: doc.fileName, content: buffer, contentType: 'application/pdf' }],
+        attachments: [
+          {
+            filename: doc.fileName,
+            content: buffer,
+            contentType: 'application/pdf',
+          },
+        ],
       });
 
       await this.prisma.generatedDocument.update({
@@ -396,7 +468,9 @@ export class DocumentsService {
     } catch (err) {
       emailStatus = EmailStatus.FAILED;
       errorMessage = (err as Error).message;
-      this.logger.error(`Email send failed for document ${id}: ${errorMessage}`);
+      this.logger.error(
+        `Email send failed for document ${id}: ${errorMessage}`,
+      );
 
       await this.prisma.generatedDocument.update({
         where: { id },
@@ -459,7 +533,11 @@ export class DocumentsService {
   async regenerate(id: string, user?: AuthUser) {
     const existing = await this.prisma.generatedDocument.findUniqueOrThrow({
       where: { id },
-      include: { sale: { include: { customer: true, items: { include: { product: true } } } } },
+      include: {
+        sale: {
+          include: { customer: true, items: { include: { product: true } } },
+        },
+      },
     });
 
     const companySettings = await this.getCompanySettings();
@@ -490,7 +568,12 @@ export class DocumentsService {
       companySettings,
     );
 
-    await this.minio.putObject(existing.minioBucket, existing.minioObjectKey, pdfBuffer, 'application/pdf');
+    await this.minio.putObject(
+      existing.minioBucket,
+      existing.minioObjectKey,
+      pdfBuffer,
+      'application/pdf',
+    );
 
     return this.prisma.generatedDocument.update({
       where: { id },
@@ -511,7 +594,9 @@ export class DocumentsService {
   private async getCompanySettings() {
     const rows = await this.settings.findAll();
     const map: Record<string, string> = {};
-    rows.forEach((r) => { map[r.key] = r.value; });
+    rows.forEach((r) => {
+      map[r.key] = r.value;
+    });
     return {
       name: map['company_name'] ?? map['nom_entreprise'],
       address: map['company_address'] ?? map['adresse'],

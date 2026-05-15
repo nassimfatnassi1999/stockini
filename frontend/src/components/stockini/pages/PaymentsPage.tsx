@@ -21,6 +21,7 @@ import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { Sale } from '@/lib/stockini/types';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { PageHeader } from '../shared/PageHeader';
 import { StateRows } from '../shared/StateRows';
 import { useDropdownOptions } from '../shared/form-utils';
@@ -44,14 +45,27 @@ function PaymentMethodLabel({ method }: { method: string }) {
 
 export function PaymentsPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<'invoices' | 'history'>('invoices');
   const [payTarget, setPayTarget] = useState<Sale | null>(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'CASH', note: '' });
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const paymentMethodOptions = useDropdownOptions('payment_methods');
 
-  const salesQuery = useQuery({ queryKey: ['stockini-sales'], queryFn: () => stockiniApi.sales() });
-  const paymentsQuery = useQuery({ queryKey: ['stockini-payments'], queryFn: stockiniApi.payments });
+  const canViewSales = can('sales.view');
+  const canViewPayments = can('payments.view');
+  const canReceivePayment = can('payments.receive_client_payment');
+
+  const salesQuery = useQuery({
+    queryKey: ['stockini-sales'],
+    queryFn: () => stockiniApi.sales(),
+    enabled: canViewSales,
+  });
+  const paymentsQuery = useQuery({
+    queryKey: ['stockini-payments'],
+    queryFn: stockiniApi.payments,
+    enabled: canViewPayments,
+  });
 
   const salesData = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
   const unpaidSales = salesData.filter(
@@ -121,69 +135,79 @@ export function PaymentsPage() {
       </div>
 
       {activeTab === 'invoices' && (
-        <Card className="shadow-card">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>N° Facture</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Total TTC</TableHead>
-                  <TableHead className="text-right">Déjà payé</TableHead>
-                  <TableHead className="text-right">Reste à payer</TableHead>
-                  <TableHead>Statut</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <StateRows
-                  loading={salesQuery.isLoading}
-                  error={salesQuery.error}
-                  empty={unpaidSales.length === 0}
-                  colSpan={8}
-                />
-                {unpaidSales.map((sale) => (
-                  <TableRow key={sale.id}>
-                    <TableCell>
-                      <button
-                        type="button"
-                        className="font-mono font-semibold text-primary underline-offset-2 hover:underline"
-                        onClick={() => setSelectedSaleId(sale.id)}
-                      >
-                        {sale.invoiceNumber}
-                      </button>
-                    </TableCell>
-                    <TableCell>{sale.customer?.name ?? '-'}</TableCell>
-                    <TableCell className="text-text-secondary">{dateTime(sale.createdAt)}</TableCell>
-                    <TableCell className="text-right font-mono">{money(sale.total)}</TableCell>
-                    <TableCell className="text-right font-mono text-emerald-600">{money(sale.paidAmount)}</TableCell>
-                    <TableCell className="text-right font-mono font-semibold text-red-600">{money(sale.remainingAmount)}</TableCell>
-                    <TableCell>
-                      <PaymentStatusBadge status={sale.paymentStatus} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => {
-                          setPayTarget(sale);
-                          setPayForm({
-                            amount: Number(sale.remainingAmount).toFixed(3),
-                            method: 'CASH',
-                            note: '',
-                          });
-                        }}
-                      >
-                        Payer
-                      </Button>
-                    </TableCell>
+        canViewSales ? (
+          <Card className="shadow-card">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>N° Facture</TableHead>
+                    <TableHead>Client</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Total TTC</TableHead>
+                    <TableHead className="text-right">Déjà payé</TableHead>
+                    <TableHead className="text-right">Reste à payer</TableHead>
+                    <TableHead>Statut</TableHead>
+                    {canReceivePayment && <TableHead className="text-right">Action</TableHead>}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  <StateRows
+                    loading={salesQuery.isLoading}
+                    error={salesQuery.error}
+                    empty={unpaidSales.length === 0}
+                    colSpan={canReceivePayment ? 8 : 7}
+                  />
+                  {unpaidSales.map((sale) => (
+                    <TableRow key={sale.id}>
+                      <TableCell>
+                        <button
+                          type="button"
+                          className="font-mono font-semibold text-primary underline-offset-2 hover:underline"
+                          onClick={() => setSelectedSaleId(sale.id)}
+                        >
+                          {sale.invoiceNumber}
+                        </button>
+                      </TableCell>
+                      <TableCell>{sale.customer?.name ?? '-'}</TableCell>
+                      <TableCell className="text-text-secondary">{dateTime(sale.createdAt)}</TableCell>
+                      <TableCell className="text-right font-mono">{money(sale.total)}</TableCell>
+                      <TableCell className="text-right font-mono text-emerald-600">{money(sale.paidAmount)}</TableCell>
+                      <TableCell className="text-right font-mono font-semibold text-red-600">{money(sale.remainingAmount)}</TableCell>
+                      <TableCell>
+                        <PaymentStatusBadge status={sale.paymentStatus} />
+                      </TableCell>
+                      {canReceivePayment && (
+                        <TableCell className="text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              setPayTarget(sale);
+                              setPayForm({
+                                amount: Number(sale.remainingAmount).toFixed(3),
+                                method: 'CASH',
+                                note: '',
+                              });
+                            }}
+                          >
+                            Payer
+                          </Button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="shadow-card">
+            <CardContent className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+              Vous n&apos;avez pas accès à la liste des ventes. Contactez un administrateur.
+            </CardContent>
+          </Card>
+        )
       )}
 
       {activeTab === 'history' && (

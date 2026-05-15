@@ -103,7 +103,10 @@ export class ReferenceGeneratorService {
    * Returns the next reference that would be generated for a given prefix/target,
    * without incrementing the counter. Used for form preview only.
    */
-  async peekNextReference(prefix: string, target: ReferenceTarget): Promise<string> {
+  async peekNextReference(
+    prefix: string,
+    target: ReferenceTarget,
+  ): Promise<string> {
     const year = new Date().getFullYear();
     const [counter, lastSeq] = await Promise.all([
       this.prisma.referenceCounter.findUnique({

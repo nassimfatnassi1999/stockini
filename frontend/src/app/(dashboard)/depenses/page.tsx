@@ -1,3 +1,12 @@
-import { DepensesPage } from '@/components/stockini/DepensesPage';
+'use client';
 
-export default DepensesPage;
+import { DepensesPage } from '@/components/stockini/DepensesPage';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+
+export default function Page() {
+  return (
+    <PermissionGuard permission="expenses.view">
+      <DepensesPage />
+    </PermissionGuard>
+  );
+}

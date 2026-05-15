@@ -7,24 +7,29 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { RequirePermissions } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { TrashService } from './trash.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('trash')
 export class TrashController {
   constructor(private readonly trashService: TrashService) {}
 
+  @RequirePermissions('trash.view')
   @Get()
   findAll(@Query('entity') entity?: string, @Query('type') type?: string) {
     return this.trashService.findAll(entity ?? type);
   }
 
+  @RequirePermissions('trash.restore')
   @Patch(':entity/:id/restore')
   restore(@Param('entity') entity: string, @Param('id') id: string) {
     return this.trashService.restore(entity, id);
   }
 
+  @RequirePermissions('trash.permanent_delete')
   @Delete(':entity/:id/permanent')
   permanentDelete(@Param('entity') entity: string, @Param('id') id: string) {
     return this.trashService.permanentDelete(entity, id);

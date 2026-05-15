@@ -34,7 +34,7 @@ export class DocumentsController {
   // ── Generation ──────────────────────────────────────────────────────────────
 
   @Post('generate')
-  @RequirePermissions('sales.create')
+  @RequirePermissions('documents.create')
   generate(@Body() dto: GenerateDocumentsDto, @CurrentUser() user?: AuthUser) {
     return this.svc.generate(dto, user);
   }
@@ -43,14 +43,14 @@ export class DocumentsController {
 
   /** New paginated list with rich filters — used by /documents page */
   @Get()
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   list(@Query() query: ListDocumentsQuery) {
     return this.svc.list(query);
   }
 
   /** Legacy flat list — kept for backward compat (used by ventes page) */
   @Get('generated')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   findAll(@Query('invoiceId') invoiceId?: string) {
     return this.svc.findAll(invoiceId);
   }
@@ -58,13 +58,13 @@ export class DocumentsController {
   // ── Batch email (ventes page) ────────────────────────────────────────────────
 
   @Post('email-preview')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   emailPreview(@Body() dto: EmailPreviewDto) {
     return this.svc.emailPreview(dto);
   }
 
   @Post('send-email')
-  @RequirePermissions('sales.create')
+  @RequirePermissions('documents.email')
   sendEmail(@Body() dto: SendEmailDto, @CurrentUser() user?: AuthUser) {
     return this.svc.sendEmail(dto, user);
   }
@@ -72,32 +72,32 @@ export class DocumentsController {
   // ── Per-document routes (:id must come after all static paths) ───────────────
 
   @Get(':id')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   findOne(@Param('id') id: string) {
     return this.svc.findOne(id);
   }
 
   @Put(':id')
-  @RequirePermissions('sales.update')
+  @RequirePermissions('documents.update')
   update(@Param('id') id: string, @Body() dto: UpdateDocumentDto) {
     return this.svc.update(id, dto);
   }
 
   @Delete(':id')
-  @RequirePermissions('sales.delete')
+  @RequirePermissions('documents.delete')
   remove(@Param('id') id: string) {
     return this.svc.remove(id);
   }
 
   @Get(':id/presigned-url')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   presignedUrl(@Param('id') id: string) {
     return this.svc.getPresignedUrl(id);
   }
 
   /** Stream PDF inline in browser (view) */
   @Get(':id/view')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   async view(@Param('id') id: string, @Res() res: Response) {
     const { buffer, fileName } = await this.svc.getDownloadBuffer(id);
     res.setHeader('Content-Type', 'application/pdf');
@@ -106,7 +106,7 @@ export class DocumentsController {
   }
 
   @Get(':id/download')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.download')
   async download(@Param('id') id: string, @Res() res: Response) {
     const { buffer, fileName } = await this.svc.getDownloadBuffer(id);
     res.setHeader('Content-Type', 'application/pdf');
@@ -115,7 +115,7 @@ export class DocumentsController {
   }
 
   @Post(':id/send-email')
-  @RequirePermissions('sales.create')
+  @RequirePermissions('documents.email')
   sendEmailForDocument(
     @Param('id') id: string,
     @Body() dto: SendDocumentEmailDto,
@@ -125,13 +125,13 @@ export class DocumentsController {
   }
 
   @Get(':id/email-logs')
-  @RequirePermissions('sales.view')
+  @RequirePermissions('documents.view')
   getEmailLogs(@Param('id') id: string) {
     return this.svc.getEmailLogs(id);
   }
 
   @Post(':id/regenerate')
-  @RequirePermissions('sales.update')
+  @RequirePermissions('documents.update')
   regenerate(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.svc.regenerate(id, user);
   }

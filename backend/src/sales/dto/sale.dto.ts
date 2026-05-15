@@ -13,7 +13,12 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { DocumentType, PaymentMethod, PaymentStatus, SaleStatus } from '@prisma/client';
+import {
+  DocumentType,
+  PaymentMethod,
+  PaymentStatus,
+  SaleStatus,
+} from '@prisma/client';
 
 export const SALES_DOCUMENT_TYPES = [
   'DEVIS',
@@ -23,7 +28,7 @@ export const SALES_DOCUMENT_TYPES = [
   'AVOIR',
 ] as const;
 
-export type SalesDocumentType = typeof SALES_DOCUMENT_TYPES[number];
+export type SalesDocumentType = (typeof SALES_DOCUMENT_TYPES)[number];
 
 export class CreateSaleItemDto {
   @IsString()

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Plus, X } from 'lucide-react';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { Can } from '@/components/shared/Can';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -319,6 +321,7 @@ function ProductModal({
 
 export function ProductsPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -397,10 +400,12 @@ export function ProductsPage() {
           <CardTitle>Catalogue pièces</CardTitle>
           <div className="flex flex-col gap-2 sm:flex-row">
             <SearchBox value={search} onChange={setSearch} />
-            <Button type="button" size="sm" onClick={() => setModalOpen(true)}>
-              <Plus size={14} />
-              Nouveau
-            </Button>
+            <Can permission="products.create">
+              <Button type="button" size="sm" onClick={() => setModalOpen(true)}>
+                <Plus size={14} />
+                Nouveau
+              </Button>
+            </Can>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -456,6 +461,8 @@ export function ProductsPage() {
                       onEdit={() => setEditingProduct(product)}
                       onDelete={() => setTrashTarget({ id: product.id, name: product.name })}
                       deleting={deleteMutation.isPending}
+                      canEdit={can('products.update')}
+                      canDelete={can('products.delete')}
                     />
                   </TableCell>
                 </TableRow>
@@ -466,7 +473,7 @@ export function ProductsPage() {
       </Card>
 
       {/* Modal création */}
-      {modalOpen && (
+      {modalOpen && can('products.create') && (
         <ProductModal
           mode="create"
           categoryOptions={categoryOptions}

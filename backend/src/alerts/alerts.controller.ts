@@ -32,7 +32,7 @@ export class AlertsController {
     return this.alertsService.findAll(isRead);
   }
 
-  @RequirePermissions('alerts.update')
+  @RequirePermissions('alerts.mark_read')
   @Patch(':id/read')
   markRead(@Param('id') id: string) {
     return this.alertsService.markRead(id);

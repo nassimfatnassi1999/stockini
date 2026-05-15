@@ -48,7 +48,9 @@ export class CustomersService {
   }
 
   findOne(id: string) {
-    return this.prisma.customer.findFirstOrThrow({ where: { id, deletedAt: null } });
+    return this.prisma.customer.findFirstOrThrow({
+      where: { id, deletedAt: null },
+    });
   }
 
   async update(id: string, dto: UpdateCustomerDto) {
@@ -68,7 +70,9 @@ export class CustomersService {
       );
     }
     await this.prisma.customer.delete({ where: { id } });
-    this.logger.log(`Customer ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    this.logger.log(
+      `Customer ${id} permanently deleted by ${userId ?? 'unknown'}`,
+    );
     return { id };
   }
 }

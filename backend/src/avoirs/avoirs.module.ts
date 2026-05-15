@@ -8,7 +8,13 @@ import { AvoirsController } from './avoirs.controller';
 import { AvoirsService } from './avoirs.service';
 
 @Module({
-  imports: [StockModule, ReferencesModule, DocumentsModule, SettingsModule, CaisseModule],
+  imports: [
+    StockModule,
+    ReferencesModule,
+    DocumentsModule,
+    SettingsModule,
+    CaisseModule,
+  ],
   controllers: [AvoirsController],
   providers: [AvoirsService],
   exports: [AvoirsService],

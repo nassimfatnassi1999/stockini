@@ -1,7 +1,13 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type TrashEntity = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment';
+export type TrashEntity =
+  | 'product'
+  | 'customer'
+  | 'supplier'
+  | 'sale'
+  | 'purchase'
+  | 'payment';
 
 export interface TrashItem {
   id: string;
@@ -213,8 +219,12 @@ export class TrashService {
         );
       }
       case 'customer': {
-        const sales = await this.prisma.sale.count({ where: { customerId: id } });
-        const payments = await this.prisma.payment.count({ where: { customerId: id } });
+        const sales = await this.prisma.sale.count({
+          where: { customerId: id },
+        });
+        const payments = await this.prisma.payment.count({
+          where: { customerId: id },
+        });
         if (sales > 0 || payments > 0) {
           throw new BadRequestException(
             'Ce client est lié à des ventes ou paiements. Suppression permanente refusée.',
@@ -224,8 +234,12 @@ export class TrashService {
         break;
       }
       case 'supplier': {
-        const purchases = await this.prisma.purchase.count({ where: { supplierId: id } });
-        const products = await this.prisma.product.count({ where: { supplierId: id } });
+        const purchases = await this.prisma.purchase.count({
+          where: { supplierId: id },
+        });
+        const products = await this.prisma.product.count({
+          where: { supplierId: id },
+        });
         if (purchases > 0 || products > 0) {
           throw new BadRequestException(
             'Ce fournisseur est lié à des achats ou produits. Suppression permanente refusée.',

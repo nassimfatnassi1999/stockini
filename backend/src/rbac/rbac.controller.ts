@@ -34,7 +34,10 @@ export class RbacController {
     @Param('role') role: string,
     @Body() body: { permissionCodes: string[] },
   ) {
-    return this.rbacService.updateRolePermissions(role, body.permissionCodes ?? []);
+    return this.rbacService.updateRolePermissions(
+      role,
+      body.permissionCodes ?? [],
+    );
   }
 
   @Get('users/:userId/overrides')

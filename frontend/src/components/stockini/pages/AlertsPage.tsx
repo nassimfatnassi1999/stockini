@@ -9,6 +9,8 @@ import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, statusLabel } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { Alert } from '@/lib/stockini/types';
+import { Can } from '@/components/shared/Can';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { CrudModal } from '../shared/CrudModal';
 import { PageHeader } from '../shared/PageHeader';
 import { RowActions } from '../shared/RowActions';
@@ -40,6 +42,7 @@ function AlertStatusBadge({ isRead }: { isRead: boolean }) {
 
 export function AlertsPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [editing, setEditing] = useState<Alert | null>(null);
   const alertTypeOptions = useDropdownOptions('alert_types');
   const fields: FieldConfig[] = [
@@ -76,10 +79,12 @@ export function AlertsPage() {
     <>
       <div className="mb-4 flex items-end justify-between gap-3">
         <PageHeader title="Alertes" subtitle="Alertes de stock, factures impayées, retards achats et système." />
-        <Button type="button" size="sm" onClick={() => { setEditing({} as Alert); setForm(emptyForm(fields)); }}>
-          <Plus size={14} />
-          Nouveau
-        </Button>
+        <Can permission="alerts.create">
+          <Button type="button" size="sm" onClick={() => { setEditing({} as Alert); setForm(emptyForm(fields)); }}>
+            <Plus size={14} />
+            Nouveau
+          </Button>
+        </Can>
       </div>
       <SimpleTable
         title=""
@@ -116,11 +121,13 @@ export function AlertsPage() {
               }}
               onDelete={() => deleteMutation.mutate(alert.id)}
               deleting={deleteMutation.isPending}
+              canEdit={can('alerts.update')}
+              canDelete={can('alerts.delete')}
             />,
           ];
         })}
       />
-      {editing && (
+      {editing && can(editing.id ? 'alerts.update' : 'alerts.create') && (
         <CrudModal
           title={editing.id ? 'Modifier alerte' : 'Nouvelle alerte'}
           fields={fields}

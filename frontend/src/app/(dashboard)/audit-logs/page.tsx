@@ -1,3 +1,12 @@
-import { AuditLogsPage } from '@/components/stockini/StockiniShell';
+'use client';
 
-export default AuditLogsPage;
+import { AuditLogsPage } from '@/components/stockini/StockiniShell';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+
+export default function Page() {
+  return (
+    <PermissionGuard permission="audit_logs.view">
+      <AuditLogsPage />
+    </PermissionGuard>
+  );
+}

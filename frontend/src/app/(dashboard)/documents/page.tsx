@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -382,6 +384,7 @@ function EmailLogsModal({ doc, onClose }: EmailLogsModalProps) {
 
 export default function DocumentsPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
 
   // Filters
   const [search, setSearch] = useState('');
@@ -461,6 +464,7 @@ export default function DocumentsPage() {
   const hasFilters = search || docType || status || dateFrom || dateTo || minSize || maxSize;
 
   return (
+    <PermissionGuard permission="documents.view">
     <div className="space-y-5">
       {/* Header */}
       <div>
@@ -661,46 +665,56 @@ export default function DocumentsPage() {
                           >
                             <Eye size={13} />
                           </Button>
-                          <Button
-                            variant="actionView"
-                            size="action"
-                            title="Télécharger"
-                            onClick={() => handleDownload(doc)}
-                          >
-                            <Download size={13} />
-                          </Button>
-                          <Button
-                            variant="actionView"
-                            size="action"
-                            title="Modifier"
-                            onClick={() => setEditDoc(doc)}
-                          >
-                            <Pencil size={13} />
-                          </Button>
-                          <Button
-                            variant="actionView"
-                            size="action"
-                            title="Envoyer par email"
-                            onClick={() => setEmailDoc(doc)}
-                          >
-                            <Mail size={13} />
-                          </Button>
-                          <Button
-                            variant="actionView"
-                            size="action"
-                            title="Historique emails"
-                            onClick={() => setEmailLogsDoc(doc)}
-                          >
-                            <FileText size={13} />
-                          </Button>
-                          <Button
-                            variant="actionDelete"
-                            size="action"
-                            title="Supprimer"
-                            onClick={() => setDeleteDoc(doc)}
-                          >
-                            <Trash2 size={13} />
-                          </Button>
+                          {can('documents.download') && (
+                            <Button
+                              variant="actionView"
+                              size="action"
+                              title="Télécharger"
+                              onClick={() => handleDownload(doc)}
+                            >
+                              <Download size={13} />
+                            </Button>
+                          )}
+                          {can('documents.update') && (
+                            <Button
+                              variant="actionView"
+                              size="action"
+                              title="Modifier"
+                              onClick={() => setEditDoc(doc)}
+                            >
+                              <Pencil size={13} />
+                            </Button>
+                          )}
+                          {can('documents.email') && (
+                            <Button
+                              variant="actionView"
+                              size="action"
+                              title="Envoyer par email"
+                              onClick={() => setEmailDoc(doc)}
+                            >
+                              <Mail size={13} />
+                            </Button>
+                          )}
+                          {can('documents.email') && (
+                            <Button
+                              variant="actionView"
+                              size="action"
+                              title="Historique emails"
+                              onClick={() => setEmailLogsDoc(doc)}
+                            >
+                              <FileText size={13} />
+                            </Button>
+                          )}
+                          {can('documents.delete') && (
+                            <Button
+                              variant="actionDelete"
+                              size="action"
+                              title="Supprimer"
+                              onClick={() => setDeleteDoc(doc)}
+                            >
+                              <Trash2 size={13} />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -772,5 +786,6 @@ export default function DocumentsPage() {
         />
       )}
     </div>
+    </PermissionGuard>
   );
 }

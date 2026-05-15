@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RbacService } from '../../rbac/rbac.service';
 
 type JwtPayload = {
   sub: string;
@@ -14,6 +15,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly rbac: RbacService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -32,17 +34,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Invalid or inactive user');
     }
 
-    const permissions = Array.isArray(user.role.permissions)
-      ? user.role.permissions.filter(
-          (permission): permission is string => typeof permission === 'string',
-        )
-      : [];
+    // Use getEffectivePermissions so user-specific ALLOW/DENY overrides are enforced
+    const effective = await this.rbac.getEffectivePermissions(user.id);
 
     return {
       id: user.id,
       email: user.email,
       role: user.role.name,
-      permissions,
+      permissions: effective.permissions,
     };
   }
 }

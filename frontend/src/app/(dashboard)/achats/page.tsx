@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PurchaseRegisterGrid } from '@/components/stockini/register/PurchaseRegisterGrid';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import {
   calculateDocumentTotals,
   createEmptyLine,
@@ -97,6 +99,7 @@ function fmtCommandeOption(p: Purchase): string {
 
 export default function AchatsPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
 
   const [docType, setDocType] = useState<PurchaseDocType>('BON_COMMANDE');
   const [receptionMode, setReceptionMode] = useState<ReceptionMode>('LIBRE');
@@ -416,6 +419,7 @@ export default function AchatsPage() {
       : activeConfig.saveLabel;
 
   return (
+    <PermissionGuard permission="purchases.view">
     <div className="space-y-4">
       {/* Draft restore banner */}
       {showRestorePrompt && (
@@ -634,14 +638,16 @@ export default function AchatsPage() {
             <Button type="button" variant="outline" size="sm" onClick={resetForm}>
               Réinitialiser
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => createMutation.mutate()}
-              disabled={!canSave || createMutation.isPending}
-            >
-              {saveButtonLabel}
-            </Button>
+            {can('purchases.create') && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => createMutation.mutate()}
+                disabled={!canSave || createMutation.isPending}
+              >
+                {saveButtonLabel}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -735,14 +741,16 @@ export default function AchatsPage() {
                           >
                             <Eye size={14} />
                           </Button>
-                          <Button
-                            variant="actionDelete"
-                            size="action"
-                            title="Supprimer"
-                            onClick={() => setDeleteTarget(purchase)}
-                          >
-                            <Trash2 size={14} />
-                          </Button>
+                          {can('purchases.delete') && (
+                            <Button
+                              variant="actionDelete"
+                              size="action"
+                              title="Supprimer"
+                              onClick={() => setDeleteTarget(purchase)}
+                            >
+                              <Trash2 size={14} />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -770,6 +778,7 @@ export default function AchatsPage() {
         />
       )}
     </div>
+    </PermissionGuard>
   );
 }
 

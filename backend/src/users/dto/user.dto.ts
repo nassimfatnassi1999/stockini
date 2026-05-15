@@ -1,24 +1,40 @@
 import {
   IsBoolean,
   IsEmail,
+  IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Min,
   MinLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export const VALID_ROLES = [
+  'ADMIN',
+  'STOCK_MANAGER',
+  'SELLER',
+  'PURCHASE_MANAGER',
+] as const;
 
 export class CreateUserDto {
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  @MinLength(6)
-  password!: string;
-
   @IsString()
   fullName!: string;
 
+  @IsEmail()
+  email!: string;
+
+  @IsOptional()
   @IsString()
-  roleId!: string;
+  phone?: string;
+
+  @IsString()
+  @MinLength(8)
+  password!: string;
+
+  @IsString()
+  @IsIn(VALID_ROLES)
+  roleName!: string;
 
   @IsOptional()
   @IsBoolean()
@@ -27,23 +43,58 @@ export class CreateUserDto {
 
 export class UpdateUserDto {
   @IsOptional()
-  @IsEmail()
-  email?: string;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(6)
-  password?: string;
-
-  @IsOptional()
   @IsString()
   fullName?: string;
 
   @IsOptional()
   @IsString()
-  roleId?: string;
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_ROLES)
+  roleName?: string;
 
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+}
+
+export class UpdateUserStatusDto {
+  @IsBoolean()
+  isActive!: boolean;
+}
+
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(8)
+  password!: string;
+}
+
+export class UsersQueryDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn([...VALID_ROLES, ''])
+  role?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'inactive', ''])
+  status?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
 }

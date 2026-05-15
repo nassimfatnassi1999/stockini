@@ -40,7 +40,9 @@ export class SuppliersService {
   }
 
   findOne(id: string) {
-    return this.prisma.supplier.findFirstOrThrow({ where: { id, deletedAt: null } });
+    return this.prisma.supplier.findFirstOrThrow({
+      where: { id, deletedAt: null },
+    });
   }
 
   update(id: string, dto: UpdateSupplierDto) {
@@ -59,7 +61,9 @@ export class SuppliersService {
       );
     }
     await this.prisma.supplier.delete({ where: { id } });
-    this.logger.log(`Supplier ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    this.logger.log(
+      `Supplier ${id} permanently deleted by ${userId ?? 'unknown'}`,
+    );
     return { id };
   }
 }

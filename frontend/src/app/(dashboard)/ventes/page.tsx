@@ -17,7 +17,8 @@ import {
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
-import { hasPermission } from '@/lib/auth';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { useDraftSave } from '@/lib/hooks/useDraftSave';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -126,15 +127,13 @@ interface VenteDraft {
 export default function VentesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
   const [customerId, setCustomerId] = useState('');
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [showHistory, setShowHistory] = useState(true);
-  const [allowLowMargin, setAllowLowMargin] = useState(false);
-  const [canViewDetails, setCanViewDetails] = useState(false);
-  const [canDeleteSale, setCanDeleteSale] = useState(false);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
@@ -159,11 +158,9 @@ export default function VentesPage() {
   // Document history selection (for email from history)
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
 
-  useEffect(() => {
-    setAllowLowMargin(hasPermission(PERMISSION_LOW_MARGIN));
-    setCanViewDetails(hasPermission(PERMISSION_VIEW_DETAILS));
-    setCanDeleteSale(hasPermission(PERMISSION_DELETE_SALE));
-  }, []);
+  const allowLowMargin = can(PERMISSION_LOW_MARGIN);
+  const canViewDetails = can(PERMISSION_VIEW_DETAILS);
+  const canDeleteSale = can(PERMISSION_DELETE_SALE);
 
   const filledLines = lines.filter(isFilledLine);
   const totals = calculateDocumentTotals(lines);
@@ -538,6 +535,7 @@ export default function VentesPage() {
   const colSpan = 1 + 7 + (hasActions ? 1 : 0) + 1; // extra col for Download
 
   return (
+    <PermissionGuard permission="sales.view">
     <div className="space-y-4">
       {/* Draft restore banner */}
       {showRestorePrompt && (
@@ -709,14 +707,16 @@ export default function VentesPage() {
             <Button type="button" variant="outline" size="sm" onClick={resetForm}>
               Réinitialiser
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => createMutation.mutate()}
-              disabled={!canSave || createMutation.isPending}
-            >
-              {createMutation.isPending ? 'Enregistrement…' : currentDocConfig.saveLabel}
-            </Button>
+            {can('sales.create') && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => createMutation.mutate()}
+                disabled={!canSave || createMutation.isPending}
+              >
+                {createMutation.isPending ? 'Enregistrement…' : currentDocConfig.saveLabel}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -976,5 +976,6 @@ export default function VentesPage() {
       </>
       )}
     </div>
+    </PermissionGuard>
   );
 }

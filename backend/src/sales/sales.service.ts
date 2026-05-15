@@ -19,7 +19,11 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateSaleDto, SalePaginationDto, UpdateSaleDto } from './dto/sale.dto';
+import {
+  CreateSaleDto,
+  SalePaginationDto,
+  UpdateSaleDto,
+} from './dto/sale.dto';
 
 const MIN_MARGIN_PERCENT = 20;
 
@@ -28,9 +32,7 @@ const STOCK_IMPACTING_TYPES = new Set<DocumentType>([
   DocumentType.FACTURE,
 ]);
 
-const PAYMENT_ACCEPTING_TYPES = new Set<DocumentType>([
-  DocumentType.FACTURE,
-]);
+const PAYMENT_ACCEPTING_TYPES = new Set<DocumentType>([DocumentType.FACTURE]);
 
 const LAST_SALE_PRICE_TYPES = new Set<DocumentType>([
   DocumentType.BON_LIVRAISON,
@@ -54,9 +56,14 @@ export class SalesService {
     private readonly caisseService: CaisseService,
   ) {}
 
-  async getNextReference(documentType: DocumentType): Promise<{ reference: string }> {
+  async getNextReference(
+    documentType: DocumentType,
+  ): Promise<{ reference: string }> {
     const prefix = this.prefixForDocument(documentType);
-    const reference = await this.references.peekNextSimpleReference(prefix, 'sale');
+    const reference = await this.references.peekNextSimpleReference(
+      prefix,
+      'sale',
+    );
     return { reference };
   }
 
@@ -77,7 +84,10 @@ export class SalesService {
     const acceptsPayment = PAYMENT_ACCEPTING_TYPES.has(documentType);
 
     if (dto.paymentMethod) {
-      await this.settings.assertActiveOption('payment_methods', dto.paymentMethod);
+      await this.settings.assertActiveOption(
+        'payment_methods',
+        dto.paymentMethod,
+      );
     }
 
     if (!acceptsPayment && (dto.paidAmount ?? 0) > 0) {
@@ -90,7 +100,11 @@ export class SalesService {
 
     return this.prisma.$transaction(async (tx) => {
       const prefix = this.prefixForDocument(documentType);
-      const invoiceNumber = await this.references.generateSimple(prefix, 'sale', tx);
+      const invoiceNumber = await this.references.generateSimple(
+        prefix,
+        'sale',
+        tx,
+      );
 
       const expectedPrefix = `${prefix}-`;
       if (!invoiceNumber.startsWith(expectedPrefix)) {
@@ -136,7 +150,9 @@ export class SalesService {
             );
           }
           const marginPercent =
-            ((unitPrice * (1 - discountPercent / 100) - purchasePriceHt) / purchasePriceHt) * 100;
+            ((unitPrice * (1 - discountPercent / 100) - purchasePriceHt) /
+              purchasePriceHt) *
+            100;
           if (marginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
             throw new BadRequestException(
               `Vente refusée : marge insuffisante pour "${product.name}" (${marginPercent.toFixed(2)}% < ${MIN_MARGIN_PERCENT}%).`,
@@ -164,7 +180,9 @@ export class SalesService {
       const discount = this.round3(
         rawItems.reduce((sum, item) => sum + item.discountAmount, 0),
       );
-      const tax = this.round3(rawItems.reduce((sum, item) => sum + item.tax, 0));
+      const tax = this.round3(
+        rawItems.reduce((sum, item) => sum + item.tax, 0),
+      );
       const total = this.round3(subtotal + tax);
 
       const paidAmount = acceptsPayment ? this.round3(dto.paidAmount ?? 0) : 0;
@@ -208,7 +226,9 @@ export class SalesService {
           paidAmount,
           remainingAmount,
           paymentStatus,
-          status: immediateStockImpact ? SaleStatus.COMPLETED : SaleStatus.DRAFT,
+          status: immediateStockImpact
+            ? SaleStatus.COMPLETED
+            : SaleStatus.DRAFT,
           documentType,
           reserveStock,
           stockImpactDone: false,
@@ -294,25 +314,30 @@ export class SalesService {
         throw new BadRequestException('Un devis ne peut pas être validé');
       }
       if (sale.status === SaleStatus.CANCELLED) {
-        throw new BadRequestException('Impossible de valider un document annulé');
+        throw new BadRequestException(
+          'Impossible de valider un document annulé',
+        );
       }
       if (sale.status === SaleStatus.COMPLETED) {
         throw new BadRequestException('Ce document est déjà validé');
       }
 
       const needsStockImpact =
-        (STOCK_IMPACTING_TYPES.has(sale.documentType as DocumentType) ||
-          (sale.documentType === DocumentType.BON_COMMANDE && sale.reserveStock)) &&
+        (STOCK_IMPACTING_TYPES.has(sale.documentType) ||
+          (sale.documentType === DocumentType.BON_COMMANDE &&
+            sale.reserveStock)) &&
         !sale.stockImpactDone;
       const needsLastSalePriceImpact =
-        LAST_SALE_PRICE_TYPES.has(sale.documentType as DocumentType) &&
+        LAST_SALE_PRICE_TYPES.has(sale.documentType) &&
         !sale.lastSalePriceImpactDone;
 
       if (needsStockImpact) {
         for (const item of sale.items) {
           const product = item.product;
           if (!product) {
-            throw new BadRequestException(`Produit introuvable (id: ${item.productId})`);
+            throw new BadRequestException(
+              `Produit introuvable (id: ${item.productId})`,
+            );
           }
           if (product.quantity < item.quantity) {
             throw new BadRequestException(
@@ -376,7 +401,9 @@ export class SalesService {
       ...(query?.search && {
         OR: [
           { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
-          { customer: { name: { contains: query.search, mode: 'insensitive' } } },
+          {
+            customer: { name: { contains: query.search, mode: 'insensitive' } },
+          },
         ],
       }),
     };
@@ -473,7 +500,7 @@ export class SalesService {
         include: { items: true, payments: true },
       });
 
-      if (LAST_SALE_PRICE_TYPES.has(sale.documentType as DocumentType)) {
+      if (LAST_SALE_PRICE_TYPES.has(sale.documentType)) {
         await this.recalculateLastSalePricesForProducts(
           tx,
           sale.items.map((item) => item.productId),
@@ -550,7 +577,7 @@ export class SalesService {
 
       const productIdsToRecalculate = sale.items.map((item) => item.productId);
       const shouldRecalculateLastSalePrice = LAST_SALE_PRICE_TYPES.has(
-        sale.documentType as DocumentType,
+        sale.documentType,
       );
 
       await tx.payment.deleteMany({ where: { saleId: id } });
@@ -563,7 +590,9 @@ export class SalesService {
           userId,
         );
       }
-      this.logger.log(`Sale ${id} permanently deleted by ${userId ?? 'unknown'}`);
+      this.logger.log(
+        `Sale ${id} permanently deleted by ${userId ?? 'unknown'}`,
+      );
       return { id };
     });
   }
@@ -692,7 +721,9 @@ export class SalesService {
         );
         const tva = Number(item.product.tva ?? 0);
         const netTtc = netHt * (1 + tva / 100);
-        const unitTtc = new Prisma.Decimal(netTtc / item.quantity).toDecimalPlaces(3);
+        const unitTtc = new Prisma.Decimal(
+          netTtc / item.quantity,
+        ).toDecimalPlaces(3);
 
         await tx.productPriceHistory.upsert({
           where: {
@@ -794,7 +825,9 @@ export class SalesService {
     };
     const prefix = map[documentType];
     if (!prefix) {
-      throw new BadRequestException(`Type de document invalide: ${documentType}`);
+      throw new BadRequestException(
+        `Type de document invalide: ${documentType}`,
+      );
     }
     return prefix;
   }
@@ -805,7 +838,10 @@ export class SalesService {
     return PaymentStatus.PAID;
   }
 
-  private salePriceHt(product: { salePrice: Prisma.Decimal | number | string; tva?: Prisma.Decimal | number | string | null }) {
+  private salePriceHt(product: {
+    salePrice: Prisma.Decimal | number | string;
+    tva?: Prisma.Decimal | number | string | null;
+  }) {
     const salePrice = Number(product.salePrice);
     const tva = Number(product.tva ?? 0);
     if (!Number.isFinite(salePrice) || salePrice <= 0) return 0;
@@ -816,7 +852,10 @@ export class SalesService {
     return Math.round(value * 1000) / 1000;
   }
 
-  private hasPermission(user: AuthUser | undefined, permission: string): boolean {
+  private hasPermission(
+    user: AuthUser | undefined,
+    permission: string,
+  ): boolean {
     if (!user) return false;
     const perms = user.permissions ?? [];
     return perms.includes('*') || perms.includes(permission);

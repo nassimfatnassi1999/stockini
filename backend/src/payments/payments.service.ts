@@ -123,7 +123,10 @@ export class PaymentsService {
         where: { id: saleId, deletedAt: null },
       });
 
-      if (sale.documentType === DocumentType.DEVIS || sale.documentType === DocumentType.AVOIR) {
+      if (
+        sale.documentType === DocumentType.DEVIS ||
+        sale.documentType === DocumentType.AVOIR
+      ) {
         throw new BadRequestException(
           `Le type ${sale.documentType} n'accepte pas de paiement`,
         );
@@ -141,8 +144,14 @@ export class PaymentsService {
       }
 
       const newPaidAmount = Number(sale.paidAmount) + dto.amount;
-      const newRemainingAmount = Math.max(Number(sale.total) - newPaidAmount, 0);
-      const newStatus = this.computePaymentStatus(Number(sale.total), newPaidAmount);
+      const newRemainingAmount = Math.max(
+        Number(sale.total) - newPaidAmount,
+        0,
+      );
+      const newStatus = this.computePaymentStatus(
+        Number(sale.total),
+        newPaidAmount,
+      );
 
       const payRef = await this.references.generate('PAY', 'payment', tx);
       const payment = await tx.payment.create({
@@ -195,8 +204,14 @@ export class PaymentsService {
       }
 
       const newPaidAmount = Number(purchase.paidAmount) + dto.amount;
-      const newRemainingAmount = Math.max(Number(purchase.total) - newPaidAmount, 0);
-      const newStatus = this.computePaymentStatus(Number(purchase.total), newPaidAmount);
+      const newRemainingAmount = Math.max(
+        Number(purchase.total) - newPaidAmount,
+        0,
+      );
+      const newStatus = this.computePaymentStatus(
+        Number(purchase.total),
+        newPaidAmount,
+      );
 
       const payRef = await this.references.generate('EXP', 'payment', tx);
       const payment = await tx.payment.create({
@@ -234,7 +249,10 @@ export class PaymentsService {
     });
   }
 
-  private computePaymentStatus(total: number, paidAmount: number): PaymentStatus {
+  private computePaymentStatus(
+    total: number,
+    paidAmount: number,
+  ): PaymentStatus {
     if (paidAmount <= 0) return PaymentStatus.UNPAID;
     if (paidAmount >= total) return PaymentStatus.PAID;
     return PaymentStatus.PARTIAL;

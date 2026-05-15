@@ -5,27 +5,50 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ring-offset-background [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ring-offset-background [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary-dark',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-muted',
-        outline: 'border border-border bg-background text-text-secondary hover:bg-muted hover:text-text-primary',
-        ghost: 'text-text-secondary hover:bg-muted hover:text-text-primary',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        link: 'text-primary underline-offset-4 hover:underline',
-        action: 'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:bg-muted hover:text-text-primary',
-        actionEdit: 'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:border-orange-200 hover:bg-orange-50 hover:text-primary',
-        actionView: 'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700',
-        actionDelete: 'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:border-red-200 hover:bg-red-50 hover:text-red-700',
+        /* ── Primary actions ─────────────────────────────── */
+        default:
+          'bg-app-primary text-white shadow-sm hover:bg-app-primary-hover',
+        success:
+          'bg-app-success text-white shadow-sm hover:bg-app-success/90',
+        warning:
+          'bg-app-warning text-white shadow-sm hover:bg-app-warning/90',
+        danger:
+          'bg-app-danger text-white shadow-sm hover:bg-app-danger/90',
+
+        /* ── Neutral / structural ────────────────────────── */
+        secondary:
+          'bg-secondary text-text-primary hover:bg-muted',
+        outline:
+          'border border-border bg-background text-text-secondary hover:bg-muted hover:text-text-primary',
+        ghost:
+          'text-text-secondary hover:bg-muted hover:text-text-primary',
+        link:
+          'text-app-primary underline-offset-4 hover:underline',
+
+        /* ── shadcn destructive alias ────────────────────── */
+        destructive:
+          'bg-app-danger text-white shadow-sm hover:bg-app-danger/90',
+
+        /* ── Icon action variants (token-aware) ──────────── */
+        action:
+          'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:bg-muted hover:text-text-primary',
+        actionEdit:
+          'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:border-app-primary/20 hover:bg-app-primary-soft hover:text-app-primary',
+        actionView:
+          'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:border-border hover:bg-muted hover:text-text-primary',
+        actionDelete:
+          'h-7 w-7 border border-transparent bg-transparent p-0 text-text-muted hover:border-app-danger/20 hover:bg-app-danger-soft hover:text-app-danger',
       },
       size: {
         default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-8',
-        icon: 'h-10 w-10',
-        action: 'h-7 w-7 rounded-md p-0',
+        sm:      'h-9 rounded-md px-3',
+        lg:      'h-11 rounded-md px-8',
+        icon:    'h-10 w-10',
+        action:  'h-7 w-7 rounded-md p-0',
       },
     },
     defaultVariants: {

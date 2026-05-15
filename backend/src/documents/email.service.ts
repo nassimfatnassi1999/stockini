@@ -35,7 +35,10 @@ export class EmailService {
   }
 
   async send(options: SendEmailOptions): Promise<void> {
-    const from = this.config.get<string>('SMTP_FROM', this.config.get<string>('SMTP_USER', 'noreply@stockini.com'));
+    const from = this.config.get<string>(
+      'SMTP_FROM',
+      this.config.get<string>('SMTP_USER', 'noreply@stockini.com'),
+    );
     await this.transporter.sendMail({
       from,
       to: options.to,

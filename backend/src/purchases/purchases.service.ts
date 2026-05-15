@@ -87,7 +87,9 @@ export class PurchasesService {
       ...(query?.search && {
         OR: [
           { orderNumber: { contains: query.search, mode: 'insensitive' } },
-          { supplier: { name: { contains: query.search, mode: 'insensitive' } } },
+          {
+            supplier: { name: { contains: query.search, mode: 'insensitive' } },
+          },
         ],
       }),
     };
@@ -238,7 +240,11 @@ export class PurchasesService {
           remainingAmount: purchase.total,
           paymentStatus: PaymentStatus.UNPAID,
         },
-        include: { supplier: true, items: { include: { product: true } }, payments: true },
+        include: {
+          supplier: true,
+          items: { include: { product: true } },
+          payments: true,
+        },
       });
     });
   }
@@ -301,7 +307,9 @@ export class PurchasesService {
       await tx.payment.deleteMany({ where: { purchaseId: id } });
       await tx.purchase.delete({ where: { id } });
     });
-    this.logger.log(`Purchase ${id} permanently deleted by ${userId ?? 'unknown'}`);
+    this.logger.log(
+      `Purchase ${id} permanently deleted by ${userId ?? 'unknown'}`,
+    );
     return { id };
   }
 

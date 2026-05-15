@@ -12,6 +12,14 @@ export const api = axios.create({
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
 
+// Deduplicate 403 toasts — only fire once per 3-second window
+let toast403Timer: ReturnType<typeof setTimeout> | null = null;
+function show403Toast() {
+  if (toast403Timer) return;
+  toast.error('Accès refusé — permissions insuffisantes');
+  toast403Timer = setTimeout(() => { toast403Timer = null; }, 3000);
+}
+
 function processQueue(error: unknown, token: string | null = null) {
   failedQueue.forEach(({ resolve, reject }) => {
     if (error) reject(error);
@@ -89,7 +97,11 @@ api.interceptors.response.use(
     }
 
     if (status === 403) {
-      toast.error('Accès refusé — permissions insuffisantes');
+      // Only show toast for mutations — GET 403s are silently ignored (widget queries)
+      const method = (originalRequest?.method ?? 'get').toUpperCase();
+      if (method !== 'GET') {
+        show403Toast();
+      }
       return Promise.reject(error);
     }
 

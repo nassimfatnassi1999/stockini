@@ -4,32 +4,76 @@
 
 @layer base {
   :root {
-    /* ─── Stockini Design System ─── */
-    --p: #E67E22;
-    --pl: #FAD7A0;
-    --pd: #C96712;
-    --acc: #E67E22;
-    --accd: #C96712;
-    --accl: #FAD7A0;
-    --sf: #F7F9FC;
-    --cd: #FFFFFF;
-    --bd: #D5DCE8;
-    --bds: #9EB0C8;
-    --t1: #1A2332;
-    --t2: #5A6A7E;
-    --t3: #9AAFC5;
-    --sb-bg: #0D2B3E;
-    --sb-hov: #173B54;
-    --sb-act: #1B4F72;
-    --sb-txt: #B8CCE0;
+    /* ─── Stockini Design System — CSS Tokens ─── */
+
+    /* Primary brand (orange by default — Stockini Classic) */
+    --color-primary-rgb: 249 115 22;       /* #F97316 */
+    --color-primary-hover-rgb: 234 88 12;  /* #EA580C */
+    --color-primary-soft: #FFF7ED;
+
+    /* Secondary (deep navy) */
+    --color-secondary-rgb: 11 34 57;       /* #0B2239 */
+    --color-secondary-hover-rgb: 23 59 84; /* #173B54 */
+    --color-secondary-soft: #EBF2F8;
+
+    /* Accent */
+    --color-accent-rgb: 37 99 235;         /* #2563EB */
+    --color-accent-hover-rgb: 29 78 216;   /* #1D4ED8 */
+    --color-accent-soft: #EFF6FF;
+
+    /* App backgrounds */
+    --color-bg-app: #F7F9FC;
+    --color-bg-card: #FFFFFF;
+    --color-bg-sidebar: #0B2239;
+    --color-bg-navbar: #FFFFFF;
+
+    /* Sidebar internals */
+    --color-sidebar-hover: #173B54;
+    --color-sidebar-active: #1B4F72;
+    --color-sidebar-text: #B8CCE0;
+    --color-sidebar-section-ops: #7BA7CC;
+    --color-sidebar-section-pilotage: #6FB98F;
+    --color-sidebar-section-admin: #E07B54;
+
+    /* Text */
+    --color-text-primary: #1A2332;
+    --color-text-secondary: #5A6A7E;
+    --color-text-muted: #9AAFC5;
+
+    /* Border */
+    --color-border: #D5DCE8;
+
+    /* Ring (focus) */
+    --color-ring-rgb: 249 115 22;          /* follows primary */
+
+    /* Status — success */
+    --color-success-rgb: 22 163 74;        /* #16A34A */
+    --color-success-soft: #F0FDF4;
+
+    /* Status — warning */
+    --color-warning-rgb: 217 119 6;        /* #D97706 */
+    --color-warning-soft: #FFFBEB;
+
+    /* Status — danger */
+    --color-danger-rgb: 220 38 38;         /* #DC2626 */
+    --color-danger-soft: #FEF2F2;
+
+    /* Typography */
     --fn: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     --mn: 'Consolas', 'Menlo', 'Monaco', monospace;
-    --rc: 8px;
-    --rb: 8px;
-    --rch: 20px;
+
+    /* Radius */
+    --radius: 8px;
+
+    /* Shadows */
     --shc: 0 2px 8px rgba(13, 43, 62, 0.07);
     --shh: 0 8px 28px rgba(13, 43, 62, 0.14);
-    --radius: 8px;
+
+    /* ─── shadcn/ui compatibility aliases ─── */
+    --background: var(--color-bg-app);
+    --foreground: var(--color-text-primary);
+    --border: var(--color-border);
+    --ring: rgb(var(--color-ring-rgb));
   }
 
   * {
@@ -48,7 +92,7 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Transitions globales sobres (§2.9) */
+  /* Subtle global transitions */
   *,
   *::before,
   *::after {
@@ -56,7 +100,7 @@
     transition-timing-function: ease;
   }
 
-  /* Feedback tactile boutons */
+  /* Tactile button feedback */
   button:active {
     transform: scale(0.97);
   }
@@ -89,16 +133,17 @@
     @apply h-4 w-4;
   }
 
+  /* Token-based action modifiers */
   .app-action-edit {
-    @apply hover:border-orange-200 hover:bg-orange-50 hover:text-primary;
+    @apply hover:border-app-primary/20 hover:bg-app-primary-soft hover:text-app-primary;
   }
 
   .app-action-view {
-    @apply hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700;
+    @apply hover:border-app-border hover:bg-muted hover:text-app-text;
   }
 
   .app-action-delete {
-    @apply hover:border-red-200 hover:bg-red-50 hover:text-red-700;
+    @apply hover:border-app-danger/20 hover:bg-app-danger-soft hover:text-app-danger;
   }
 
   .app-status-badge {
@@ -114,9 +159,14 @@
     letter-spacing: 0.05em;
   }
 
-  /* Skeleton loading */
+  /* Skeleton loading — uses theme tokens */
   .skeleton {
-    background: linear-gradient(90deg, #f0f4f8 25%, #e0e8f0 50%, #f0f4f8 75%);
+    background: linear-gradient(
+      90deg,
+      var(--color-bg-app) 25%,
+      var(--color-border) 50%,
+      var(--color-bg-app) 75%
+    );
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 6px;

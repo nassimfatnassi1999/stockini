@@ -16,7 +16,11 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateSaleDto, SalePaginationDto, UpdateSaleDto } from './dto/sale.dto';
+import {
+  CreateSaleDto,
+  SalePaginationDto,
+  UpdateSaleDto,
+} from './dto/sale.dto';
 import { SalesService } from './sales.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -68,7 +72,11 @@ export class SalesController {
 
   @RequirePermissions('sales.update')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateSaleDto, @CurrentUser() user?: AuthUser) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSaleDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
     return this.salesService.update(id, dto, user);
   }
 

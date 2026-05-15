@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { RbacService } from '../rbac/rbac.service';
 import { ChangePasswordDto, LoginDto, UpdateProfileDto } from './dto/login.dto';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly rbac: RbacService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -23,24 +25,24 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const passwordMatches = await bcrypt.compare(
-      dto.password,
-      user.passwordHash,
-    );
+    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    const effective = await this.rbac.getEffectivePermissions(user.id);
+
     const payload = { sub: user.id, email: user.email, role: user.role.name };
     const accessToken = await this.jwtService.signAsync(payload);
     const refreshToken = await this.jwtService.signAsync(payload, {
-      secret:
-        this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
-      expiresIn: (this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ??
-        '7d') as JwtSignOptions['expiresIn'],
+      secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
+      expiresIn: (this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d') as JwtSignOptions['expiresIn'],
     });
 
-    const permissions = this.extractPermissions(user.role.permissions);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
 
     return {
       accessToken,
@@ -50,14 +52,20 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role.name,
-        permissions,
+        isActive: user.isActive,
+        permissions: effective.permissions,
+        isSuperAdmin: effective.isSuperAdmin,
       },
     };
   }
 
   async refreshToken(token: string) {
     try {
-      const payload = await this.jwtService.verifyAsync<{ sub: string; email: string; role: string }>(token, {
+      const payload = await this.jwtService.verifyAsync<{
+        sub: string;
+        email: string;
+        role: string;
+      }>(token, {
         secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
       });
 
@@ -70,9 +78,9 @@ export class AuthService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
+      const effective = await this.rbac.getEffectivePermissions(user.id);
       const newPayload = { sub: user.id, email: user.email, role: user.role.name };
       const accessToken = await this.jwtService.signAsync(newPayload);
-      const permissions = this.extractPermissions(user.role.permissions);
 
       return {
         accessToken,
@@ -81,7 +89,9 @@ export class AuthService {
           email: user.email,
           fullName: user.fullName,
           role: user.role.name,
-          permissions,
+          isActive: user.isActive,
+          permissions: effective.permissions,
+          isSuperAdmin: effective.isSuperAdmin,
         },
       };
     } catch {
@@ -90,38 +100,48 @@ export class AuthService {
   }
 
   async me(userId: string) {
+    const effective = await this.rbac.getEffectivePermissions(userId);
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      include: { role: true },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        isActive: true,
+        role: { select: { name: true } },
+      },
     });
 
-    return this.profilePayload(user);
-  }
+    const [prenom = '', ...nameParts] = user.fullName.split(' ');
+    const nom = nameParts.join(' ') || user.fullName;
 
-  private extractPermissions(raw: unknown): string[] {
-    return Array.isArray(raw)
-      ? raw.filter((p): p is string => typeof p === 'string')
-      : [];
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      prenom,
+      nom,
+      phone: user.phone,
+      isActive: user.isActive,
+      role: user.role.name,
+      permissions: effective.permissions,
+      isSuperAdmin: effective.isSuperAdmin,
+    };
   }
 
   async updateMe(userId: string, dto: UpdateProfileDto) {
     const fullName =
-      (dto.fullName ??
-        [dto.prenom, dto.nom].filter(Boolean).join(' ').trim()) ||
-      undefined;
-    const user = await this.prisma.user.update({
+      (dto.fullName ?? [dto.prenom, dto.nom].filter(Boolean).join(' ').trim()) || undefined;
+    await this.prisma.user.update({
       where: { id: userId },
       data: { fullName },
-      include: { role: true },
     });
-
-    return this.profilePayload(user);
+    return this.me(userId);
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-    });
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const passwordMatches = await bcrypt.compare(
       dto.currentPassword ?? dto.oldPassword ?? '',
       user.passwordHash,
@@ -136,24 +156,5 @@ export class AuthService {
     });
 
     return { ok: true };
-  }
-
-  private profilePayload(user: {
-    id: string;
-    email: string;
-    fullName: string;
-    role: { name: string; permissions: unknown };
-  }) {
-    const [prenom = '', ...nameParts] = user.fullName.split(' ');
-    const nom = nameParts.join(' ') || user.fullName;
-    return {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      prenom,
-      nom,
-      role: user.role.name,
-      permissions: this.extractPermissions(user.role.permissions),
-    };
   }
 }

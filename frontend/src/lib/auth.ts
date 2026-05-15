@@ -1,9 +1,11 @@
-interface AuthUser {
+export interface AuthUser {
   id: string;
   fullName?: string;
   email: string;
   role: string;
+  isActive?: boolean;
   permissions?: string[];
+  isSuperAdmin?: boolean;
 }
 
 function getStoredUser(): AuthUser | null {
@@ -67,7 +69,7 @@ export function canAccess(permissionKey: string): boolean {
 }
 
 export function setAuthSession(payload: { accessToken: string; refreshToken?: string; user: AuthUser }) {
-  window.localStorage.setItem('access_token', payload.accessToken);
+  if (payload.accessToken) window.localStorage.setItem('access_token', payload.accessToken);
   if (payload.refreshToken) window.localStorage.setItem('refresh_token', payload.refreshToken);
   window.localStorage.setItem('auth_user', JSON.stringify(payload.user));
 }

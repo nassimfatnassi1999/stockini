@@ -6,73 +6,127 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // === Stockini — Professional Operations UI ===
+        // ─── Existing semantic tokens — now CSS-variable-backed ───
+
         primary: {
-          DEFAULT: '#E67E22',
-          light: '#FAD7A0',
-          dark: '#C96712',
+          DEFAULT: 'rgb(var(--color-primary-rgb) / <alpha-value>)',
+          light:   'var(--color-primary-soft)',
+          dark:    'rgb(var(--color-primary-hover-rgb) / <alpha-value>)',
           foreground: '#FFFFFF',
         },
         accent: {
-          DEFAULT: '#E67E22',
-          light: '#FAD7A0',
-          dark: '#C96712',
+          DEFAULT: 'rgb(var(--color-accent-rgb) / <alpha-value>)',
+          light:   'var(--color-accent-soft)',
+          dark:    'rgb(var(--color-accent-hover-rgb) / <alpha-value>)',
           foreground: '#FFFFFF',
         },
-        surface: '#F7F9FC',
+
+        surface:    'var(--color-bg-app)',
+        background: 'var(--color-bg-app)',
+        foreground: 'var(--color-text-primary)',
+
         card: {
-          DEFAULT: '#FFFFFF',
-          foreground: '#1A2332',
+          DEFAULT:    'var(--color-bg-card)',
+          foreground: 'var(--color-text-primary)',
         },
         border: {
-          DEFAULT: '#D5DCE8',
-          strong: '#9EB0C8',
+          DEFAULT: 'var(--color-border)',
+          strong:  '#9EB0C8',
         },
-        'text-primary': '#1A2332',
-        'text-secondary': '#5A6A7E',
-        'text-muted': '#9AAFC5',
-        'text-inverse': '#FFFFFF',
+        input: 'var(--color-border)',
+        ring:  'rgb(var(--color-ring-rgb) / <alpha-value>)',
 
-        // Statuts métier
+        'text-primary':   'var(--color-text-primary)',
+        'text-secondary': 'var(--color-text-secondary)',
+        'text-muted':     'var(--color-text-muted)',
+        'text-inverse':   '#FFFFFF',
+
+        // Status colours
         status: {
-          new: '#64748B',
-          progress: '#E67E22',
-          done: '#16A34A',
-          blocked: '#DC2626',
-          draft: '#94A3B8',
-          planned: '#64748B',
+          new:      '#64748B',
+          progress: 'rgb(var(--color-primary-rgb) / <alpha-value>)',
+          done:     'rgb(var(--color-success-rgb) / <alpha-value>)',
+          blocked:  'rgb(var(--color-danger-rgb) / <alpha-value>)',
+          draft:    '#94A3B8',
+          planned:  '#64748B',
         },
 
-        // Sidebar
+        // Sidebar tokens
         sidebar: {
-          bg: '#0D2B3E',
-          hover: '#173B54',
-          active: '#1B4F72',
-          text: '#B8CCE0',
+          bg:           'var(--color-bg-sidebar)',
+          hover:        'var(--color-sidebar-hover)',
+          active:       'var(--color-sidebar-active)',
+          text:         'var(--color-sidebar-text)',
           'text-active': '#FFFFFF',
-          border: '#1B4F72',
+          border:       'var(--color-sidebar-active)',
         },
 
-        // Aliases shadcn (pour compat composants existants)
-        background: '#F7F9FC',
-        foreground: '#1A2332',
-        input: '#D5DCE8',
-        ring: '#E67E22',
+        // shadcn/ui aliases
         muted: {
-          DEFAULT: '#F0F4F8',
-          foreground: '#5A6A7E',
+          DEFAULT:    '#F0F4F8',
+          foreground: 'var(--color-text-secondary)',
         },
         popover: {
-          DEFAULT: '#FFFFFF',
-          foreground: '#1A2332',
+          DEFAULT:    'var(--color-bg-card)',
+          foreground: 'var(--color-text-primary)',
         },
         destructive: {
-          DEFAULT: '#F44336',
+          DEFAULT:    'rgb(var(--color-danger-rgb) / <alpha-value>)',
           foreground: '#FFFFFF',
         },
         secondary: {
-          DEFAULT: '#F0F4F8',
-          foreground: '#1A2332',
+          DEFAULT:    '#F0F4F8',
+          foreground: 'var(--color-text-primary)',
+        },
+
+        // ─── app.* namespace — new design token API ───
+        app: {
+          // Primary
+          primary:         'rgb(var(--color-primary-rgb) / <alpha-value>)',
+          'primary-hover': 'rgb(var(--color-primary-hover-rgb) / <alpha-value>)',
+          'primary-soft':  'var(--color-primary-soft)',
+
+          // Secondary
+          secondary:         'rgb(var(--color-secondary-rgb) / <alpha-value>)',
+          'secondary-hover': 'rgb(var(--color-secondary-hover-rgb) / <alpha-value>)',
+          'secondary-soft':  'var(--color-secondary-soft)',
+
+          // Accent
+          accent:         'rgb(var(--color-accent-rgb) / <alpha-value>)',
+          'accent-hover': 'rgb(var(--color-accent-hover-rgb) / <alpha-value>)',
+          'accent-soft':  'var(--color-accent-soft)',
+
+          // Backgrounds
+          bg:      'var(--color-bg-app)',
+          card:    'var(--color-bg-card)',
+          sidebar: 'var(--color-bg-sidebar)',
+          navbar:  'var(--color-bg-navbar)',
+
+          // Sidebar internals
+          'sidebar-hover':   'var(--color-sidebar-hover)',
+          'sidebar-active':  'var(--color-sidebar-active)',
+          'sidebar-text':    'var(--color-sidebar-text)',
+
+          // Text
+          text:           'var(--color-text-primary)',
+          'text-secondary': 'var(--color-text-secondary)',
+          muted:          'var(--color-text-muted)',
+
+          // Border / Ring
+          border: 'var(--color-border)',
+          ring:   'rgb(var(--color-ring-rgb) / <alpha-value>)',
+
+          // Success
+          success:       'rgb(var(--color-success-rgb) / <alpha-value>)',
+          'success-soft': 'var(--color-success-soft)',
+
+          // Warning
+          warning:       'rgb(var(--color-warning-rgb) / <alpha-value>)',
+          'warning-soft': 'var(--color-warning-soft)',
+
+          // Danger
+          danger:       'rgb(var(--color-danger-rgb) / <alpha-value>)',
+          'danger-soft': 'var(--color-danger-soft)',
         },
       },
       fontFamily: {
@@ -82,28 +136,28 @@ const config: Config = {
       borderRadius: {
         card: '8px',
         chip: '20px',
-        lg: '8px',
-        md: '8px',
-        sm: '6px',
+        lg:   '8px',
+        md:   '8px',
+        sm:   '6px',
       },
       boxShadow: {
-        card: '0 2px 8px rgba(13,43,62,0.06)',
+        card:        '0 2px 8px rgba(13,43,62,0.06)',
         'card-hover': '0 8px 24px rgba(13,43,62,0.12)',
-        topbar: '0 1px 3px rgba(0,0,0,0.08)',
+        topbar:      '0 1px 3px rgba(0,0,0,0.08)',
       },
       keyframes: {
         fadeInUp: {
           from: { opacity: '0', transform: 'translateY(12px)' },
-          to: { opacity: '1', transform: 'translateY(0)' },
+          to:   { opacity: '1', transform: 'translateY(0)' },
         },
         shimmer: {
-          '0%': { backgroundPosition: '200% 0' },
+          '0%':   { backgroundPosition: '200% 0' },
           '100%': { backgroundPosition: '-200% 0' },
         },
       },
       animation: {
         fadeInUp: 'fadeInUp 0.3s ease both',
-        shimmer: 'shimmer 1.5s infinite',
+        shimmer:  'shimmer 1.5s infinite',
       },
     },
   },

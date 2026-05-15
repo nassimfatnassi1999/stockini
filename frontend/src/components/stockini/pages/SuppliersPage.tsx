@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { Can } from '@/components/shared/Can';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
@@ -18,6 +20,7 @@ import type { FieldConfig } from '../shared/form-utils';
 
 export function SuppliersPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const fields: FieldConfig[] = [
@@ -36,7 +39,9 @@ export function SuppliersPage() {
   const saveMutation = useMutation({
     mutationFn: () => {
       const payload = cleanPayload(form, fields) as Partial<Supplier>;
-      return editing ? stockiniApi.updateSupplier(editing.id, payload) : stockiniApi.createSupplier(payload);
+      return editing && editing.id
+        ? stockiniApi.updateSupplier(editing.id, payload)
+        : stockiniApi.createSupplier(payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-suppliers'] });
@@ -60,14 +65,19 @@ export function SuppliersPage() {
       setTrashTarget(null);
     },
   });
+  const isEditing = editing && editing.id;
+  const modalPermission = isEditing ? 'suppliers.update' : 'suppliers.create';
+
   return (
     <>
       <div className="mb-4 flex items-end justify-between gap-3">
         <PageHeader title="Fournisseurs" subtitle="Contacts, conditions de paiement et coordonnées fournisseurs." />
-        <Button type="button" size="sm" onClick={() => { setEditing({} as Supplier); setForm(emptyForm(fields)); }}>
-          <Plus size={14} />
-          Nouveau
-        </Button>
+        <Can permission="suppliers.create">
+          <Button type="button" size="sm" onClick={() => { setEditing({} as Supplier); setForm(emptyForm(fields)); }}>
+            <Plus size={14} />
+            Nouveau
+          </Button>
+        </Can>
       </div>
       <SimpleTable
         title=""
@@ -99,12 +109,14 @@ export function SuppliersPage() {
             }}
             onDelete={() => setTrashTarget({ id: supplier.id, name: supplier.name })}
             deleting={deleteMutation.isPending}
+            canEdit={can('suppliers.update')}
+            canDelete={can('suppliers.delete')}
           />,
         ])}
       />
-      {editing && (
+      {editing && can(modalPermission) && (
         <CrudModal
-          title={editing.id ? 'Modifier fournisseur' : 'Nouveau fournisseur'}
+          title={isEditing ? 'Modifier fournisseur' : 'Nouveau fournisseur'}
           fields={fields}
           form={form}
           onChange={(name, value) => setForm((current) => ({ ...current, [name]: value }))}

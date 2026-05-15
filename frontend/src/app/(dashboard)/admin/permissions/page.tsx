@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { hasPermission } from '@/lib/auth';
+import { ME_QUERY_KEY } from '@/lib/hooks/usePermissions';
+import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -43,43 +44,49 @@ const ROLES = [
   { value: 'PURCHASE_MANAGER', label: 'Responsable achats' },
 ];
 
-// Display order for module sections
+// Display order for module sections — covers ALL sidebar sections
 const MODULE_ORDER = [
   'dashboard',
   'clients',
+  'suppliers',
   'products',
+  'stock',
   'sales',
   'purchases',
-  'suppliers',
-  'stock',
+  'documents',
   'payments',
+  'caisse',
   'expenses',
   'reports',
   'alerts',
-  'settings',
   'audit_logs',
-  'permissions',
+  'settings',
   'users',
+  'permissions',
   'trash',
+  'documentation',
 ];
 
 const MODULE_LABELS: Record<string, string> = {
-  dashboard:   'Tableau de bord',
-  clients:     'Clients',
-  products:    'Produits',
-  sales:       'Ventes',
-  purchases:   'Achats',
-  suppliers:   'Fournisseurs',
-  stock:       'Stock',
-  payments:    'Paiements clients',
-  expenses:    'Dépenses / Paiements fournisseurs',
-  reports:     'Rapports',
-  alerts:      'Alertes',
-  settings:    'Paramètres',
-  audit_logs:  'Audit logs',
-  permissions: 'Permissions',
-  users:       'Utilisateurs',
-  trash:       'Corbeille',
+  dashboard:     'Tableau de bord',
+  clients:       'Clients',
+  suppliers:     'Fournisseurs',
+  products:      'Produits',
+  stock:         'Stock',
+  sales:         'Ventes',
+  purchases:     'Achats',
+  documents:     'Documents',
+  payments:      'Paiements clients',
+  caisse:        'Caisse & Trésorerie',
+  expenses:      'Dépenses / Paiements fournisseurs',
+  reports:       'Rapports',
+  alerts:        'Alertes',
+  audit_logs:    'Audit logs',
+  settings:      'Paramètres',
+  users:         'Utilisateurs',
+  permissions:   'Permissions',
+  trash:         'Corbeille',
+  documentation: 'Documentation',
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -87,21 +94,55 @@ const ACTION_LABELS: Record<string, string> = {
   create:                 'Créer',
   update:                 'Modifier',
   delete:                 'Supprimer',
+  export:                 'Exporter',
+  import:                 'Importer',
+  print:                  'Imprimer',
+  cancel:                 'Annuler',
+  view_details:           'Voir détails',
+  view_history:           'Voir historique',
+  // clients
+  // products
+  view_margin:            'Voir marge',
+  update_price:           'Modifier prix',
+  update_discount:        'Modifier remise',
+  // sales
+  allow_low_margin:       'Autoriser marge < 20%',
+  // purchases
   create_order:           'Créer commande',
   create_receipt:         'Créer bon de réception',
-  create_invoice:         'Créer facture',
+  create_invoice:         'Créer facture fournisseur',
   validate_receipt:       'Valider réception',
-  pay_supplier:           'Payer fournisseur',
+  // payments
   receive_client_payment: 'Encaisser client',
-  adjust:                 'Ajuster stock',
-  transfer:               'Transférer stock',
+  pay_supplier:           'Payer fournisseur',
+  // caisse
+  operate:                'Opérations (dépôt/retrait)',
+  close:                  'Clôturer caisse',
+  admin:                  'Administrer caisse',
+  // stock
+  adjust:                 'Ajuster / Corriger',
+  transfer:               'Transférer',
   'movements.view':       'Voir mouvements',
-  'financial.view':       'Voir rapports financiers',
-  export:                 'Exporter',
-  allow_low_margin:       'Autoriser marge < 20%',
-  view_details:           'Voir détails',
+  'movements.delete':     'Supprimer mouvement',
+  reset:                  'Réinitialiser',
+  // documents
+  download:               'Télécharger',
+  email:                  'Envoyer par email',
+  // reports
+  'financial.view':       'Rapports financiers',
+  sales_stats:            'Statistiques ventes',
+  purchases_stats:        'Statistiques achats',
+  stock_stats:            'Statistiques stock',
+  margins:                'Bénéfices / Marges',
+  // alerts
+  mark_read:              'Marquer comme lue',
+  // users
+  reset_password:         'Reset mot de passe',
+  // trash
   restore:                'Restaurer',
   permanent_delete:       'Supprimer définitivement',
+  // audit
+  recalculate_last_sale_prices: 'Recalculer prix',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -125,6 +166,7 @@ function RolePermissionsTab({ permissions }: { permissions: Permission[] }) {
   const [roleCodes, setRoleCodes] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const queryClient = useQueryClient();
 
   const loadRolePerms = useCallback(async (role: string) => {
     const res = await api.get<Permission[]>(`/rbac/roles/${role}/permissions`);
@@ -164,6 +206,8 @@ function RolePermissionsTab({ permissions }: { permissions: Permission[] }) {
         permissionCodes: [...roleCodes],
       });
       setSaved(true);
+      // Invalidate auth/me so the current user's permissions are refreshed immediately
+      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
     } finally {
       setSaving(false);
     }
@@ -261,9 +305,13 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
   const [overrides, setOverrides] = useState<Override[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    api.get<User[]>('/users').then((r) => setUsers(r.data));
+    // Requires users.view permission (now permission-based, not role-based)
+    api.get<{ data: User[] }>('/users').then((r) => setUsers(r.data.data ?? [])).catch(() => {
+      api.get<User[]>('/users').then((r) => setUsers(Array.isArray(r.data) ? r.data : []));
+    });
   }, []);
 
   async function selectUser(userId: string) {
@@ -281,7 +329,8 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
       await api.put('/rbac/users/overrides', { userId: selectedUserId, permissionCode: code, granted });
       const res = await api.get<Override[]>(`/rbac/users/${selectedUserId}/overrides`);
       setOverrides(res.data);
-      setMsg('Override appliqué');
+      setMsg(granted ? 'Permission forcée : Oui' : 'Permission révoquée : Non');
+      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
     } finally {
       setSaving(false);
     }
@@ -295,6 +344,7 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
       const res = await api.get<Override[]>(`/rbac/users/${selectedUserId}/overrides`);
       setOverrides(res.data);
       setMsg('Override supprimé — permission héritée du rôle');
+      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
     } finally {
       setSaving(false);
     }
@@ -409,22 +459,17 @@ function UserOverridesTab({ permissions }: { permissions: Permission[] }) {
 // ─── Page principale ──────────────────────────────────────────────────────────
 
 export default function PermissionsAdminPage() {
-  const router = useRouter();
   const [tab, setTab] = useState<'roles' | 'users'>('roles');
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!hasPermission('permissions.view')) {
-      router.replace('/dashboard');
-      return;
-    }
     api.get<Permission[]>('/rbac/permissions')
       .then((r) => setPermissions(r.data))
       .catch(() => setError('Accès refusé ou erreur réseau'))
       .finally(() => setLoading(false));
-  }, [router]);
+  }, []);
 
   if (loading) {
     return (
@@ -451,6 +496,7 @@ export default function PermissionsAdminPage() {
   }
 
   return (
+    <PermissionGuard permission="permissions.view">
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">Gestion des permissions</h1>
@@ -472,5 +518,6 @@ export default function PermissionsAdminPage() {
         </TabsContent>
       </Tabs>
     </div>
+    </PermissionGuard>
   );
 }

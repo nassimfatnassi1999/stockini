@@ -106,6 +106,11 @@ export const stockiniApi = {
     api.post<StockMovement>('/stock/exit', data).then((r) => r.data),
   stockAdjustment: (data: { productId: string; newQuantity: number; reason?: string }) =>
     api.post<StockMovement>('/stock/adjustment', data).then((r) => r.data),
+  resetInventory: (data: { adminPassword: string; confirmationText: string }) =>
+    api.post<{ success: boolean; previousTotal: number; productsImpacted: number; message: string }>(
+      '/stock/reset-inventory',
+      data,
+    ).then((r) => r.data),
   settings: () => api.get<Array<{ key: string; value: string }>>('/settings').then((r) => r.data),
   createSetting: (data: { key: string; value: string }) => api.post('/settings', data).then((r) => r.data),
   updateSetting: (key: string, data: { value: string }) => api.patch(`/settings/${key}`, data).then((r) => r.data),

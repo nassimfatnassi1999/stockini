@@ -1,9 +1,18 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { AlertType, Prisma, StockMovementType } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { StockAdjustmentDto, StockChangeDto } from './dto/stock.dto';
+import {
+  ResetInventoryDto,
+  StockAdjustmentDto,
+  StockChangeDto,
+} from './dto/stock.dto';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
 
@@ -94,6 +103,77 @@ export class StockService {
     });
   }
 
+  // ─── Reset inventory ──────────────────────────────────────────────────────────
+
+  async resetInventory(dto: ResetInventoryDto, adminId: string) {
+    // Re-authenticate the admin
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      include: { role: true },
+    });
+
+    if (!admin) {
+      throw new ForbiddenException('Utilisateur introuvable');
+    }
+
+    const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin'];
+    if (!ADMIN_ROLES.includes(admin.role.name)) {
+      throw new ForbiddenException('Action réservée aux administrateurs');
+    }
+
+    const passwordValid = await bcrypt.compare(
+      dto.adminPassword,
+      admin.passwordHash,
+    );
+    if (!passwordValid) {
+      throw new ForbiddenException('Mot de passe administrateur incorrect');
+    }
+
+    // confirmationText is already validated by @Equals in the DTO
+
+    return this.prisma.$transaction(async (tx) => {
+      // Snapshot before
+      const products = await tx.product.findMany({
+        where: { deletedAt: null },
+        select: { id: true, quantity: true },
+      });
+
+      const previousTotal = products.reduce((sum, p) => sum + p.quantity, 0);
+      const productsImpacted = products.filter((p) => p.quantity !== 0).length;
+
+      // Zero out all quantities
+      await tx.product.updateMany({
+        where: { deletedAt: null },
+        data: { quantity: 0 },
+      });
+
+      // Audit log
+      await tx.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'RESET_INVENTORY',
+          entity: 'Product',
+          entityId: null,
+          metadata: {
+            adminId,
+            date: new Date().toISOString(),
+            action: 'RESET_INVENTORY',
+            previousTotal,
+            newTotal: 0,
+            productsImpacted,
+          },
+        },
+      });
+
+      return {
+        success: true,
+        previousTotal,
+        productsImpacted,
+        message: `Remise à zéro effectuée. ${productsImpacted} produit(s) impacté(s).`,
+      };
+    });
+  }
+
   async applyMovement(
     client: DbClient,
     input: {
@@ -171,7 +251,8 @@ export class StockService {
     }
 
     const alertDate = new Date();
-    const alertType = quantity === 0 ? AlertType.OUT_OF_STOCK : AlertType.LOW_STOCK;
+    const alertType =
+      quantity === 0 ? AlertType.OUT_OF_STOCK : AlertType.LOW_STOCK;
     await client.alert.create({
       data: {
         productId: product.id,
@@ -180,7 +261,10 @@ export class StockService {
         currentStock: quantity,
         minimumStock: product.minStock,
         type: alertType,
-        title: quantity === 0 ? 'Produit en rupture de stock' : 'Stock faible détecté',
+        title:
+          quantity === 0
+            ? 'Produit en rupture de stock'
+            : 'Stock faible détecté',
         message: [
           `Produit : ${product.name}`,
           `Référence : ${product.reference}`,
