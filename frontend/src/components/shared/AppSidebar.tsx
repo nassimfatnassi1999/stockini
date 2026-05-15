@@ -27,7 +27,7 @@ import {
   Building2,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   getCurrentUserDisplayName,
   getCurrentUserEmail,
@@ -126,24 +126,25 @@ function saveCollapsedSections(collapsed: Set<string>) {
 export function AppSidebar() {
   const pathname = usePathname();
   const { closeMobile, collapsed, isMobile, mobileOpen, toggleCollapsed } = useSidebar();
-  const { can, isSuperAdmin } = usePermissions();
+  const { can } = usePermissions();
 
+  const [mounted, setMounted] = useState(false);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const sectionRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    setMounted(true);
     setDisplayName(getCurrentUserDisplayName());
     setEmail(getCurrentUserEmail());
+    setRole(getCurrentUserRole());
 
     const loaded = loadCollapsedSections();
     sectionRef.current = loaded;
     setCollapsedSections(new Set(loaded));
   }, []);
-
-  const role = getCurrentUserRole();
-  const isAdmin = isSuperAdmin;
 
   const identity = displayName ?? email ?? 'Utilisateur';
   const initials = getInitials(identity);
@@ -313,9 +314,12 @@ export function AppSidebar() {
           )}
         </div>
 
-        {/* Navigation */}
+        {/* Navigation — le wrapper .nav-sections-slot est toujours rendu (SSR + client)
+            pour garantir l'identité structurelle avant hydration. */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-          {NAV_SECTIONS.map((section) => renderSection(section))}
+          <div className="nav-sections-slot">
+            {mounted ? NAV_SECTIONS.map((section) => renderSection(section)) : null}
+          </div>
         </nav>
 
         {/* User footer */}
