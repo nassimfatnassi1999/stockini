@@ -79,6 +79,8 @@ export const stockiniApi = {
   validateSale: (id: string) => api.patch(`/sales/${id}/validate`).then((r) => r.data),
   cancelSale: (id: string) => api.patch(`/sales/${id}/cancel`).then((r) => r.data),
   deleteSale: (id: string) => api.delete(`/sales/${id}`).then((r) => r.data),
+  transformSale: (id: string, targetType: SalesDocumentType) =>
+    api.post<Sale>(`/sales/${id}/transform`, { targetType }).then((r) => r.data),
   purchases: (params?: PurchasesQueryParams) => api.get<PaginatedResponse<Purchase>>('/purchases', { params }).then((r) => r.data),
   purchase: (id: string) => api.get<PurchaseDetail>(`/purchases/${id}`).then((r) => r.data),
   createPurchase: (data: unknown) => api.post<Purchase>('/purchases', data).then((r) => r.data),

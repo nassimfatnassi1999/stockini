@@ -19,6 +19,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreateSaleDto,
   SalePaginationDto,
+  TransformDocumentDto,
   UpdateSaleDto,
 } from './dto/sale.dto';
 import { SalesService } from './sales.service';
@@ -68,6 +69,16 @@ export class SalesController {
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.salesService.cancel(id, user);
+  }
+
+  @RequirePermissions('sales.create')
+  @Post(':id/transform')
+  transform(
+    @Param('id') id: string,
+    @Body() dto: TransformDocumentDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.salesService.transformDocument(id, dto.targetType, user);
   }
 
   @RequirePermissions('sales.update')

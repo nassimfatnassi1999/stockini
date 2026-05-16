@@ -56,9 +56,11 @@ export function PaymentsPage() {
   const canViewPayments = can('payments.view');
   const canReceivePayment = can('payments.receive_client_payment');
 
+  // On demande directement au backend les documents réellement payables :
+  // FACTURE ou BON_LIVRAISON non transformé, paiement incomplet, non annulé.
   const salesQuery = useQuery({
-    queryKey: ['stockini-sales'],
-    queryFn: () => stockiniApi.sales(),
+    queryKey: ['stockini-sales', 'payable'],
+    queryFn: () => stockiniApi.sales({ payableOnly: true, limit: 100 }),
     enabled: canViewSales,
   });
   const paymentsQuery = useQuery({
@@ -68,6 +70,7 @@ export function PaymentsPage() {
   });
 
   const salesData = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
+  // Le backend a déjà filtré ; on garde le filtre côté client comme filet de sécurité.
   const unpaidSales = salesData.filter(
     (s) => (s.paymentStatus === 'UNPAID' || s.paymentStatus === 'PARTIAL') && !s.deletedAt,
   );
@@ -86,6 +89,7 @@ export function PaymentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-caisse'] });
       setPayTarget(null);
       setPayForm({ amount: '', method: 'CASH', note: '' });
       toast.success('Paiement enregistré avec succès');
@@ -141,7 +145,7 @@ export function PaymentsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>N° Facture</TableHead>
+                    <TableHead>N° Document</TableHead>
                     <TableHead>Client</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Total TTC</TableHead>

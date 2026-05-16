@@ -30,13 +30,14 @@ describe('SalesService document references', () => {
       generate: jest.fn((prefix: string) => Promise.resolve(`${prefix}-001`)),
     };
 
-    const tx = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tx: any = {
       product: {
         findMany: jest.fn().mockResolvedValue([product]),
         update: jest.fn().mockResolvedValue(product),
       },
       sale: {
-        create: jest.fn(({ data }) =>
+        create: jest.fn(({ data }: { data: any }) =>
           Promise.resolve({
             id: 'sale-1',
             ...data,
@@ -50,7 +51,7 @@ describe('SalesService document references', () => {
             payments: [],
           }),
         ),
-        update: jest.fn(({ data }) =>
+        update: jest.fn(({ data }: { data: any }) =>
           Promise.resolve({
             id: 'sale-1',
             ...tx.sale.create.mock.calls[0][0].data,
@@ -61,14 +62,15 @@ describe('SalesService document references', () => {
         ),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: jest.fn(),
+        findFirstOrThrow: jest.fn(),
       },
       payment: {
-        create: jest.fn(({ data }) =>
+        create: jest.fn(({ data }: { data: any }) =>
           Promise.resolve({ id: 'payment-1', ...data }),
         ),
       },
       saleItem: {
-        findMany: jest.fn((args) => {
+        findMany: jest.fn((args: any) => {
           if (args?.select?.saleId)
             return Promise.resolve([{ saleId: 'sale-1' }]);
           return Promise.resolve([
@@ -99,7 +101,7 @@ describe('SalesService document references', () => {
       },
     };
 
-    tx.sale.findUniqueOrThrow.mockImplementation(({ where }) =>
+    tx.sale.findUniqueOrThrow.mockImplementation(({ where }: { where: { id: string } }) =>
       Promise.resolve({
         id: where.id,
         invoiceNumber: tx.sale.create.mock.calls[0][0].data.invoiceNumber,
@@ -169,9 +171,9 @@ describe('SalesService document references', () => {
             discount: 0,
             tax: 28.5,
             total: 178.5,
-            status: [DocumentType.FACTURE, DocumentType.BON_LIVRAISON].includes(
-              documentType,
-            )
+            status: (
+              [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+            ).includes(documentType)
               ? SaleStatus.COMPLETED
               : SaleStatus.DRAFT,
           }),

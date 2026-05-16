@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -97,6 +97,14 @@ export class CreateSaleDto {
   items!: CreateSaleItemDto[];
 }
 
+export class TransformDocumentDto {
+  @IsEnum(DocumentType, {
+    message:
+      'targetType doit être : DEVIS, BON_COMMANDE, BON_LIVRAISON, FACTURE ou AVOIR',
+  })
+  targetType!: DocumentType;
+}
+
 /** Only status changes are allowed via PATCH. Financial state is managed through payment endpoints. */
 export class UpdateSaleDto {
   @IsOptional()
@@ -145,4 +153,13 @@ export class SalePaginationDto {
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  /**
+   * Quand true : retourne uniquement les documents réellement payables
+   * (FACTURE ou BON_LIVRAISON non transformé) dont le paiement est incomplet.
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  payableOnly?: boolean;
 }

@@ -99,6 +99,8 @@ export interface Sale {
   stockImpactDone: boolean;
   lastSalePriceImpactDone?: boolean;
   reserveStock: boolean;
+  sourceDocumentId?: string | null;
+  transformedToId?: string | null;
   createdAt: string;
   customer?: Customer | null;
   items?: Array<{ id: Id; quantity: number }>;
@@ -413,6 +415,7 @@ export interface SalesQueryParams {
   documentType?: string;
   paymentStatus?: string;
   customerId?: string;
+  payableOnly?: boolean;
 }
 
 export interface PurchasesQueryParams {

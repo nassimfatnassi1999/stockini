@@ -315,6 +315,8 @@ model Sale {
   stockImpactDone         Boolean               @default(false)
   lastSalePriceImpactDone Boolean               @default(false) @map("last_sale_price_impact_done")
   reserveStock            Boolean               @default(false)
+  sourceDocumentId        String?               @map("source_document_id")
+  transformedToId         String?               @map("transformed_to_id")
   sellerId                String?
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt

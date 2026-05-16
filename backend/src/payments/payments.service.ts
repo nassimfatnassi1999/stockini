@@ -125,6 +125,7 @@ export class PaymentsService {
 
       if (
         sale.documentType === DocumentType.DEVIS ||
+        sale.documentType === DocumentType.BON_COMMANDE ||
         sale.documentType === DocumentType.AVOIR
       ) {
         throw new BadRequestException(

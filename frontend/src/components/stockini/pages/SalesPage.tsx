@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Ban, Check, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, Ban, Check, Plus, Trash2 } from 'lucide-react';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
 import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
@@ -48,11 +48,24 @@ const DOC_TYPE_COLOR: Record<string, string> = {
   AVOIR: 'bg-red-50 text-red-700 border-red-200',
 };
 
-/** Document types where validation triggers stock decrement */
+/** Types qui diminuent le stock lors de la validation */
 const VALIDATES_STOCK = new Set<string>(['BON_LIVRAISON', 'FACTURE']);
 
-/** Document types (other than DEVIS) that can be validated */
+/** Types qui peuvent être validés */
 const VALIDATABLE = new Set<string>(['BON_COMMANDE', 'BON_LIVRAISON', 'FACTURE']);
+
+/** Transformations autorisées par type source */
+const ALLOWED_TRANSFORMS: Record<string, Array<{ value: SalesDocumentType; label: string }>> = {
+  DEVIS: [
+    { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
+    { value: 'FACTURE', label: 'Facture' },
+  ],
+  BON_COMMANDE: [
+    { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
+    { value: 'FACTURE', label: 'Facture' },
+  ],
+  BON_LIVRAISON: [{ value: 'FACTURE', label: 'Facture' }],
+};
 
 // ─── Confirm dialog ──────────────────────────────────────────────────────────
 
@@ -112,7 +125,128 @@ function ConfirmDialog({
   );
 }
 
-// ─── Enum mapping (exact Prisma values — never use display labels as values) ──
+// ─── Transform dialog ────────────────────────────────────────────────────────
+
+function TransformDialog({
+  sale,
+  isPending,
+  onConfirm,
+  onCancel,
+}: {
+  sale: Sale;
+  isPending: boolean;
+  onConfirm: (targetType: SalesDocumentType) => void;
+  onCancel: () => void;
+}) {
+  const options = ALLOWED_TRANSFORMS[sale.documentType] ?? [];
+  const [selected, setSelected] = useState<SalesDocumentType | ''>(
+    options[0]?.value ?? '',
+  );
+
+  const targetAppliesStock =
+    selected === 'BON_LIVRAISON' || selected === 'FACTURE';
+  const sourceAlreadyAppliedStock = sale.stockImpactDone;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isPending) onCancel();
+      }}
+    >
+      <div className="w-full max-w-md rounded-xl border border-border/70 bg-white shadow-2xl">
+        <div className="space-y-4 p-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100">
+              <ArrowRightLeft size={18} className="text-indigo-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-text-primary">
+                Transformer le document
+              </h3>
+              <p className="text-xs text-text-muted font-mono">{sale.invoiceNumber}</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-text-primary">
+              Transformer en
+            </label>
+            <div className="flex flex-col gap-2">
+              {options.map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
+                    selected === opt.value
+                      ? 'border-indigo-400 bg-indigo-50'
+                      : 'border-border hover:border-indigo-200 hover:bg-surface'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="targetType"
+                    value={opt.value}
+                    checked={selected === opt.value}
+                    onChange={() => setSelected(opt.value)}
+                    className="accent-indigo-600"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-text-primary">
+                      {opt.label}
+                    </span>
+                    {opt.value === 'BON_LIVRAISON' && (
+                      <p className="text-xs text-text-muted">Diminue le stock immédiatement</p>
+                    )}
+                    {opt.value === 'FACTURE' && (
+                      <p className="text-xs text-text-muted">
+                        {sourceAlreadyAppliedStock
+                          ? 'Stock déjà appliqué — pas de double décrément'
+                          : 'Diminue le stock immédiatement'}
+                      </p>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {targetAppliesStock && !sourceAlreadyAppliedStock && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              Le stock sera décrémenté pour chaque article au moment de la transformation.
+            </div>
+          )}
+          {sourceAlreadyAppliedStock && targetAppliesStock && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+              Stock déjà appliqué sur le document source — aucun double décrément.
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2 border-t border-border/60 px-6 py-4">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={onCancel}
+            disabled={isPending}
+          >
+            Annuler
+          </Button>
+          <Button
+            size="sm"
+            className="flex-1 bg-indigo-600 text-white hover:bg-indigo-700"
+            onClick={() => selected && onConfirm(selected as SalesDocumentType)}
+            disabled={isPending || !selected}
+          >
+            {isPending ? 'En cours…' : 'Confirmer la transformation'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Enum mapping ────────────────────────────────────────────────────────────
 
 const DOCUMENT_TYPES = {
   DEVIS: 'DEVIS',
@@ -144,6 +278,7 @@ export function SalesPage() {
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
   const [validateTarget, setValidateTarget] = useState<{ id: string; name: string } | null>(null);
+  const [transformTarget, setTransformTarget] = useState<Sale | null>(null);
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const customers = useQuery({ queryKey: ['stockini-customers'], queryFn: stockiniApi.customers });
@@ -225,7 +360,6 @@ export function SalesPage() {
 
   const [form, setForm] = useState<FormState>(() => makeInitialForm('DEVIS'));
 
-  // Derived from form — always in sync, no separate state needed
   const currentDocType = String(form.documentType || 'DEVIS') as SalesDocumentType;
   const fields = buildFields(currentDocType);
 
@@ -254,8 +388,6 @@ export function SalesPage() {
   };
 
   // ── Form update handler ──────────────────────────────────────────────────────
-  // FIX: do NOT call setState inside another setState's updater (React anti-pattern).
-  // Each branch directly calls setForm with the complete next state.
   const updateForm = (name: string, value: string | boolean) => {
     if (name === 'documentType') {
       const newDocType = value as SalesDocumentType;
@@ -275,8 +407,6 @@ export function SalesPage() {
   };
 
   // ── Helper: open modal ───────────────────────────────────────────────────────
-  // FIX: initialize form from the active filter tab so "Nouveau" under "Facture"
-  // pre-selects Facture instead of defaulting to DEVIS.
   const openModal = () => {
     const docType = (docTypeFilter as SalesDocumentType) || DOCUMENT_TYPES.DEVIS;
     setActiveDocType(docType);
@@ -295,10 +425,7 @@ export function SalesPage() {
   // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: (submitForm: FormState) => {
-      // Step 1: Extract documentType ONLY from the snapshot passed as argument — never from closure
       const docType = String(submitForm.documentType ?? '') as SalesDocumentType;
-
-      // Step 2: Strict guard — block before any API call
       const allowed: SalesDocumentType[] = ['DEVIS', 'BON_COMMANDE', 'BON_LIVRAISON', 'FACTURE', 'AVOIR'];
       if (!allowed.includes(docType)) {
         throw new Error(`Invalid documentType before API: ${JSON.stringify(docType)}`);
@@ -312,7 +439,6 @@ export function SalesPage() {
       const payload = cleanPayload(submitForm, submitFields);
       const calc = getSaleCalculation(submitForm);
 
-      // Send paymentMethod only when non-empty — empty string fails @IsEnum on backend
       const paymentMethodValue = String(payload.paymentMethod ?? '').trim() || undefined;
       const productTva = numberValue(calc.product?.tva);
       const unitPriceHt =
@@ -398,11 +524,26 @@ export function SalesPage() {
     },
   });
 
+  const transformMutation = useMutation({
+    mutationFn: ({ id, targetType }: { id: string; targetType: SalesDocumentType }) =>
+      stockiniApi.transformSale(id, targetType),
+    onSuccess: (newSale) => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
+      queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
+      toast.success(`Document transformé → ${DOC_TYPE_LABEL[newSale.documentType] ?? newSale.documentType} ${newSale.invoiceNumber}`);
+      setTransformTarget(null);
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors de la transformation');
+    },
+  });
+
   // ── Form submit ──────────────────────────────────────────────────────────────
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    // activeDocType and form.documentType are always kept in sync via updateForm/openModal
     const snapshot: FormState = { ...form, documentType: activeDocType as string };
     const docType = String(snapshot.documentType ?? '') as SalesDocumentType;
     const calc = getSaleCalculation(snapshot);
@@ -439,7 +580,6 @@ export function SalesPage() {
       }
     }
 
-    // FIX: pass the snapshot explicitly so mutationFn always uses the current form
     createMutation.mutate(snapshot);
   };
 
@@ -487,15 +627,26 @@ export function SalesPage() {
           const docType = sale.documentType;
           const canValidate = sale.status === 'DRAFT' && VALIDATABLE.has(docType);
           const canCancel = sale.status === 'COMPLETED';
+          const canTransform =
+            sale.status !== 'CANCELLED' &&
+            !sale.transformedToId &&
+            Object.prototype.hasOwnProperty.call(ALLOWED_TRANSFORMS, docType);
 
           return [
             /* Type */
-            <span
-              key="type"
-              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${DOC_TYPE_COLOR[docType] ?? 'bg-gray-100 text-gray-700'}`}
-            >
-              {DOC_TYPE_LABEL[docType] ?? docType}
-            </span>,
+            <div key="type" className="flex flex-col gap-1">
+              <span
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${DOC_TYPE_COLOR[docType] ?? 'bg-gray-100 text-gray-700'}`}
+              >
+                {DOC_TYPE_LABEL[docType] ?? docType}
+              </span>
+              {sale.sourceDocumentId && (
+                <span className="text-xs text-text-muted">Issu d'une transformation</span>
+              )}
+              {sale.transformedToId && (
+                <span className="text-xs text-emerald-600">Transformé</span>
+              )}
+            </div>,
 
             /* Référence */
             <span key="ref" className="font-mono font-semibold">
@@ -522,6 +673,16 @@ export function SalesPage() {
 
             /* Actions */
             <div key="actions" className="flex justify-end gap-1">
+              {canTransform && (
+                <button
+                  type="button"
+                  title="Transformer ce document"
+                  onClick={() => setTransformTarget(sale)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-indigo-300 bg-indigo-50 text-indigo-700 transition-colors hover:bg-indigo-100"
+                >
+                  <ArrowRightLeft size={13} />
+                </button>
+              )}
               {canValidate && (
                 <button
                   type="button"
@@ -565,6 +726,18 @@ export function SalesPage() {
           onClose={() => setModalOpen(false)}
           onSubmit={handleSubmit}
           saving={createMutation.isPending}
+        />
+      )}
+
+      {/* Transform dialog */}
+      {transformTarget && (
+        <TransformDialog
+          sale={transformTarget}
+          isPending={transformMutation.isPending}
+          onConfirm={(targetType) =>
+            transformMutation.mutate({ id: transformTarget.id, targetType })
+          }
+          onCancel={() => setTransformTarget(null)}
         />
       )}
 

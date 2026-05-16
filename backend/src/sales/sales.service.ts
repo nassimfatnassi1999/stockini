@@ -44,6 +44,13 @@ const LAST_SALE_PRICE_TYPE_LIST = [
   DocumentType.FACTURE,
 ];
 
+// Transformations autorisées : source -> cibles possibles
+const ALLOWED_TRANSFORMS: Partial<Record<DocumentType, DocumentType[]>> = {
+  [DocumentType.DEVIS]: [DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
+  [DocumentType.BON_COMMANDE]: [DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
+  [DocumentType.BON_LIVRAISON]: [DocumentType.FACTURE],
+};
+
 @Injectable()
 export class SalesService {
   private readonly logger = new Logger(SalesService.name);
@@ -322,11 +329,9 @@ export class SalesService {
         throw new BadRequestException('Ce document est déjà validé');
       }
 
+      // Seuls BON_LIVRAISON et FACTURE affectent le stock — jamais DEVIS ni BON_COMMANDE
       const needsStockImpact =
-        (STOCK_IMPACTING_TYPES.has(sale.documentType) ||
-          (sale.documentType === DocumentType.BON_COMMANDE &&
-            sale.reserveStock)) &&
-        !sale.stockImpactDone;
+        STOCK_IMPACTING_TYPES.has(sale.documentType) && !sale.stockImpactDone;
       const needsLastSalePriceImpact =
         LAST_SALE_PRICE_TYPES.has(sale.documentType) &&
         !sale.lastSalePriceImpactDone;
@@ -386,11 +391,40 @@ export class SalesService {
     const limit = Math.min(query?.limit ?? 20, 100);
     const skip = (page - 1) * limit;
 
+    // Conditions qui nécessitent un sous-bloc OR sont placées dans AND
+    // pour éviter les conflits de clés Prisma.
+    const andConditions: Prisma.SaleWhereInput[] = [];
+
+    if (query?.search) {
+      andConditions.push({
+        OR: [
+          { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
+          { customer: { name: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      });
+    }
+
+    if (query?.payableOnly) {
+      // Seuls FACTURE et BON_LIVRAISON non transformé sont des dettes réelles.
+      // Un BL dont transformedToId != null a été converti en FACTURE : la FACTURE
+      // est le document final payable, le BL ne doit plus apparaître.
+      andConditions.push({
+        paymentStatus: { not: PaymentStatus.PAID },
+        status: { not: SaleStatus.CANCELLED },
+        OR: [
+          { documentType: DocumentType.FACTURE },
+          { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
+        ],
+      });
+    }
+
     const where: Prisma.SaleWhereInput = {
       deletedAt: null,
-      ...(query?.status && { status: query.status }),
-      ...(query?.documentType && { documentType: query.documentType }),
-      ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
+      // Ces filtres sont ignorés quand payableOnly est actif pour éviter des
+      // contradictions (ex: documentType=DEVIS AND payableOnly=true → 0 résultat).
+      ...(!query?.payableOnly && query?.status && { status: query.status }),
+      ...(!query?.payableOnly && query?.documentType && { documentType: query.documentType }),
+      ...(!query?.payableOnly && query?.paymentStatus && { paymentStatus: query.paymentStatus }),
       ...(query?.customerId && { customerId: query.customerId }),
       ...((query?.dateFrom || query?.dateTo) && {
         createdAt: {
@@ -398,14 +432,7 @@ export class SalesService {
           ...(query.dateTo && { lte: new Date(query.dateTo) }),
         },
       }),
-      ...(query?.search && {
-        OR: [
-          { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
-          {
-            customer: { name: { contains: query.search, mode: 'insensitive' } },
-          },
-        ],
-      }),
+      ...(andConditions.length > 0 && { AND: andConditions }),
     };
 
     const [data, total] = await Promise.all([
@@ -594,6 +621,159 @@ export class SalesService {
         `Sale ${id} permanently deleted by ${userId ?? 'unknown'}`,
       );
       return { id };
+    });
+  }
+
+  async transformDocument(
+    sourceId: string,
+    targetType: DocumentType,
+    user?: AuthUser,
+  ) {
+    const userId = user?.id;
+
+    return this.prisma.$transaction(async (tx) => {
+      const source = await tx.sale.findFirstOrThrow({
+        where: { id: sourceId, deletedAt: null },
+        include: { items: true, customer: true },
+      });
+
+      if (source.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException(
+          'Impossible de transformer un document annulé',
+        );
+      }
+
+      const allowed = ALLOWED_TRANSFORMS[source.documentType] ?? [];
+      if (!allowed.includes(targetType)) {
+        throw new BadRequestException(
+          `Transformation ${source.documentType} → ${targetType} non autorisée. Transformations permises : ${allowed.join(', ') || 'aucune'}`,
+        );
+      }
+
+      if (source.transformedToId) {
+        throw new BadRequestException(
+          'Ce document a déjà été transformé. Impossible de le transformer une deuxième fois.',
+        );
+      }
+
+      if (!source.items.length) {
+        throw new BadRequestException(
+          'Le document source ne contient aucun article',
+        );
+      }
+
+      const targetAppliesStock = STOCK_IMPACTING_TYPES.has(targetType);
+      const sourceAppliedStock = source.stockImpactDone;
+
+      // Vérifier la disponibilité stock uniquement si le document cible affecte le
+      // stock ET que le document source n'a pas déjà consommé ce stock.
+      if (targetAppliesStock && !sourceAppliedStock) {
+        for (const item of source.items) {
+          const product = await tx.product.findUniqueOrThrow({
+            where: { id: item.productId },
+          });
+          if (product.quantity < item.quantity) {
+            throw new BadRequestException(
+              `Stock insuffisant pour "${product.name}" — disponible : ${product.quantity}, demandé : ${item.quantity}`,
+            );
+          }
+        }
+      }
+
+      const prefix = this.prefixForDocument(targetType);
+      const invoiceNumber = await this.references.generateSimple(
+        prefix,
+        'sale',
+        tx,
+      );
+
+      // Le document cible hérite du stock si la source l'avait déjà appliqué
+      // (cas BL → FAC : le stock ne doit pas être décrémenté une 2e fois).
+      const newStockImpactDone =
+        targetAppliesStock && sourceAppliedStock ? true : false;
+
+      const newSale = await tx.sale.create({
+        data: {
+          invoiceNumber,
+          customerId: source.customerId,
+          subtotal: source.subtotal,
+          discount: source.discount,
+          tax: source.tax,
+          total: source.total,
+          paidAmount: 0,
+          remainingAmount: source.total,
+          paymentStatus: PaymentStatus.UNPAID,
+          status: targetAppliesStock ? SaleStatus.COMPLETED : SaleStatus.DRAFT,
+          documentType: targetType,
+          reserveStock: false,
+          stockImpactDone: newStockImpactDone,
+          lastSalePriceImpactDone: false,
+          sellerId: userId,
+          sourceDocumentId: source.id,
+          items: {
+            create: source.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discountPercent: item.discountPercent,
+              finalUnitPrice: item.finalUnitPrice,
+              total: item.total,
+            })),
+          },
+        },
+        include: {
+          items: { include: { product: true } },
+          customer: true,
+          seller: true,
+          payments: true,
+        },
+      });
+
+      // Appliquer le stock une seule fois si nécessaire
+      if (targetAppliesStock && !sourceAppliedStock) {
+        for (const item of source.items) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.SALE,
+            quantity: item.quantity,
+            reason: `TRANSFORMATION:${source.invoiceNumber} -> ${invoiceNumber}`,
+            userId,
+          });
+        }
+        await tx.sale.update({
+          where: { id: newSale.id },
+          data: { stockImpactDone: true },
+        });
+      }
+
+      // Marquer le document source comme transformé
+      await tx.sale.update({
+        where: { id: source.id },
+        data: { transformedToId: newSale.id },
+      });
+
+      // Mettre à jour le dernier prix de vente si applicable
+      if (LAST_SALE_PRICE_TYPES.has(targetType)) {
+        await tx.sale.update({
+          where: { id: newSale.id },
+          data: { lastSalePriceImpactDone: true },
+        });
+        await this.recalculateLastSalePricesForProducts(
+          tx,
+          source.items.map((i) => i.productId),
+          userId,
+        );
+      }
+
+      return tx.sale.findUniqueOrThrow({
+        where: { id: newSale.id },
+        include: {
+          items: { include: { product: true } },
+          customer: true,
+          seller: true,
+          payments: true,
+        },
+      });
     });
   }
 
