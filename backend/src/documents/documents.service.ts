@@ -529,23 +529,47 @@ export class DocumentsService {
     });
   }
 
-  // ─── Soft delete ─────────────────────────────────────────────────────────────
+  // ─── Soft delete (move to trash) ─────────────────────────────────────────────
 
-  async remove(id: string) {
+  async remove(id: string, user?: AuthUser) {
     const doc = await this.prisma.generatedDocument.findFirst({
       where: { id, deletedAt: null },
     });
     if (!doc) throw new NotFoundException(`Document ${id} introuvable`);
+
+    const trashKey = this.toTrashKey(doc.minioObjectKey);
+    try {
+      await this.minio.moveObject(doc.minioBucket, doc.minioObjectKey, trashKey);
+    } catch (err) {
+      this.logger.warn(
+        `MinIO move to trash failed for document ${id}: ${(err as Error).message}. Proceeding with soft-delete.`,
+      );
+    }
 
     await this.prisma.generatedDocument.update({
       where: { id },
       data: {
         status: DocumentStatus.DELETED,
         deletedAt: new Date(),
+        deletedBy: user?.id ?? null,
       },
     });
 
     return { id, deleted: true };
+  }
+
+  toTrashKey(objectKey: string): string {
+    if (objectKey.startsWith('documents/')) {
+      return 'documents-trash/' + objectKey.slice('documents/'.length);
+    }
+    return 'documents-trash/' + objectKey;
+  }
+
+  fromTrashKey(trashKey: string): string {
+    if (trashKey.startsWith('documents-trash/')) {
+      return 'documents/' + trashKey.slice('documents-trash/'.length);
+    }
+    return trashKey;
   }
 
   // ─── Regenerate ──────────────────────────────────────────────────────────────

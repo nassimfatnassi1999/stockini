@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2, X } from 'lucide-react';
-import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
@@ -113,12 +113,13 @@ export default function ClientsPage() {
       queryClient.setQueryData<Customer[]>(['customers'], (prev) =>
         prev ? prev.filter((c) => c.id !== id) : prev,
       );
-      toast.success('Client supprimé avec succès');
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      toast.success('Client déplacé dans la corbeille');
       setTrashTarget(null);
     },
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors de la suppression');
+      toast.error(msg ?? 'Erreur lors du déplacement dans la corbeille');
       setTrashTarget(null);
     },
   });
@@ -279,7 +280,7 @@ export default function ClientsPage() {
       </div>
 
       {trashTarget && (
-        <PermanentDeleteDialog
+        <MoveToTrashDialog
           label={trashTarget.name}
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(trashTarget.id)}

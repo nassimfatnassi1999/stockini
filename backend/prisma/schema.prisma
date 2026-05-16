@@ -494,6 +494,7 @@ model GeneratedDocument {
   generatedAt    DateTime           @default(now())
   status         DocumentStatus     @default(GENERATED)
   deletedAt      DateTime?
+  deletedBy      String?
   emailStatus    EmailStatus        @default(PENDING)
   sentAt         DateTime?
   sentTo         String?

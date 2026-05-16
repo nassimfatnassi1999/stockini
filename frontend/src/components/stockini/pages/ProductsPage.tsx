@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Plus, X } from 'lucide-react';
-import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
@@ -382,12 +382,13 @@ export function ProductsPage() {
     mutationFn: stockiniApi.deleteProduct,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
-      toast.success('Produit supprimé avec succès');
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      toast.success('Produit déplacé dans la corbeille');
       setTrashTarget(null);
     },
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors de la suppression');
+      toast.error(msg ?? 'Erreur lors du déplacement dans la corbeille');
       setTrashTarget(null);
     },
   });
@@ -500,7 +501,7 @@ export function ProductsPage() {
       )}
 
       {trashTarget && (
-        <PermanentDeleteDialog
+        <MoveToTrashDialog
           label={trashTarget.name}
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(trashTarget.id)}

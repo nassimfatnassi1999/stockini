@@ -7,6 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -31,7 +32,11 @@ export class TrashController {
 
   @RequirePermissions('trash.permanent_delete')
   @Delete(':entity/:id/permanent')
-  permanentDelete(@Param('entity') entity: string, @Param('id') id: string) {
-    return this.trashService.permanentDelete(entity, id);
+  permanentDelete(
+    @Param('entity') entity: string,
+    @Param('id') id: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.trashService.permanentDelete(entity, id, user?.id);
   }
 }

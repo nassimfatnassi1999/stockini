@@ -22,6 +22,7 @@ import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import type {
   DocumentEmailLog,
   DocumentStatus,
@@ -273,41 +274,6 @@ function EmailModal({ doc, onClose, onSent }: EmailModalProps) {
   );
 }
 
-interface DeleteConfirmProps {
-  doc: GeneratedDocument;
-  onClose: () => void;
-  onConfirm: () => void;
-  isPending: boolean;
-}
-
-function DeleteConfirm({ doc, onClose, onConfirm, isPending }: DeleteConfirmProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-sm rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="p-5">
-          <h2 className="text-sm font-semibold text-text-primary">Supprimer le document</h2>
-          <p className="mt-2 text-sm text-text-secondary">
-            Confirmer la suppression de <span className="font-mono font-semibold">{doc.documentNumber}</span> ?
-            Le fichier PDF restera dans le stockage MinIO.
-          </p>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={isPending}
-            onClick={onConfirm}
-          >
-            {isPending ? 'Suppression…' : 'Supprimer'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 interface EmailLogsModalProps {
   doc: GeneratedDocument;
@@ -430,10 +396,11 @@ export default function DocumentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
-      toast.success('Document supprimé');
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      toast.success('Document déplacé dans la corbeille');
       setDeleteDoc(null);
     },
-    onError: () => { toast.error('Erreur lors de la suppression'); setDeleteDoc(null); },
+    onError: () => { toast.error('Erreur lors du déplacement dans la corbeille'); setDeleteDoc(null); },
   });
 
   const handleView = useCallback(async (doc: GeneratedDocument) => {
@@ -816,11 +783,11 @@ export default function DocumentsPage() {
       )}
 
       {deleteDoc && (
-        <DeleteConfirm
-          doc={deleteDoc}
-          onClose={() => setDeleteDoc(null)}
-          onConfirm={() => deleteMutation.mutate(deleteDoc.id)}
+        <MoveToTrashDialog
+          label={deleteDoc.documentNumber}
           isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(deleteDoc.id)}
+          onCancel={() => setDeleteDoc(null)}
         />
       )}
 

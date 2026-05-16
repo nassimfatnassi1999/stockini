@@ -267,49 +267,11 @@ export class PurchasesService {
 
   async remove(id: string, userId?: string) {
     this.logger.log(`DELETE /purchases/${id} called by ${userId ?? 'unknown'}`);
-    await this.prisma.$transaction(async (tx) => {
-      const purchase = await tx.purchase.findUniqueOrThrow({
-        where: { id },
-        include: {
-          items: true,
-          payments: { where: { deletedAt: null } },
-        },
-      });
-
-      // Reverse stock for items already received
-      for (const item of purchase.items) {
-        if (item.receivedQuantity > 0) {
-          await this.stockService.applyMovement(tx, {
-            productId: item.productId,
-            type: StockMovementType.SUPPLIER_RETURN,
-            quantity: item.receivedQuantity,
-            reason: `Suppression achat ${purchase.orderNumber}`,
-            userId,
-          });
-        }
-      }
-
-      // Reverse caisse per active payment
-      if (purchase.status !== PurchaseStatus.CANCELLED) {
-        for (const payment of purchase.payments) {
-          if (payment.cashImpactDone) {
-            await this.caisseService.recordMovement(tx, {
-              type: CaisseMovementType.ANNULATION_ACHAT,
-              montant: Number(payment.amount),
-              motif: `Suppression achat ${purchase.orderNumber} — paiement ${payment.reference}`,
-              referenceDoc: purchase.orderNumber,
-              userId,
-            });
-          }
-        }
-      }
-
-      await tx.payment.deleteMany({ where: { purchaseId: id } });
-      await tx.purchase.delete({ where: { id } });
+    await this.prisma.purchase.update({
+      where: { id },
+      data: { deletedAt: new Date(), deletedBy: userId ?? null },
     });
-    this.logger.log(
-      `Purchase ${id} permanently deleted by ${userId ?? 'unknown'}`,
-    );
+    this.logger.log(`Purchase ${id} moved to trash by ${userId ?? 'unknown'}`);
     return { id };
   }
 

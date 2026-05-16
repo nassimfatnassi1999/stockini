@@ -65,6 +65,33 @@ export class MinioService implements OnModuleInit {
     await this.client.removeObject(bucket, objectKey);
   }
 
+  async objectExists(bucket: string, objectKey: string): Promise<boolean> {
+    try {
+      await this.client.statObject(bucket, objectKey);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async copyObject(
+    bucket: string,
+    sourceKey: string,
+    destKey: string,
+  ): Promise<void> {
+    const conditions = new Minio.CopyConditions();
+    await this.client.copyObject(bucket, destKey, `/${bucket}/${sourceKey}`, conditions);
+  }
+
+  async moveObject(
+    bucket: string,
+    sourceKey: string,
+    destKey: string,
+  ): Promise<void> {
+    await this.copyObject(bucket, sourceKey, destKey);
+    await this.client.removeObject(bucket, sourceKey);
+  }
+
   async presignedGetUrl(
     bucket: string,
     objectKey: string,

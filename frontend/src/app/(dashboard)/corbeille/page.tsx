@@ -8,7 +8,7 @@ import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
-import { RotateCcw, Trash2 } from 'lucide-react';
+import { FileText, RotateCcw, Trash2 } from 'lucide-react';
 import type { TrashEntityType, TrashItem } from '@/lib/stockini/types';
 
 type TabValue = 'all' | TrashEntityType;
@@ -21,6 +21,7 @@ const TABS: { value: TabValue; label: string }[] = [
   { value: 'sale', label: 'Ventes' },
   { value: 'purchase', label: 'Achats' },
   { value: 'payment', label: 'Paiements' },
+  { value: 'document', label: 'Documents' },
 ];
 
 const ENTITY_LABELS: Record<TrashEntityType, string> = {
@@ -30,7 +31,23 @@ const ENTITY_LABELS: Record<TrashEntityType, string> = {
   sale: 'Vente',
   purchase: 'Achat',
   payment: 'Paiement',
+  document: 'Document',
 };
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  DEVIS: 'Devis',
+  BON_COMMANDE: 'Bon de commande',
+  BON_LIVRAISON: 'Bon de livraison',
+  FACTURE: 'Facture',
+  AVOIR: 'Avoir',
+};
+
+function fmtSize(bytes?: number | null): string {
+  if (!bytes) return '—';
+  if (bytes < 1024) return `${bytes} o`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} Mo`;
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('fr-FR', {
@@ -70,6 +87,8 @@ export default function CorbeillePage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
       toast.success('Élément restauré avec succès.');
     },
     onError: () => {
@@ -148,6 +167,16 @@ export default function CorbeillePage() {
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
                     Nom / Désignation
                   </th>
+                  {(activeTab === 'all' || activeTab === 'document') && (
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
+                      Type doc
+                    </th>
+                  )}
+                  {(activeTab === 'all' || activeTab === 'document') && (
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
+                      Taille
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
                     Date suppression
                   </th>
@@ -166,7 +195,8 @@ export default function CorbeillePage() {
                 {items.map((item) => (
                   <tr key={`${item.entity}-${item.id}`} className="h-12 transition-colors hover:bg-muted/40">
                     <td className="px-4 py-3">
-                      <span className="app-status-badge border-slate-200 bg-slate-50 text-slate-700">
+                      <span className="app-status-badge border-slate-200 bg-slate-50 text-slate-700 inline-flex items-center gap-1">
+                        {item.entity === 'document' && <FileText size={11} />}
                         {ENTITY_LABELS[item.entity]}
                       </span>
                     </td>
@@ -176,6 +206,16 @@ export default function CorbeillePage() {
                     <td className="px-4 py-3 font-medium text-text-primary max-w-[200px] truncate">
                       {item.name}
                     </td>
+                    {(activeTab === 'all' || activeTab === 'document') && (
+                      <td className="px-4 py-3 text-xs text-text-muted">
+                        {item.documentType ? (DOC_TYPE_LABELS[item.documentType] ?? item.documentType) : '—'}
+                      </td>
+                    )}
+                    {(activeTab === 'all' || activeTab === 'document') && (
+                      <td className="px-4 py-3 text-xs text-text-muted whitespace-nowrap">
+                        {item.entity === 'document' ? fmtSize(item.fileSize) : '—'}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-text-secondary whitespace-nowrap">
                       {formatDate(item.deletedAt)}
                     </td>

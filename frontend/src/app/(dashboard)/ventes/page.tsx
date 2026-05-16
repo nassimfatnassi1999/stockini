@@ -26,7 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ProductRegisterGrid } from '@/components/stockini/register/ProductRegisterGrid';
 import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
-import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { EmailToast } from '@/components/stockini/EmailToast';
 import { GeneratedDocumentsHistory } from '@/components/stockini/GeneratedDocumentsHistory';
 import { AvoirPage } from '@/components/stockini/pages/AvoirPage';
@@ -526,15 +526,15 @@ export default function VentesPage() {
       queryClient.setQueryData<PaginatedResponse<Sale>>(['sales'], (prev) =>
         prev ? { ...prev, data: prev.data.filter((s) => s.id !== id) } : prev,
       );
-      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
-      toast.success('Vente supprimée avec succès');
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      toast.success('Vente déplacée dans la corbeille');
       setDeleteTarget(null);
     },
     onError: (error: unknown) => {
       const msg = (
         error as { response?: { data?: { message?: string | string[] } } }
       )?.response?.data?.message;
-      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors de la suppression');
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors du déplacement dans la corbeille');
       toast.error(text);
       setDeleteTarget(null);
     },
@@ -1080,7 +1080,7 @@ export default function VentesPage() {
                                 <Button
                                   variant="actionDelete"
                                   size="action"
-                                  title="Supprimer définitivement"
+                                  title="Mettre à la corbeille"
                                   onClick={() => setDeleteTarget(sale)}
                                 >
                                   <Trash2 size={14} />
@@ -1203,7 +1203,7 @@ export default function VentesPage() {
       )}
 
       {deleteTarget && (
-        <PermanentDeleteDialog
+        <MoveToTrashDialog
           label={deleteTarget.invoiceNumber}
           isPending={cancelMutation.isPending}
           onConfirm={() => cancelMutation.mutate(deleteTarget.id)}

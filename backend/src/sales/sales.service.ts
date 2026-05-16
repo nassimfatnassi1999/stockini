@@ -557,7 +557,7 @@ export class SalesService {
     });
   }
 
-  remove(id: string, user?: AuthUser) {
+  async remove(id: string, user?: AuthUser) {
     if (!this.hasPermission(user, 'sales.delete')) {
       throw new ForbiddenException(
         "Vous n'avez pas la permission de supprimer une vente",
@@ -565,63 +565,12 @@ export class SalesService {
     }
     const userId = user?.id;
     this.logger.log(`DELETE /sales/${id} called by ${userId ?? 'unknown'}`);
-    return this.prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.findUniqueOrThrow({
-        where: { id },
-        include: {
-          items: true,
-          payments: { where: { deletedAt: null } },
-        },
-      });
-
-      // Reverse stock only if not already cancelled and stock was impacted
-      if (sale.status !== SaleStatus.CANCELLED && sale.stockImpactDone) {
-        for (const item of sale.items) {
-          await this.stockService.applyMovement(tx, {
-            productId: item.productId,
-            type: StockMovementType.CUSTOMER_RETURN,
-            quantity: item.quantity,
-            reason: `Suppression ${sale.documentType}:${sale.invoiceNumber}`,
-            userId,
-          });
-        }
-      }
-
-      // Reverse caisse per active payment
-      if (sale.status !== SaleStatus.CANCELLED) {
-        for (const payment of sale.payments) {
-          if (payment.cashImpactDone) {
-            await this.caisseService.recordMovement(tx, {
-              type: CaisseMovementType.ANNULATION_VENTE,
-              montant: -Number(payment.amount),
-              motif: `Suppression ${sale.documentType} ${sale.invoiceNumber} — paiement ${payment.reference}`,
-              referenceDoc: sale.invoiceNumber,
-              userId,
-            });
-          }
-        }
-      }
-
-      const productIdsToRecalculate = sale.items.map((item) => item.productId);
-      const shouldRecalculateLastSalePrice = LAST_SALE_PRICE_TYPES.has(
-        sale.documentType,
-      );
-
-      await tx.payment.deleteMany({ where: { saleId: id } });
-      await tx.sale.delete({ where: { id } });
-
-      if (shouldRecalculateLastSalePrice) {
-        await this.recalculateLastSalePricesForProducts(
-          tx,
-          productIdsToRecalculate,
-          userId,
-        );
-      }
-      this.logger.log(
-        `Sale ${id} permanently deleted by ${userId ?? 'unknown'}`,
-      );
-      return { id };
+    await this.prisma.sale.update({
+      where: { id },
+      data: { deletedAt: new Date(), deletedBy: userId ?? null },
     });
+    this.logger.log(`Sale ${id} moved to trash by ${userId ?? 'unknown'}`);
+    return { id };
   }
 
   async transformDocument(

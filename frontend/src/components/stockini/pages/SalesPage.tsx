@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRightLeft, Ban, Check, Plus, Trash2 } from 'lucide-react';
-import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, money, statusLabel } from '@/lib/stockini/format';
@@ -513,13 +513,13 @@ export function SalesPage() {
       queryClient.setQueryData<PaginatedResponse<Sale>>(['stockini-sales'], (prev) =>
         prev ? { ...prev, data: prev.data.filter((s) => s.id !== id) } : prev,
       );
-      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
-      toast.success('Document supprimé');
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      toast.success('Document déplacé dans la corbeille');
       setTrashTarget(null);
     },
     onError: (err: unknown) => {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors de la suppression');
+      toast.error(msg ?? 'Erreur lors du déplacement dans la corbeille');
       setTrashTarget(null);
     },
   });
@@ -705,7 +705,7 @@ export function SalesPage() {
               )}
               <button
                 type="button"
-                title="Supprimer"
+                title="Mettre à la corbeille"
                 onClick={() => setTrashTarget({ id: sale.id, name: sale.invoiceNumber })}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:bg-red-100"
               >
@@ -790,9 +790,9 @@ export function SalesPage() {
         />
       )}
 
-      {/* Delete confirmation */}
+      {/* Move to trash confirmation */}
       {trashTarget && (
-        <PermanentDeleteDialog
+        <MoveToTrashDialog
           label={trashTarget.name}
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(trashTarget.id)}

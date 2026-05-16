@@ -85,8 +85,8 @@ export class DocumentsController {
 
   @Delete(':id')
   @RequirePermissions('documents.delete')
-  remove(@Param('id') id: string) {
-    return this.svc.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.svc.remove(id, user);
   }
 
   @Get(':id/presigned-url')

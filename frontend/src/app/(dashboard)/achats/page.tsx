@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PurchaseRegisterGrid } from '@/components/stockini/register/PurchaseRegisterGrid';
-import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import {
@@ -389,15 +389,15 @@ export default function AchatsPage() {
       queryClient.setQueryData<PaginatedResponse<Purchase>>(['stockini-purchases'], (prev) =>
         prev ? { ...prev, data: prev.data.filter((p) => p.id !== id) } : prev,
       );
-      queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
-      toast.success('Achat supprimé');
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      toast.success('Achat déplacé dans la corbeille');
       setDeleteTarget(null);
     },
     onError: (error: unknown) => {
       const msg = (
         error as { response?: { data?: { message?: string | string[] } } }
       )?.response?.data?.message;
-      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors de la suppression');
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors du déplacement dans la corbeille');
       toast.error(text);
       setDeleteTarget(null);
     },
@@ -770,7 +770,7 @@ export default function AchatsPage() {
       )}
 
       {deleteTarget && (
-        <PermanentDeleteDialog
+        <MoveToTrashDialog
           label={deleteTarget.orderNumber}
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(deleteTarget.id)}

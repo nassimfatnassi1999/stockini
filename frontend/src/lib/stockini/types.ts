@@ -268,7 +268,7 @@ export interface EmailPreview {
   attachments: Array<{ documentId: Id; fileName: string }>;
 }
 
-export type TrashEntityType = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment';
+export type TrashEntityType = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment' | 'document';
 
 export interface TrashItem {
   id: Id;
@@ -281,6 +281,10 @@ export interface TrashItem {
   deletedBy?: string | null;
   status?: string | null;
   total?: number | null;
+  fileSize?: number | null;
+  documentType?: string | null;
+  minioObjectKey?: string | null;
+  minioBucket?: string | null;
 }
 
 export interface Alert {
