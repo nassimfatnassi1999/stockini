@@ -132,6 +132,8 @@ export const stockiniApi = {
     api.patch(`/trash/${entity}/${id}/restore`).then((r) => r.data),
   permanentDeleteTrashItem: (entity: TrashEntityType, id: string) =>
     api.delete(`/trash/${entity}/${id}/permanent`).then((r) => r.data),
+  emptyTrash: () =>
+    api.delete<{ deletedCount: number; failedCount: number; errors: string[] }>('/trash/empty').then((r) => r.data),
   auditLogs: () => api.get<AuditLog[]>('/audit-logs').then((r) => r.data),
   recalculateLastSalePrices: () =>
     api

@@ -39,4 +39,10 @@ export class TrashController {
   ) {
     return this.trashService.permanentDelete(entity, id, user?.id);
   }
+
+  @RequirePermissions('trash.empty')
+  @Delete('empty')
+  emptyTrash(@CurrentUser() user?: AuthUser) {
+    return this.trashService.emptyTrash(user?.id);
+  }
 }

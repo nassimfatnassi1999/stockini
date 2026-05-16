@@ -489,6 +489,29 @@ export class TrashService {
     this.logger.log(`Permanently deleted ${normalizedEntity}:${id}`);
   }
 
+  async emptyTrash(userId?: string): Promise<{ deletedCount: number; failedCount: number; errors: string[] }> {
+    this.logger.log('DELETE /trash/empty called');
+    const items = await this.findAll();
+    let deletedCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
+
+    for (const item of items) {
+      try {
+        await this.permanentDelete(item.entity, item.id, userId);
+        deletedCount++;
+      } catch (err) {
+        failedCount++;
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${item.entity}:${item.id} — ${msg}`);
+        this.logger.warn(`emptyTrash: failed to delete ${item.entity}:${item.id} — ${msg}`);
+      }
+    }
+
+    this.logger.log(`emptyTrash done: deleted=${deletedCount} failed=${failedCount}`);
+    return { deletedCount, failedCount, errors };
+  }
+
   private computePaymentStatus(
     total: number,
     paid: number,

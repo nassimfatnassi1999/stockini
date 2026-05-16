@@ -134,6 +134,7 @@ export const PERMISSIONS = {
   TRASH_VIEW: 'trash.view',
   TRASH_RESTORE: 'trash.restore',
   TRASH_PERMANENT_DELETE: 'trash.permanent_delete',
+  TRASH_EMPTY: 'trash.empty',
 
   // ── Documentation ─────────────────────────────────────────────────────────────
   DOCUMENTATION_VIEW: 'documentation.view',
@@ -288,6 +289,7 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'trash.view', module: 'trash', action: 'view', label: 'Consulter', description: 'Voir la corbeille' },
   { code: 'trash.restore', module: 'trash', action: 'restore', label: 'Restaurer', description: 'Restaurer un élément depuis la corbeille' },
   { code: 'trash.permanent_delete', module: 'trash', action: 'permanent_delete', label: 'Suppr. définitive', description: 'Supprimer définitivement un élément' },
+  { code: 'trash.empty', module: 'trash', action: 'empty', label: 'Vider la corbeille', description: 'Supprimer définitivement tous les éléments de la corbeille' },
 
   // ── Documentation ─────────────────────────────────────────────────────────────
   { code: 'documentation.view', module: 'documentation', action: 'view', label: 'Consulter', description: 'Consulter la documentation Stockini' },

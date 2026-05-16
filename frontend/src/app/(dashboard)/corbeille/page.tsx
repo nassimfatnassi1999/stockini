@@ -8,6 +8,7 @@ import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { EmptyTrashDialog } from '@/components/stockini/EmptyTrashDialog';
 import { FileText, RotateCcw, Trash2 } from 'lucide-react';
 import type { TrashEntityType, TrashItem } from '@/lib/stockini/types';
 
@@ -64,9 +65,11 @@ export default function CorbeillePage() {
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [permanentTarget, setPermanentTarget] = useState<TrashItem | null>(null);
+  const [showEmptyDialog, setShowEmptyDialog] = useState(false);
 
   const canRestore = can('trash.restore');
   const canPermanentDelete = can('trash.permanent_delete');
+  const canEmpty = can('trash.empty');
 
   const entity = activeTab === 'all' ? undefined : activeTab;
 
@@ -109,17 +112,55 @@ export default function CorbeillePage() {
     },
   });
 
+  const emptyTrashMutation = useMutation({
+    mutationFn: () => stockiniApi.emptyTrash(),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
+      queryClient.invalidateQueries({ queryKey: ['cash'] });
+      setShowEmptyDialog(false);
+      if (result.failedCount > 0) {
+        toast.warning(`Corbeille partiellement vidée (${result.failedCount} élément(s) non supprimé(s))`);
+      } else {
+        toast.success('Corbeille vidée définitivement');
+      }
+    },
+    onError: () => {
+      toast.error('Échec du vidage de la corbeille');
+    },
+  });
+
   const items = trashQuery.data ?? [];
 
   return (
     <PermissionGuard permission="trash.view">
     <div className="space-y-4">
       {/* Header */}
-      <div>
-        <h1 className="app-page-title">Corbeille</h1>
-        <p className="app-page-subtitle">
-          {items.length} élément{items.length !== 1 ? 's' : ''} supprimé{items.length !== 1 ? 's' : ''}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="app-page-title">Corbeille</h1>
+          <p className="app-page-subtitle">
+            {items.length} élément{items.length !== 1 ? 's' : ''} supprimé{items.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        {canEmpty && items.length > 0 && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="shrink-0 gap-1.5"
+            onClick={() => setShowEmptyDialog(true)}
+          >
+            <Trash2 size={15} />
+            Vider la corbeille
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -272,6 +313,14 @@ export default function CorbeillePage() {
             permanentDeleteMutation.mutate({ entity: permanentTarget.entity, id: permanentTarget.id })
           }
           onCancel={() => setPermanentTarget(null)}
+        />
+      )}
+
+      {showEmptyDialog && (
+        <EmptyTrashDialog
+          isPending={emptyTrashMutation.isPending}
+          onConfirm={() => emptyTrashMutation.mutate()}
+          onCancel={() => setShowEmptyDialog(false)}
         />
       )}
     </div>
