@@ -65,6 +65,7 @@ const MODULE_ORDER = [
   'permissions',
   'trash',
   'documentation',
+  'database',
 ];
 
 const MODULE_LABELS: Record<string, string> = {
@@ -87,6 +88,7 @@ const MODULE_LABELS: Record<string, string> = {
   permissions:   'Permissions',
   trash:         'Corbeille',
   documentation: 'Documentation',
+  database:      'Base de données',
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -143,6 +145,9 @@ const ACTION_LABELS: Record<string, string> = {
   permanent_delete:       'Supprimer définitivement',
   // audit
   recalculate_last_sale_prices: 'Recalculer prix',
+  // database
+  backup:      'Sauvegarder',
+  maintenance: 'Maintenance',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

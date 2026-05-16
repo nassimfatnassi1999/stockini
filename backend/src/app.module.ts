@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AlertsModule } from './alerts/alerts.module';
 import { AdminModule } from './admin/admin.module';
+import { DatabaseModule } from './database/database.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
@@ -50,6 +51,7 @@ import { UsersModule } from './users/users.module';
     AvoirsModule,
     CaisseModule,
     AdminModule,
+    DatabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

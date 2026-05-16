@@ -99,4 +99,18 @@ export class MinioService implements OnModuleInit {
   ): Promise<string> {
     return this.client.presignedGetObject(bucket, objectKey, expirySeconds);
   }
+
+  async listAllObjects(bucket: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const keys: string[] = [];
+      const stream = this.client.listObjects(bucket, '', true);
+      stream.on('data', (obj) => { if (obj.name) keys.push(obj.name); });
+      stream.on('end', () => resolve(keys));
+      stream.on('error', reject);
+    });
+  }
+
+  async bucketExists(bucket: string): Promise<boolean> {
+    return this.client.bucketExists(bucket);
+  }
 }

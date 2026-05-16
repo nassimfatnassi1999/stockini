@@ -86,7 +86,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Permissions',  href: '/admin/permissions', icon: Lock,     permission: 'permissions.view' },
       { label: 'Paramètres',   href: '/settings',          icon: Settings, permission: 'settings.view' },
       { label: 'Corbeille',    href: '/corbeille',         icon: Trash2,   permission: 'trash.view' },
-      { label: 'Base données', href: '/admin/database',    icon: Database, permission: 'settings.update' },
+      { label: 'Base données', href: '/admin/database',    icon: Database, permission: 'database.view' },
     ],
   },
   {
