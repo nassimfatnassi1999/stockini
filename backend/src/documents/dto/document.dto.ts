@@ -2,10 +2,13 @@ import {
   IsArray,
   IsEmail,
   IsEnum,
+  IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 import { DocumentType, DocumentStatus } from '@prisma/client';
@@ -124,18 +127,27 @@ export class ListDocumentsQuery {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
   page?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
+  @Max(100)
   limit?: number;
 
   /** legacy filter kept for backward compat (used from ventes page) */
   @IsOptional()
   @IsString()
   invoiceId?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }

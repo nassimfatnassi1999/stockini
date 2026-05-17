@@ -267,10 +267,10 @@ export function ProductPickerModal({
                       </span>
                     </div>
                     <div className="mt-1">
-                      HT : <span className="font-semibold text-slate-700">{fmt(product.purchasePrice)} DT</span>
+                      Achat HT : <span className="font-semibold text-slate-700">{fmt(product.purchasePrice)} DT</span>
                     </div>
                     <div className="mt-1">
-                      TTC : <span className="font-semibold text-slate-700">{fmt(product.salePrice)} DT</span>
+                      Vente HT : <span className="font-semibold text-slate-700">{fmt(product.salePrice)} DT</span>
                     </div>
                   </div>
                 </button>

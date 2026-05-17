@@ -26,6 +26,8 @@ import {
 } from './dto/sale.dto';
 
 const MIN_MARGIN_PERCENT = 20;
+// Mirrors the frontend DEFAULT_MARGIN_PERCENT used in recalculateSaleLine
+const DEFAULT_MARGIN_PERCENT = 40;
 
 const STOCK_IMPACTING_TYPES = new Set<DocumentType>([
   DocumentType.BON_LIVRAISON,
@@ -114,6 +116,7 @@ export class SalesService {
     }
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
+    const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
 
     return this.prisma.$transaction(async (tx) => {
       const prefix = this.prefixForDocument(documentType);
@@ -153,6 +156,24 @@ export class SalesService {
         const tvaRate = Number(product.tva ?? 0);
         const unitPrice = item.unitPrice ?? this.salePriceHt(product);
         const discountPercent = item.discountPercent ?? 0;
+
+        // Guard: si unitPrice est explicitement fourni et diffère du prix calculé par défaut,
+        // la permission sales.line.edit_unit_price_ht est requise.
+        if (item.unitPrice !== undefined && item.unitPrice !== null) {
+          const itemPurchasePriceHt = Number(product.purchasePrice);
+          let expectedPuHt: number;
+          if (itemPurchasePriceHt > 0) {
+            const margeFinalePourcent = Math.max(DEFAULT_MARGIN_PERCENT - discountPercent, 0);
+            expectedPuHt = this.round3(itemPurchasePriceHt * (1 + margeFinalePourcent / 100));
+          } else {
+            expectedPuHt = this.salePriceHt(product);
+          }
+          if (Math.abs(item.unitPrice - expectedPuHt) > 0.005 && !allowEditUnitPriceHt) {
+            throw new ForbiddenException(
+              `Vous n'avez pas la permission de modifier le prix unitaire HT pour "${product.name}".`,
+            );
+          }
+        }
         const grossLineHt = unitPrice * item.quantity;
         const lineDiscount = grossLineHt * (discountPercent / 100);
         const netLineHt = grossLineHt - lineDiscount;
@@ -407,8 +428,8 @@ export class SalesService {
   }
 
   async findAll(query?: SalePaginationDto) {
-    const page = query?.page ?? 1;
-    const limit = Math.min(query?.limit ?? 20, 100);
+    const page = Math.max(1, query?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
     const skip = (page - 1) * limit;
 
     // Conditions qui nécessitent un sous-bloc OR sont placées dans AND
@@ -456,11 +477,30 @@ export class SalesService {
       ...(andConditions.length > 0 && { AND: andConditions }),
     };
 
+    const sortOrder = query?.sortOrder ?? 'desc';
+    const allowedSortFields: Record<string, Prisma.SaleOrderByWithRelationInput> = {
+      createdAt: { createdAt: sortOrder },
+      date: { createdAt: sortOrder },
+      totalTtc: { total: sortOrder },
+      total: { total: sortOrder },
+      paidAmount: { paidAmount: sortOrder },
+      remainingAmount: { remainingAmount: sortOrder },
+      clientName: { customer: { name: sortOrder } },
+      customer: { customer: { name: sortOrder } },
+      reference: { invoiceNumber: sortOrder },
+      invoiceNumber: { invoiceNumber: sortOrder },
+      status: { status: sortOrder },
+      paymentStatus: { paymentStatus: sortOrder },
+      documentType: { documentType: sortOrder },
+    };
+    const orderBy: Prisma.SaleOrderByWithRelationInput =
+      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+
     const [data, total] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         include: { customer: true, items: true, payments: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),
@@ -999,9 +1039,8 @@ export class SalesService {
     tva?: Prisma.Decimal | number | string | null;
   }) {
     const salePrice = Number(product.salePrice);
-    const tva = Number(product.tva ?? 0);
     if (!Number.isFinite(salePrice) || salePrice <= 0) return 0;
-    return this.round3(salePrice / (1 + tva / 100));
+    return this.round3(salePrice);
   }
 
   private round3(value: number) {

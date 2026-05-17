@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import { cleanPaginationParams } from '@/lib/pagination';
 import type {
   Alert,
   AuditLog,
@@ -17,6 +18,8 @@ import type {
   PaginatedResponse,
   PurchasesQueryParams,
   SalesQueryParams,
+  StockMovementsQueryParams,
+  PaymentsQueryParams,
   Payment,
   Product,
   Purchase,
@@ -47,6 +50,25 @@ function normalizeTrashItem(item: TrashItem): TrashItem {
   };
 }
 
+export function cleanQueryParams<T extends object>(params?: T): Partial<T> | undefined {
+  if (!params) return undefined;
+
+  const cleaned = Object.entries(params).reduce<Record<string, unknown>>((acc, [key, value]) => {
+    if (
+      value === undefined ||
+      value === null ||
+      value === '' ||
+      (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)
+    ) {
+      return acc;
+    }
+    acc[key] = value;
+    return acc;
+  }, {});
+
+  return Object.keys(cleaned).length > 0 ? (cleaned as Partial<T>) : undefined;
+}
+
 export const stockiniApi = {
   dashboard: () => api.get<DashboardReport>('/reports/dashboard').then((r) => r.data),
   stockValue: () => api.get<{ purchaseValue: number; saleValue: number }>('/reports/stock-value').then((r) => r.data),
@@ -70,7 +92,7 @@ export const stockiniApi = {
   createSupplier: (data: Partial<Supplier>) => api.post<Supplier>('/suppliers', data).then((r) => r.data),
   updateSupplier: (id: string, data: Partial<Supplier>) => api.patch<Supplier>(`/suppliers/${id}`, data).then((r) => r.data),
   deleteSupplier: (id: string) => api.delete(`/suppliers/${id}`).then((r) => r.data),
-  sales: (params?: SalesQueryParams) => api.get<PaginatedResponse<Sale>>('/sales', { params }).then((r) => r.data),
+  sales: (params?: SalesQueryParams) => api.get<PaginatedResponse<Sale>>('/sales', { params: cleanPaginationParams(params) }).then((r) => r.data),
   sale: (id: string) => api.get<SaleDetail>(`/sales/${id}`).then((r) => r.data),
   saleNextReference: (documentType: SalesDocumentType) =>
     api.get<{ reference: string }>('/sales/next-reference', { params: { documentType } }).then((r) => r.data),
@@ -81,7 +103,7 @@ export const stockiniApi = {
   deleteSale: (id: string) => api.delete(`/sales/${id}`).then((r) => r.data),
   transformSale: (id: string, targetType: SalesDocumentType) =>
     api.post<Sale>(`/sales/${id}/transform`, { targetType }).then((r) => r.data),
-  purchases: (params?: PurchasesQueryParams) => api.get<PaginatedResponse<Purchase>>('/purchases', { params }).then((r) => r.data),
+  purchases: (params?: PurchasesQueryParams) => api.get<PaginatedResponse<Purchase>>('/purchases', { params: cleanPaginationParams(params) }).then((r) => r.data),
   purchase: (id: string) => api.get<PurchaseDetail>(`/purchases/${id}`).then((r) => r.data),
   createPurchase: (data: unknown) => api.post<Purchase>('/purchases', data).then((r) => r.data),
   receivePurchase: (id: string, items: Array<{ purchaseItemId: string; quantity: number }>) =>
@@ -89,7 +111,7 @@ export const stockiniApi = {
   updatePurchase: (id: string, data: Partial<Purchase>) => api.patch<Purchase>(`/purchases/${id}`, data).then((r) => r.data),
   cancelPurchase: (id: string) => api.patch(`/purchases/${id}/cancel`).then((r) => r.data),
   deletePurchase: (id: string) => api.delete(`/purchases/${id}`).then((r) => r.data),
-  payments: () => api.get<Payment[]>('/payments').then((r) => r.data),
+  payments: (params?: PaymentsQueryParams) => api.get<PaginatedResponse<Payment>>('/payments', { params: cleanPaginationParams(params) }).then((r) => r.data),
   createPayment: (data: Partial<Payment>) => api.post<Payment>('/payments', data).then((r) => r.data),
   updatePayment: (id: string, data: Partial<Payment>) => api.patch<Payment>(`/payments/${id}`, data).then((r) => r.data),
   deletePayment: (id: string) => api.delete(`/payments/${id}`).then((r) => r.data),
@@ -101,7 +123,7 @@ export const stockiniApi = {
   createAlert: (data: Partial<Alert>) => api.post<Alert>('/alerts', data).then((r) => r.data),
   updateAlert: (id: string, data: Partial<Alert>) => api.patch<Alert>(`/alerts/${id}`, data).then((r) => r.data),
   deleteAlert: (id: string) => api.delete(`/alerts/${id}`).then((r) => r.data),
-  movements: () => api.get<StockMovement[]>('/stock/movements').then((r) => r.data),
+  movements: (params?: StockMovementsQueryParams) => api.get<PaginatedResponse<StockMovement>>('/stock/movements', { params: cleanPaginationParams(params) }).then((r) => r.data),
   stockEntry: (data: { productId: string; quantity: number; reason?: string }) =>
     api.post<StockMovement>('/stock/entry', data).then((r) => r.data),
   stockExit: (data: { productId: string; quantity: number; reason?: string }) =>
@@ -162,7 +184,9 @@ export const stockiniApi = {
     status?: DocumentStatus;
     page?: number;
     limit?: number;
-  }) => api.get<DocumentsListResponse>('/documents', { params }).then((r) => r.data),
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }) => api.get<DocumentsListResponse>('/documents', { params: cleanPaginationParams(params) }).then((r) => r.data),
 
   documentDetail: (id: string) =>
     api.get<GeneratedDocument>(`/documents/${id}`).then((r) => r.data),

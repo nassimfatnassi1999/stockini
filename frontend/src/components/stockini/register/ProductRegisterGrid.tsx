@@ -13,6 +13,7 @@ import {
 interface Props {
   lines: RegisterLine[];
   hasLowMarginPermission: boolean;
+  canEditUnitPriceHt: boolean;
   onLinesChange: (lines: RegisterLine[]) => void;
 }
 
@@ -40,7 +41,7 @@ function fmt3(value: number): string {
   });
 }
 
-export function ProductRegisterGrid({ lines, hasLowMarginPermission, onLinesChange }: Props) {
+export function ProductRegisterGrid({ lines, hasLowMarginPermission, canEditUnitPriceHt, onLinesChange }: Props) {
   const totals = calculateDocumentTotals(lines);
   const margeTotals = calculateSaleMargeTotals(lines);
 
@@ -108,6 +109,7 @@ export function ProductRegisterGrid({ lines, hasLowMarginPermission, onLinesChan
                 line={line}
                 lineNumber={index + 1}
                 hasLowMarginPermission={hasLowMarginPermission}
+                canEditUnitPriceHt={canEditUnitPriceHt}
                 onChange={(updated) => updateLine(index, updated)}
                 onDelete={() => deleteLine(index)}
               />

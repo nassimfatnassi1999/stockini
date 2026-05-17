@@ -15,9 +15,16 @@ describe('SalesService document references', () => {
     name: 'Produit test',
     quantity: 50,
     purchasePrice: 100,
-    salePrice: 178.5,
+    salePrice: 140, // HT = purchaseHT × 1.4
     tva: 19,
   };
+
+  // unitPrice = purchaseHT × 1.4 = 140 (auto-calculé, aucune permission requise)
+  const AUTO_UNIT_PRICE = 140;
+  // TTC = netHt × (1 + TVA%) = 140 × 1.19 = 166.6
+  const AUTO_NET_HT = 140;
+  const AUTO_TAX = 26.6;
+  const AUTO_TOTAL_TTC = 166.6;
 
   function buildService() {
     const references = {
@@ -79,7 +86,7 @@ describe('SalesService document references', () => {
               saleId: 'sale-1',
               productId: product.id,
               quantity: 1,
-              unitPrice: 150,
+              unitPrice: AUTO_UNIT_PRICE,
               discountPercent: 0,
               product,
               sale: {
@@ -151,9 +158,9 @@ describe('SalesService document references', () => {
         documentType,
         customerId: 'customer-1',
         paidAmount: 0,
-        discount: 999,
-        tax: 999,
-        items: [{ productId: product.id, quantity: 1, unitPrice: 150 }],
+        discount: 999, // ignored — backend recalculates
+        tax: 999,      // ignored — backend recalculates
+        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
       });
 
       expect(references.generateSimple).toHaveBeenCalledWith(
@@ -166,11 +173,11 @@ describe('SalesService document references', () => {
           data: expect.objectContaining({
             invoiceNumber: expectedReference,
             documentType,
-            paymentStatus: PaymentStatus.UNPAID,
-            subtotal: 150,
+            paymentStatus: documentType === DocumentType.FACTURE ? PaymentStatus.UNPAID : null,
+            subtotal: AUTO_NET_HT,
             discount: 0,
-            tax: 28.5,
-            total: 178.5,
+            tax: AUTO_TAX,
+            total: AUTO_TOTAL_TTC,
             status: (
               [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
             ).includes(documentType)
@@ -196,7 +203,7 @@ describe('SalesService document references', () => {
         documentType: DocumentType.AVOIR,
         customerId: 'customer-1',
         paidAmount: 0,
-        items: [{ productId: product.id, quantity: 1, unitPrice: 150 }],
+        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
       }),
     ).rejects.toThrow('Un avoir doit être créé via le module Avoirs');
   });
@@ -210,7 +217,7 @@ describe('SalesService document references', () => {
         customerId: 'customer-1',
         paidAmount: 10,
         paymentMethod: PaymentMethod.CASH,
-        items: [{ productId: product.id, quantity: 1, unitPrice: 150 }],
+        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
       }),
     ).rejects.toThrow("DEVIS n'accepte pas de paiement");
   });
@@ -221,9 +228,9 @@ describe('SalesService document references', () => {
     await service.create({
       documentType: DocumentType.FACTURE,
       customerId: 'customer-1',
-      paidAmount: 178.5,
+      paidAmount: AUTO_TOTAL_TTC,
       paymentMethod: PaymentMethod.CASH,
-      items: [{ productId: product.id, quantity: 1, unitPrice: 150 }],
+      items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
     });
 
     expect(settings.assertActiveOption).toHaveBeenCalledWith(
@@ -235,7 +242,7 @@ describe('SalesService document references', () => {
         data: expect.objectContaining({
           type: 'CUSTOMER_PAYMENT',
           method: PaymentMethod.CASH,
-          amount: 178.5,
+          amount: AUTO_TOTAL_TTC,
           cashImpactDone: true,
         }),
       }),
@@ -244,7 +251,7 @@ describe('SalesService document references', () => {
       tx,
       expect.objectContaining({
         type: CaisseMovementType.ENCAISSEMENT_VENTE,
-        montant: 178.5,
+        montant: AUTO_TOTAL_TTC,
       }),
     );
   });
@@ -258,7 +265,7 @@ describe('SalesService document references', () => {
         documentType,
         customerId: 'customer-1',
         paidAmount: 0,
-        items: [{ productId: product.id, quantity: 1, unitPrice: 150 }],
+        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
       });
 
       expect(stockService.applyMovement).toHaveBeenCalledTimes(1);

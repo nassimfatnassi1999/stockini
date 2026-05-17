@@ -242,19 +242,48 @@ export class CaisseService {
   // ─── Transactions list ────────────────────────────────────────────────────────
 
   async getTransactions(query: CashTransactionsQueryDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 50;
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
     const skip = (page - 1) * limit;
 
     // Only apply a date range filter when at least one param is present
-    const hasDateFilter = query.period || (query.startDate && query.endDate);
+    const hasDateFilter =
+      query.period ||
+      (query.startDate && query.endDate) ||
+      (query.dateFrom && query.dateTo);
     const range = hasDateFilter
-      ? resolveCashDateRange(query.period, query.startDate, query.endDate)
+      ? resolveCashDateRange(
+          query.period,
+          query.startDate ?? query.dateFrom,
+          query.endDate ?? query.dateTo,
+        )
       : undefined;
 
     const where: Prisma.CaisseMovementWhereInput = {
       ...(range ? { createdAt: range } : {}),
+      ...(query.type && { type: query.type }),
+      ...(query.search && {
+        OR: [
+          { referenceDoc: { contains: query.search, mode: 'insensitive' } },
+          { motif: { contains: query.search, mode: 'insensitive' } },
+          { user: { fullName: { contains: query.search, mode: 'insensitive' } } },
+          { user: { email: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      }),
     };
+
+    const sortOrder = query.sortOrder ?? 'desc';
+    const allowedSortFields: Record<string, Prisma.CaisseMovementOrderByWithRelationInput> = {
+      createdAt: { createdAt: sortOrder },
+      date: { createdAt: sortOrder },
+      totalTtc: { montant: sortOrder },
+      amount: { montant: sortOrder },
+      montant: { montant: sortOrder },
+      reference: { referenceDoc: sortOrder },
+      status: { type: sortOrder },
+    };
+    const orderBy: Prisma.CaisseMovementOrderByWithRelationInput =
+      (query.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
 
     const [movements, total] = await Promise.all([
       this.prisma.caisseMovement.findMany({
@@ -262,7 +291,7 @@ export class CaisseService {
         include: {
           user: { select: { id: true, fullName: true, email: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

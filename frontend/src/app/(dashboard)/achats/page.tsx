@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, ClipboardList, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, Eye, Package, ReceiptText, RotateCcw, Trash2, X } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
 import { useDraftSave } from '@/lib/hooks/useDraftSave';
@@ -21,7 +21,8 @@ import {
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
 import { money } from '@/lib/stockini/format';
-import type { DropdownOption, PaginatedResponse, Purchase, Supplier } from '@/lib/stockini/types';
+import type { DropdownOption, PaginatedResponse, Purchase, PurchasesQueryParams, Supplier } from '@/lib/stockini/types';
+import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
 
 type PurchaseDocType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE';
 type ReceptionMode = 'LIBRE' | 'FROM_COMMANDE';
@@ -112,6 +113,24 @@ export default function AchatsPage() {
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [showHistory, setShowHistory] = useState(true);
+
+  // ── Purchases history pagination + filters ────────────────────────────────
+  const [purchasesPage, setPurchasesPage] = useState(1);
+  const [purchasesLimit, setPurchasesLimit] = useState(20);
+  const [purchasesSearch, setPurchasesSearch] = useState('');
+  const [purchasesLocalSearch, setPurchasesLocalSearch] = useState('');
+  const [purchasesStatus, setPurchasesStatus] = useState('');
+  const purchasesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handlePurchasesSearchChange = (value: string) => {
+    setPurchasesLocalSearch(value);
+    if (purchasesDebounceRef.current) clearTimeout(purchasesDebounceRef.current);
+    purchasesDebounceRef.current = setTimeout(() => {
+      setPurchasesSearch(value);
+      setPurchasesPage(1);
+    }, 300);
+  };
+
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
@@ -122,9 +141,17 @@ export default function AchatsPage() {
     queryFn: stockiniApi.suppliers,
   });
 
+  const purchasesQueryParams: PurchasesQueryParams = {
+    page: purchasesPage,
+    limit: purchasesLimit,
+    search: purchasesSearch || undefined,
+    status: purchasesStatus || undefined,
+  };
+
   const purchasesQuery = useQuery<PaginatedResponse<Purchase>>({
-    queryKey: ['stockini-purchases'],
-    queryFn: () => stockiniApi.purchases(),
+    queryKey: ['stockini-purchases', purchasesPage, purchasesLimit, purchasesSearch, purchasesStatus],
+    queryFn: () => stockiniApi.purchases(purchasesQueryParams),
+    placeholderData: (prev) => prev,
   });
   const purchasesList: Purchase[] = Array.isArray(purchasesQuery.data?.data) ? purchasesQuery.data.data : [];
 
@@ -221,6 +248,7 @@ export default function AchatsPage() {
         netTtc: 0,
         margePercent: null,
         margeAmount: null,
+        manualUnitPriceHt: false,
       });
     });
 
@@ -385,10 +413,8 @@ export default function AchatsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => stockiniApi.deletePurchase(id),
-    onSuccess: (_data, id) => {
-      queryClient.setQueryData<PaginatedResponse<Purchase>>(['stockini-purchases'], (prev) =>
-        prev ? { ...prev, data: prev.data.filter((p) => p.id !== id) } : prev,
-      );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
       queryClient.invalidateQueries({ queryKey: ['trash'] });
       toast.success('Achat déplacé dans la corbeille');
       setDeleteTarget(null);
@@ -663,6 +689,36 @@ export default function AchatsPage() {
           {showHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
         {showHistory && (
+          <>
+          <HistoryToolbar
+            search={purchasesLocalSearch}
+            onSearch={handlePurchasesSearchChange}
+            searchPlaceholder="Rechercher document, fournisseur…"
+            filters={[
+              {
+                key: 'status',
+                type: 'select',
+                options: [
+                  { value: '', label: 'Tous les statuts' },
+                  { value: 'ORDERED', label: 'Commandé' },
+                  { value: 'RECEIVED', label: 'Reçu' },
+                  { value: 'PARTIALLY_RECEIVED', label: 'Partiellement reçu' },
+                  { value: 'CANCELLED', label: 'Annulé' },
+                ],
+              },
+            ]}
+            filterValues={{ status: purchasesStatus }}
+            onFilterChange={(key, value) => {
+              if (key === 'status') { setPurchasesStatus(value); setPurchasesPage(1); }
+            }}
+            resultsCount={purchasesQuery.data?.total ?? 0}
+            onReset={() => {
+              handlePurchasesSearchChange('');
+              setPurchasesStatus('');
+              setPurchasesPage(1);
+            }}
+            isFetching={purchasesQuery.isFetching}
+          />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-surface">
@@ -759,6 +815,49 @@ export default function AchatsPage() {
               </tbody>
             </table>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 text-text-muted">
+              <span className="text-xs">Lignes par page&nbsp;:</span>
+              <select
+                value={purchasesLimit}
+                onChange={(e) => { setPurchasesLimit(Number(e.target.value)); setPurchasesPage(1); }}
+                className="h-7 rounded-md border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                {[10, 20, 50, 100].map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3 text-text-muted">
+              {(purchasesQuery.data?.total ?? 0) > 0 && (
+                <span className="text-xs">
+                  {(purchasesPage - 1) * purchasesLimit + 1}–{Math.min(purchasesPage * purchasesLimit, purchasesQuery.data?.total ?? 0)} sur {purchasesQuery.data?.total ?? 0}
+                </span>
+              )}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPurchasesPage((p) => p - 1)}
+                  disabled={purchasesPage <= 1 || purchasesQuery.isFetching}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Page précédente"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span className="min-w-[80px] text-center text-xs font-medium text-text-primary">
+                  Page {purchasesPage} / {Math.max(purchasesQuery.data?.totalPages ?? 1, 1)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPurchasesPage((p) => p + 1)}
+                  disabled={purchasesPage >= (purchasesQuery.data?.totalPages ?? 1) || purchasesQuery.isFetching}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Page suivante"
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            </div>
+          </div>
+          </>
         )}
       </div>
 

@@ -60,6 +60,7 @@ async function main() {
         // Ventes
         'sales.view', 'sales.create', 'sales.update', 'sales.delete',
         'sales.view_details', 'sales.cancel', 'sales.print', 'sales.view_history',
+        'sales.line.edit_unit_price_ht',
         // Documents
         'documents.view', 'documents.create', 'documents.download',
         'documents.email', 'documents.view_history',

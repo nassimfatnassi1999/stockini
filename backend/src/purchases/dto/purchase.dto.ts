@@ -3,9 +3,10 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   Max,
   Min,
@@ -77,14 +78,14 @@ export class UpdatePurchaseDto {
 export class PurchasePaginationDto {
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
+  @IsInt()
+  @Min(1)
   page?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
+  @IsInt()
+  @Min(1)
   @Max(100)
   limit?: number;
 
@@ -111,4 +112,12 @@ export class PurchasePaginationDto {
   @IsOptional()
   @IsString()
   supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }

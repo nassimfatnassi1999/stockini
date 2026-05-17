@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, List, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
+import { cleanPaginationParams } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
 import { CashSummaryCards, type CashSummary } from './CashSummaryCards';
 import { CashFilters, type CashFilterState, type CashPeriod } from './CashFilters';
@@ -38,7 +39,7 @@ export function CashDashboard() {
   const txQuery  = useQuery<{ data: CashTransaction[]; pagination: CashPagination }>({
     queryKey: ['caisse-transactions', txParams, page],
     queryFn:  () =>
-      api.get('/caisse/transactions', { params: { ...txParams, page, limit: 50 } }).then((r) => r.data),
+      api.get('/caisse/transactions', { params: cleanPaginationParams({ ...txParams, page, limit: 50 }) }).then((r) => r.data),
     staleTime: 30_000,
   });
 

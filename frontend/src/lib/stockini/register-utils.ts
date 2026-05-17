@@ -19,6 +19,8 @@ export interface RegisterLine {
   netTtc: number;
   margePercent: number | null;
   margeAmount: number | null;
+  /** true = user explicitly set puHt; recalculateSaleLine must not overwrite it */
+  manualUnitPriceHt: boolean;
 }
 
 /** PU HT using the default 40% markup on purchase cost */
@@ -84,6 +86,7 @@ export function createEmptyLine(): RegisterLine {
     netTtc: 0,
     margePercent: null,
     margeAmount: null,
+    manualUnitPriceHt: false,
   };
 }
 
@@ -106,9 +109,31 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
  * For sales: remise reduces the margin, not the price.
  * margeFinal = max(defaultMarginPercent - remisePercent, 0)
  * puHt = purchasePriceHt × (1 + margeFinal / 100)
+ *
+ * When manualUnitPriceHt is true, puHt is frozen (user-set) and only the
+ * derived fields (margePercent, margeAmount, netHt, netTtc) are recalculated.
  */
 export function recalculateSaleLine(line: RegisterLine): RegisterLine {
+  if (line.manualUnitPriceHt) {
+    // Manual mode: puHt is fixed by the user, discount applied classically.
+    const puHt = line.puHt;
+    const grossHt = round3(puHt * line.quantity);
+    const discountAmount = round3(grossHt * line.remisePercent / 100);
+    const netHt = round3(grossHt - discountAmount);
+    const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
+    let margePercent: number | null = null;
+    let margeAmount: number | null = null;
+    if (line.purchasePriceHt > 0) {
+      // Net unit price after per-unit share of discount
+      const netUnitPriceHt = round3(puHt * (1 - line.remisePercent / 100));
+      margeAmount = round3(netUnitPriceHt - line.purchasePriceHt);
+      margePercent = Math.round(((netUnitPriceHt - line.purchasePriceHt) / line.purchasePriceHt) * 10000) / 100;
+    }
+    return { ...line, margePercent, margeAmount, netHt, netTtc };
+  }
+
   if (line.purchasePriceHt > 0) {
+    // Auto mode: derive puHt from margin formula, then all other fields.
     const margeFinalePourcent = Math.max(line.defaultMarginPercent - line.remisePercent, 0);
     const puHt = round3(line.purchasePriceHt * (1 + margeFinalePourcent / 100));
     const margePercent = Math.round(margeFinalePourcent * 100) / 100;
@@ -117,7 +142,8 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
     return { ...line, puHt, margePercent, margeAmount, netHt, netTtc };
   }
-  // No purchase price: use puHt as manually entered
+
+  // No purchase price: use puHt as-is.
   const netHt = round3(line.puHt * line.quantity);
   const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
   return { ...line, margePercent: null, margeAmount: null, netHt, netTtc };

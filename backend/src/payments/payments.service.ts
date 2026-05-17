@@ -4,13 +4,14 @@ import {
   DocumentType,
   PaymentStatus,
   PaymentType,
+  Prisma,
   SaleStatus,
 } from '@prisma/client';
 import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
+import { PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -23,12 +24,67 @@ export class PaymentsService {
     private readonly caisseService: CaisseService,
   ) {}
 
-  findAll() {
-    return this.prisma.payment.findMany({
-      where: { deletedAt: null },
-      include: { sale: true, purchase: true, customer: true, supplier: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(query?: PaymentQueryDto) {
+    const page = Math.max(1, query?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const andConditions: Prisma.PaymentWhereInput[] = [];
+
+    if (query?.search) {
+      andConditions.push({
+        OR: [
+          { reference: { contains: query.search, mode: 'insensitive' } },
+          { sale: { invoiceNumber: { contains: query.search, mode: 'insensitive' } } },
+          { customer: { name: { contains: query.search, mode: 'insensitive' } } },
+          { supplier: { name: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      });
+    }
+
+    const where: Prisma.PaymentWhereInput = {
+      deletedAt: null,
+      ...(query?.type && { type: query.type }),
+      ...(query?.method && { method: query.method }),
+      ...(query?.customerId && { customerId: query.customerId }),
+      ...(query?.supplierId && { supplierId: query.supplierId }),
+      ...((query?.dateFrom || query?.dateTo) && {
+        createdAt: {
+          ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
+          ...(query.dateTo && { lte: new Date(query.dateTo) }),
+        },
+      }),
+      ...(andConditions.length > 0 && { AND: andConditions }),
+    };
+
+    const sortOrder = query?.sortOrder ?? 'desc';
+    const allowedSortFields: Record<string, Prisma.PaymentOrderByWithRelationInput> = {
+      createdAt: { createdAt: sortOrder },
+      date: { createdAt: sortOrder },
+      totalTtc: { sale: { total: sortOrder } },
+      amount: { amount: sortOrder },
+      paidAmount: { sale: { paidAmount: sortOrder } },
+      remainingAmount: { sale: { remainingAmount: sortOrder } },
+      clientName: { customer: { name: sortOrder } },
+      customer: { customer: { name: sortOrder } },
+      reference: { reference: sortOrder },
+      status: { sale: { paymentStatus: sortOrder } },
+    };
+    const orderBy: Prisma.PaymentOrderByWithRelationInput =
+      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+
+    const [data, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        include: { sale: true, purchase: true, customer: true, supplier: true },
+        orderBy,
+        skip,
+        take: limit,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   findOne(id: string) {

@@ -262,11 +262,11 @@ function ProductModal({
             </div>
           </div>
 
-          {/* Prix de vente — calculé automatiquement */}
+          {/* Prix de vente HT — calculé automatiquement */}
           <div className="space-y-1.5">
             <Label>
-              Prix vente{' '}
-              <span className="text-xs font-normal text-text-muted">(TTC × 1,4)</span>
+              Prix vente HT{' '}
+              <span className="text-xs font-normal text-text-muted">(Achat HT × 1,4)</span>
             </Label>
             <div className="relative">
               <Input
@@ -420,7 +420,7 @@ export function ProductsPage() {
                 <TableHead className="text-right">Stock / Seuil min</TableHead>
                 <TableHead className="text-right">Achat HT</TableHead>
                 <TableHead className="text-right">Achat TTC</TableHead>
-                <TableHead className="text-right">Prix vente</TableHead>
+                <TableHead className="text-right">Prix vente HT</TableHead>
                 <TableHead className="text-right">Dernier prix vente</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead className="text-right">Actions</TableHead>

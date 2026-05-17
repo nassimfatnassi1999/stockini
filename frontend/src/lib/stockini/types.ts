@@ -16,7 +16,7 @@ export interface Product {
   tva: number | string;                 // TVA en % (défaut 19)
   purchasePrice: number | string;       // Prix d'achat HT
   purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × (1 + TVA/100))
-  salePrice: number | string;           // Prix de vente (TTC × 1.4)
+  salePrice: number | string;           // Prix de vente HT (purchaseHT × 1.4)
   lastSellingPrice?: number | string | null;
   lastSaleDate?: string | null;
   lastSaleDocumentId?: string | null;
@@ -429,6 +429,8 @@ export interface SalesQueryParams {
   paymentStatus?: string;
   customerId?: string;
   payableOnly?: boolean;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface PurchasesQueryParams {
@@ -440,4 +442,34 @@ export interface PurchasesQueryParams {
   status?: string;
   paymentStatus?: string;
   supplierId?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface StockMovementsQueryParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  type?: string;
+  productId?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaymentsQueryParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  type?: string;
+  method?: string;
+  customerId?: string;
+  supplierId?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }

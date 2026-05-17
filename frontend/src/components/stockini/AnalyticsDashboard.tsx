@@ -276,7 +276,8 @@ export function AnalyticsDashboard() {
   const purchases: Purchase[] = Array.isArray(purchasesResp?.data) ? purchasesResp.data : [];
   const { data: customers = [] }      = useQuery({ queryKey: ['db-customers'],  queryFn: stockiniApi.customers,  staleTime: 60_000 });
   const { data: alerts = [] }         = useQuery({ queryKey: ['db-alerts'],     queryFn: stockiniApi.alerts,     staleTime: 30_000 });
-  const { data: movements = [] }      = useQuery({ queryKey: ['db-movements'],  queryFn: stockiniApi.movements,  staleTime: 30_000 });
+  const { data: movementsResp }        = useQuery({ queryKey: ['db-movements'],  queryFn: () => stockiniApi.movements({ limit: 100 }), staleTime: 30_000 });
+  const movements = Array.isArray(movementsResp?.data) ? movementsResp.data : [];
 
   // ── Filtered slices ───────────────────────────────────────────────────────
   const activeSales    = useMemo(() => sales.filter(s => s.status !== 'CANCELLED'), [sales]);

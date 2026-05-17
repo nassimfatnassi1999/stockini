@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Download,
   Eye,
@@ -42,6 +44,7 @@ import {
 import { getPaymentDisplay, money } from '@/lib/stockini/format';
 import { stockiniApi } from '@/lib/stockini/api';
 import { cn } from '@/lib/utils';
+import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
 import type {
   Customer,
   DropdownOption,
@@ -50,9 +53,11 @@ import type {
   Sale,
   SaleDetail,
   SalesDocumentType,
+  SalesQueryParams,
 } from '@/lib/stockini/types';
 
 const PERMISSION_LOW_MARGIN = 'sales.allow_low_margin';
+const PERMISSION_EDIT_UNIT_PRICE_HT = 'sales.line.edit_unit_price_ht';
 const PERMISSION_VIEW_DETAILS = 'sales.view_details';
 const PERMISSION_DELETE_SALE = 'sales.delete';
 
@@ -271,6 +276,25 @@ export default function VentesPage() {
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [showHistory, setShowHistory] = useState(true);
+
+  // ── Sales history pagination + filters ────────────────────────────────────
+  const [salesPage, setSalesPage] = useState(1);
+  const [salesLimit, setSalesLimit] = useState(20);
+  const [salesSearch, setSalesSearch] = useState('');
+  const [salesLocalSearch, setSalesLocalSearch] = useState('');
+  const [salesDocType, setSalesDocType] = useState('');
+  const [salesStatus, setSalesStatus] = useState('');
+  const salesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSalesSearchChange = (value: string) => {
+    setSalesLocalSearch(value);
+    if (salesDebounceRef.current) clearTimeout(salesDebounceRef.current);
+    salesDebounceRef.current = setTimeout(() => {
+      setSalesSearch(value);
+      setSalesPage(1);
+    }, 300);
+  };
+
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
@@ -299,6 +323,7 @@ export default function VentesPage() {
   const [transformDialogOpen, setTransformDialogOpen] = useState(false);
 
   const allowLowMargin = can(PERMISSION_LOW_MARGIN);
+  const canEditUnitPriceHt = can(PERMISSION_EDIT_UNIT_PRICE_HT);
   const canViewDetails = can(PERMISSION_VIEW_DETAILS);
   const canDeleteSale = can(PERMISSION_DELETE_SALE);
 
@@ -409,9 +434,18 @@ export default function VentesPage() {
     setShowRestorePrompt(false);
   };
 
+  const salesQueryParams: SalesQueryParams = {
+    page: salesPage,
+    limit: salesLimit,
+    search: salesSearch || undefined,
+    documentType: salesDocType || undefined,
+    status: salesStatus || undefined,
+  };
+
   const salesQuery = useQuery<PaginatedResponse<Sale>>({
-    queryKey: ['sales'],
-    queryFn: () => api.get<PaginatedResponse<Sale>>('/sales').then((r) => r.data),
+    queryKey: ['stockini-sales', salesPage, salesLimit, salesSearch, salesDocType, salesStatus],
+    queryFn: () => stockiniApi.sales(salesQueryParams),
+    placeholderData: (prev) => prev,
   });
   const salesList: Sale[] = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
 
@@ -568,7 +602,7 @@ export default function VentesPage() {
         .then((r) => r.data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       toast.success('Vente enregistrée avec succès');
@@ -591,10 +625,8 @@ export default function VentesPage() {
   const cancelMutation = useMutation({
     mutationFn: (id: string) =>
       api.delete(`/sales/${id}`).then((r) => r.data),
-    onSuccess: (_data, id) => {
-      queryClient.setQueryData<PaginatedResponse<Sale>>(['sales'], (prev) =>
-        prev ? { ...prev, data: prev.data.filter((s) => s.id !== id) } : prev,
-      );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['trash'] });
       toast.success('Vente déplacée dans la corbeille');
       setDeleteTarget(null);
@@ -613,7 +645,7 @@ export default function VentesPage() {
     mutationFn: ({ id, targetType }: { id: string; targetType: SalesDocumentType }) =>
       stockiniApi.transformSale(id, targetType),
     onSuccess: (newSale) => {
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
       const label = DOC_TYPE_SHORT[newSale.documentType] ?? newSale.documentType;
@@ -940,6 +972,7 @@ export default function VentesPage() {
       <ProductRegisterGrid
         lines={lines}
         hasLowMarginPermission={allowLowMargin}
+        canEditUnitPriceHt={canEditUnitPriceHt}
         onLinesChange={setLines}
       />
 
@@ -1063,6 +1096,48 @@ export default function VentesPage() {
         </div>
 
         {showHistory && (
+          <>
+          <HistoryToolbar
+            search={salesLocalSearch}
+            onSearch={handleSalesSearchChange}
+            searchPlaceholder="Rechercher facture, client…"
+            filters={[
+              {
+                key: 'docType',
+                type: 'select',
+                options: [
+                  { value: '', label: 'Tous les types' },
+                  { value: 'DEVIS', label: 'Devis' },
+                  { value: 'BON_COMMANDE', label: 'Bon de commande' },
+                  { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
+                  { value: 'FACTURE', label: 'Facture' },
+                ],
+              },
+              {
+                key: 'status',
+                type: 'select',
+                options: [
+                  { value: '', label: 'Tous les statuts' },
+                  { value: 'DRAFT', label: 'Brouillon' },
+                  { value: 'COMPLETED', label: 'Terminée' },
+                  { value: 'CANCELLED', label: 'Annulée' },
+                ],
+              },
+            ]}
+            filterValues={{ docType: salesDocType, status: salesStatus }}
+            onFilterChange={(key, value) => {
+              if (key === 'docType') { setSalesDocType(value); setSalesPage(1); }
+              if (key === 'status') { setSalesStatus(value); setSalesPage(1); }
+            }}
+            resultsCount={salesQuery.data?.total ?? 0}
+            onReset={() => {
+              handleSalesSearchChange('');
+              setSalesDocType('');
+              setSalesStatus('');
+              setSalesPage(1);
+            }}
+            isFetching={salesQuery.isFetching}
+          />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-surface">
@@ -1200,6 +1275,49 @@ export default function VentesPage() {
               </tbody>
             </table>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 text-text-muted">
+              <span className="text-xs">Lignes par page&nbsp;:</span>
+              <select
+                value={salesLimit}
+                onChange={(e) => { setSalesLimit(Number(e.target.value)); setSalesPage(1); }}
+                className="h-7 rounded-md border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                {[10, 20, 50, 100].map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3 text-text-muted">
+              {(salesQuery.data?.total ?? 0) > 0 && (
+                <span className="text-xs">
+                  {(salesPage - 1) * salesLimit + 1}–{Math.min(salesPage * salesLimit, salesQuery.data?.total ?? 0)} sur {salesQuery.data?.total ?? 0}
+                </span>
+              )}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSalesPage((p) => p - 1)}
+                  disabled={salesPage <= 1 || salesQuery.isFetching}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Page précédente"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span className="min-w-[80px] text-center text-xs font-medium text-text-primary">
+                  Page {salesPage} / {Math.max(salesQuery.data?.totalPages ?? 1, 1)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSalesPage((p) => p + 1)}
+                  disabled={salesPage >= (salesQuery.data?.totalPages ?? 1) || salesQuery.isFetching}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Page suivante"
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            </div>
+          </div>
+          </>
         )}
       </div>
 

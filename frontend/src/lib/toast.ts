@@ -22,6 +22,8 @@ function notify() {
 }
 
 function add(type: ToastType, message: string, action?: ToastAction) {
+  if (toasts.some((t) => t.type === type && t.message === message)) return;
+
   const id = `${Date.now()}-${Math.random()}`;
   toasts = [...toasts, { id, type, message, action }];
   notify();

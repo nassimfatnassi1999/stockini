@@ -20,6 +20,15 @@ function show403Toast() {
   toast403Timer = setTimeout(() => { toast403Timer = null; }, 3000);
 }
 
+const errorToastKeys = new Set<string>();
+function showEndpointErrorToast(url: string, message: string) {
+  const key = `${url}:${message}`;
+  if (errorToastKeys.has(key)) return;
+  errorToastKeys.add(key);
+  toast.error(message);
+  setTimeout(() => { errorToastKeys.delete(key); }, 6000);
+}
+
 function processQueue(error: unknown, token: string | null = null) {
   failedQueue.forEach(({ resolve, reject }) => {
     if (error) reject(error);
@@ -107,7 +116,7 @@ api.interceptors.response.use(
 
     if (status === 404) {
       const msg = error.response?.data?.message;
-      if (msg) toast.error(msg);
+      if (msg) showEndpointErrorToast(url, Array.isArray(msg) ? msg[0] : msg);
       return Promise.reject(error);
     }
 
@@ -115,13 +124,13 @@ api.interceptors.response.use(
       const msg = error.response?.data?.message;
       if (msg) {
         const text = Array.isArray(msg) ? msg[0] : msg;
-        toast.error(text);
+        showEndpointErrorToast(url, text);
       }
       return Promise.reject(error);
     }
 
     if (status >= 500) {
-      toast.error('Erreur serveur — veuillez réessayer');
+      showEndpointErrorToast(url, 'Erreur serveur — veuillez réessayer');
     }
 
     return Promise.reject(error);

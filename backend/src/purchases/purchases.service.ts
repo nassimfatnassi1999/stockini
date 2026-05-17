@@ -69,8 +69,8 @@ export class PurchasesService {
   }
 
   async findAll(query?: PurchasePaginationDto) {
-    const page = query?.page ?? 1;
-    const limit = Math.min(query?.limit ?? 20, 100);
+    const page = Math.max(1, query?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
     const skip = (page - 1) * limit;
 
     const where: Prisma.PurchaseWhereInput = {
@@ -94,11 +94,30 @@ export class PurchasesService {
       }),
     };
 
+    const sortOrder = query?.sortOrder ?? 'desc';
+    const allowedSortFields: Record<string, Prisma.PurchaseOrderByWithRelationInput> = {
+      createdAt: { createdAt: sortOrder },
+      date: { createdAt: sortOrder },
+      totalTtc: { total: sortOrder },
+      total: { total: sortOrder },
+      paidAmount: { paidAmount: sortOrder },
+      remainingAmount: { remainingAmount: sortOrder },
+      clientName: { supplier: { name: sortOrder } },
+      supplierName: { supplier: { name: sortOrder } },
+      supplier: { supplier: { name: sortOrder } },
+      reference: { orderNumber: sortOrder },
+      orderNumber: { orderNumber: sortOrder },
+      status: { status: sortOrder },
+      paymentStatus: { paymentStatus: sortOrder },
+    };
+    const orderBy: Prisma.PurchaseOrderByWithRelationInput =
+      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+
     const [data, total] = await Promise.all([
       this.prisma.purchase.findMany({
         where,
         include: { supplier: true, items: true, payments: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

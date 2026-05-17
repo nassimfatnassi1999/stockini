@@ -8,6 +8,7 @@ import {
   ResetInventoryDto,
   StockAdjustmentDto,
   StockChangeDto,
+  StockMovementQueryDto,
 } from './dto/stock.dto';
 import { StockService } from './stock.service';
 
@@ -36,8 +37,8 @@ export class StockController {
 
   @RequirePermissions('stock.movements.view')
   @Get('movements')
-  history(@Query('productId') productId?: string) {
-    return this.stockService.history(productId);
+  history(@Query() query: StockMovementQueryDto) {
+    return this.stockService.history(query);
   }
 
   /** Admin-only: zero out all product quantities in a single transaction */

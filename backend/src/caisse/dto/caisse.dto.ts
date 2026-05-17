@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -12,7 +13,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
-  CashTransactionType,
+  CaisseMovementType,
   CashDirection,
   PaymentMethod,
 } from '@prisma/client';
@@ -58,8 +59,8 @@ export class CashSummaryQueryDto extends CashQueryDto {}
 
 export class CashTransactionsQueryDto extends CashQueryDto {
   @IsOptional()
-  @IsEnum(CashTransactionType)
-  type?: CashTransactionType;
+  @IsEnum(CaisseMovementType)
+  type?: CaisseMovementType;
 
   @IsOptional()
   @IsEnum(CashDirection)
@@ -75,8 +76,28 @@ export class CashTransactionsQueryDto extends CashQueryDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(200)
+  @Max(100)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }
 
 export class CashAnalyticsQueryDto extends CashQueryDto {}

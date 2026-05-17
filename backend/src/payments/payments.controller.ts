@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -12,7 +13,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
+import { PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -42,8 +43,8 @@ export class PaymentsController {
 
   @RequirePermissions('payments.view')
   @Get()
-  findAll() {
-    return this.paymentsService.findAll();
+  findAll(@Query() query: PaymentQueryDto) {
+    return this.paymentsService.findAll(query);
   }
 
   @RequirePermissions('payments.view')

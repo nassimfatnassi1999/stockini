@@ -5,10 +5,10 @@ import {
   IsDateString,
   IsEnum,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   Max,
   Min,
@@ -134,14 +134,14 @@ export class UpdateSaleDto {
 export class SalePaginationDto {
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
+  @IsInt()
+  @Min(1)
   page?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
+  @IsInt()
+  @Min(1)
   @Max(100)
   limit?: number;
 
@@ -172,6 +172,14 @@ export class SalePaginationDto {
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 
   /**
    * Quand true : retourne uniquement les documents réellement payables

@@ -178,7 +178,7 @@ export class DocumentsService {
 
   async list(query: ListDocumentsQuery) {
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 50));
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
     const skip = (page - 1) * limit;
 
     const where: Prisma.GeneratedDocumentWhereInput = {
@@ -228,12 +228,28 @@ export class DocumentsService {
         (where.fileSize as Prisma.IntFilter).lte = query.maxSize;
     }
 
+    const sortOrder = query.sortOrder ?? 'desc';
+    const allowedSortFields: Record<string, Prisma.GeneratedDocumentOrderByWithRelationInput> = {
+      createdAt: { generatedAt: sortOrder },
+      generatedAt: { generatedAt: sortOrder },
+      date: { generatedAt: sortOrder },
+      totalTtc: { totalTtc: sortOrder },
+      clientName: { clientName: sortOrder },
+      reference: { documentNumber: sortOrder },
+      documentNumber: { documentNumber: sortOrder },
+      status: { status: sortOrder },
+      documentType: { documentType: sortOrder },
+      fileSize: { fileSize: sortOrder },
+    };
+    const orderBy: Prisma.GeneratedDocumentOrderByWithRelationInput =
+      (query.sortBy && allowedSortFields[query.sortBy]) || { generatedAt: 'desc' };
+
     const [total, data] = await this.prisma.$transaction([
       this.prisma.generatedDocument.count({ where }),
       this.prisma.generatedDocument.findMany({
         where,
         include: INCLUDE_SALE,
-        orderBy: { generatedAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

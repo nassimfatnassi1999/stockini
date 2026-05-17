@@ -103,8 +103,14 @@ export function DepensesPage() {
   const [caisseTypeFilter, setCaisseTypeFilter] = useState<CaisseMovementType | ''>('');
   const paymentMethodOptions = usePaymentMethodOptions();
 
-  const purchasesQuery = useQuery({ queryKey: ['stockini-purchases'], queryFn: () => stockiniApi.purchases() });
-  const paymentsQuery = useQuery({ queryKey: ['stockini-payments'], queryFn: stockiniApi.payments });
+  const purchasesQuery = useQuery({
+    queryKey: ['stockini-purchases', 'supplier-expenses'],
+    queryFn: () => stockiniApi.purchases({ page: 1, limit: 100 }),
+  });
+  const paymentsQuery = useQuery({
+    queryKey: ['stockini-payments', 'supplier-expenses'],
+    queryFn: () => stockiniApi.payments({ page: 1, limit: 100, type: 'SUPPLIER_PAYMENT' }),
+  });
   const balanceQuery = useQuery({ queryKey: ['caisse-balance'], queryFn: stockiniApi.caisseBalance });
   const caisseHistoriqueQuery = useQuery({
     queryKey: ['caisse-historique', caisseTypeFilter],
@@ -115,8 +121,8 @@ export function DepensesPage() {
   const unpaidPurchases = purchasesData.filter(
     (p) => (p.paymentStatus === 'UNPAID' || p.paymentStatus === 'PARTIAL') && !p.deletedAt,
   );
-  const paymentsData = Array.isArray(paymentsQuery.data) ? paymentsQuery.data : [];
-  const supplierPayments = paymentsData.filter((p) => p.type === 'SUPPLIER_PAYMENT' && !p.deletedAt);
+  const paymentsData = paymentsQuery.data?.data ?? [];
+  const supplierPayments = paymentsData.filter((p) => !p.deletedAt);
 
   const payMutation = useMutation({
     mutationFn: () => stockiniApi.payPurchase(payTarget!.id, { amount: Number(payForm.amount), method: payForm.method, note: payForm.note || undefined }),

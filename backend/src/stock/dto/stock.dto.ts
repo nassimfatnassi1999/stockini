@@ -1,5 +1,17 @@
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, IsString, Min, Equals } from 'class-validator';
+import {
+  Equals,
+  IsDateString,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
+import { StockMovementType } from '@prisma/client';
 
 export class StockChangeDto {
   @IsString()
@@ -27,6 +39,53 @@ export class StockAdjustmentDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+export class StockMovementQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsEnum(StockMovementType)
+  type?: StockMovementType;
+
+  @IsOptional()
+  @IsString()
+  productId?: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
 }
 
 export class ResetInventoryDto {

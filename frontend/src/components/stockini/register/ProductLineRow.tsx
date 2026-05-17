@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { ProductSearchAutocomplete } from './ProductSearchAutocomplete';
 import {
@@ -15,6 +15,7 @@ interface Props {
   line: RegisterLine;
   lineNumber: number;
   hasLowMarginPermission: boolean;
+  canEditUnitPriceHt: boolean;
   onChange: (line: RegisterLine) => void;
   onDelete: () => void;
 }
@@ -31,8 +32,10 @@ const NUM_INPUT =
 const TEXT_INPUT =
   'w-full bg-transparent text-xs outline-none focus:bg-primary/5 px-2 py-1 rounded min-w-0';
 
-export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onChange, onDelete }: Props) {
+export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEditUnitPriceHt, onChange, onDelete }: Props) {
   const qteRef = useRef<HTMLInputElement>(null);
+  const [puHtRaw, setPuHtRaw] = useState<string>('');
+  const [isPuHtFocused, setIsPuHtFocused] = useState(false);
 
   const update = (patch: Partial<RegisterLine>) => {
     onChange(recalculateSaleLine({ ...line, ...patch }));
@@ -40,10 +43,10 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
 
   const handleProductSelect = (product: Product) => {
     const purchasePriceHt = round3(Number(product.purchasePrice));
-    // When no purchase price, derive puHt from salePrice (no margin-based computation)
+    // salePrice is stored as HT; use it directly when no purchasePrice is available
     const puHt = purchasePriceHt > 0
       ? 0 // will be computed by recalculateSaleLine from defaultMarginPercent
-      : round3(Number(product.salePrice) / (1 + (line.tvaPercent || DEFAULT_TVA) / 100));
+      : round3(Number(product.salePrice));
     onChange(
       recalculateSaleLine({
         ...line,
@@ -57,6 +60,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
         defaultMarginPercent: DEFAULT_MARGIN_PERCENT,
         remisePercent: 0,
         quantity: Math.max(line.quantity, 1),
+        manualUnitPriceHt: false,
       }),
     );
     setTimeout(() => qteRef.current?.select(), 50);
@@ -64,6 +68,10 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
 
   const fmt = (v: number) =>
     v > 0 ? v.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '—';
+
+  const puHtDisplayValue = isPuHtFocused
+    ? puHtRaw
+    : (line.puHt > 0 ? line.puHt.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '');
 
   const hasProduct = line.productId !== null || line.puHt > 0;
   const margeIsInvalid =
@@ -147,26 +155,36 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
         />
       </td>
 
-      {/* PU HT — computed when purchasePriceHt > 0; editable otherwise */}
+      {/* PU HT — éditable si canEditUnitPriceHt, sinon lecture seule */}
       <td className={`min-w-[80px] ${CELL}`}>
-        <input
-          type="number"
-          min={0}
-          step={0.001}
-          value={line.puHt === 0 ? '' : line.puHt}
-          onChange={(e) => {
-            const newPuHt = Math.max(0, Number(e.target.value) || 0);
-            if (line.purchasePriceHt > 0) {
-              // Back-calculate defaultMarginPercent so the effective price matches the typed value
-              const impliedMargin = (newPuHt / line.purchasePriceHt - 1) * 100;
-              const newDefaultMargin = Math.max(impliedMargin + line.remisePercent, 0);
-              update({ defaultMarginPercent: newDefaultMargin });
-            } else {
-              update({ puHt: newPuHt });
-            }
-          }}
-          className={NUM_INPUT}
-        />
+        {canEditUnitPriceHt ? (
+          <input
+            type="text"
+            inputMode="decimal"
+            value={puHtDisplayValue}
+            onFocus={() => {
+              setPuHtRaw(line.puHt > 0 ? String(line.puHt) : '');
+              setIsPuHtFocused(true);
+            }}
+            onChange={(e) => setPuHtRaw(e.target.value)}
+            onBlur={() => {
+              setIsPuHtFocused(false);
+              const newPuHt = Math.max(0, parseFloat(puHtRaw.replace(',', '.')) || 0);
+              // Empty field → revert to auto-computed mode
+              const manual = newPuHt > 0;
+              onChange(recalculateSaleLine({ ...line, puHt: manual ? newPuHt : 0, manualUnitPriceHt: manual }));
+            }}
+            placeholder="—"
+            className={NUM_INPUT}
+          />
+        ) : (
+          <div
+            className="w-full px-2 py-1 text-xs text-right tabular-nums text-text-secondary cursor-not-allowed select-none"
+            title="Vous n'avez pas la permission de modifier le PU HT"
+          >
+            {line.puHt === 0 ? '—' : line.puHt.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+          </div>
+        )}
       </td>
 
       {/* Marge % — read-only, auto-calculated */}

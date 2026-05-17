@@ -12,6 +12,7 @@ import {
   ResetInventoryDto,
   StockAdjustmentDto,
   StockChangeDto,
+  StockMovementQueryDto,
 } from './dto/stock.dto';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
@@ -92,15 +93,65 @@ export class StockService {
     });
   }
 
-  history(productId?: string) {
-    return this.prisma.stockMovement.findMany({
-      where: productId ? { productId } : undefined,
-      include: {
-        product: true,
-        user: { select: { id: true, fullName: true, email: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  async history(query?: StockMovementQueryDto) {
+    const page = Math.max(1, query?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const andConditions: Prisma.StockMovementWhereInput[] = [];
+
+    if (query?.search) {
+      andConditions.push({
+        OR: [
+          { reference: { contains: query.search, mode: 'insensitive' } },
+          { reason: { contains: query.search, mode: 'insensitive' } },
+          { product: { name: { contains: query.search, mode: 'insensitive' } } },
+          { user: { fullName: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      });
+    }
+
+    const where: Prisma.StockMovementWhereInput = {
+      ...(query?.type && { type: query.type }),
+      ...(query?.productId && { productId: query.productId }),
+      ...(query?.userId && { userId: query.userId }),
+      ...((query?.dateFrom || query?.dateTo) && {
+        createdAt: {
+          ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
+          ...(query.dateTo && { lte: new Date(query.dateTo) }),
+        },
+      }),
+      ...(andConditions.length > 0 && { AND: andConditions }),
+    };
+
+    const sortOrder = query?.sortOrder ?? 'desc';
+    const allowedSortFields: Record<string, Prisma.StockMovementOrderByWithRelationInput> = {
+      createdAt: { createdAt: sortOrder },
+      date: { createdAt: sortOrder },
+      quantity: { quantity: sortOrder },
+      previousQuantity: { previousQuantity: sortOrder },
+      newQuantity: { newQuantity: sortOrder },
+      reference: { reference: sortOrder },
+      status: { type: sortOrder },
+    };
+    const orderBy: Prisma.StockMovementOrderByWithRelationInput =
+      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+
+    const [data, total] = await Promise.all([
+      this.prisma.stockMovement.findMany({
+        where,
+        include: {
+          product: true,
+          user: { select: { id: true, fullName: true, email: true } },
+        },
+        orderBy,
+        skip,
+        take: limit,
+      }),
+      this.prisma.stockMovement.count({ where }),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   // ─── Reset inventory ──────────────────────────────────────────────────────────
