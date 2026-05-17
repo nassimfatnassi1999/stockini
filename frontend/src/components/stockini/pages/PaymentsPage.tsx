@@ -26,9 +26,10 @@ import { PageHeader } from '../shared/PageHeader';
 import { StateRows } from '../shared/StateRows';
 import { useDropdownOptions } from '../shared/form-utils';
 
-function PaymentStatusBadge({ status }: { status: string }) {
+function PaymentStatusBadge({ status }: { status: string | null }) {
   if (status === 'PAID') return <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Payé</Badge>;
   if (status === 'PARTIAL') return <Badge className="border-amber-200 bg-amber-50 text-amber-700">Partiel</Badge>;
+  if (!status) return <Badge className="border-gray-200 bg-gray-100 text-gray-500">—</Badge>;
   return <Badge className="border-red-200 bg-red-50 text-red-700">Non payé</Badge>;
 }
 

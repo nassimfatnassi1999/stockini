@@ -334,7 +334,14 @@ export class AvoirsService {
       where: { id },
       include: {
         ...AVOIR_INCLUDE,
-        sale: { select: { invoiceNumber: true, customerId: true } },
+        sale: {
+          select: {
+            invoiceNumber: true,
+            customerId: true,
+            clientType: true,
+            counterClientFullName: true,
+          },
+        },
         items: {
           include: {
             product: { select: { id: true, reference: true, name: true } },
@@ -345,7 +352,10 @@ export class AvoirsService {
     if (!avoir) throw new NotFoundException(`Avoir ${id} introuvable`);
 
     const companySettings = await this.getCompanySettings();
-    const customerName = avoir.customer?.name ?? 'Client comptoir';
+    const customerName =
+      avoir.sale?.counterClientFullName ??
+      avoir.customer?.name ??
+      'Client comptoir';
 
     const pdfBuffer = await this.pdf.generateAvoirDocument(
       {
@@ -353,6 +363,7 @@ export class AvoirsService {
         dateAvoir: avoir.dateAvoir,
         factureOrigine: avoir.sale.invoiceNumber,
         customerName,
+        isCounterClient: avoir.sale?.clientType === 'COMPTOIR',
         customerAddress: avoir.customer?.address ?? null,
         customerPhone: avoir.customer?.phone ?? null,
         customerEmail: avoir.customer?.email ?? null,

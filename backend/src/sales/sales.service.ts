@@ -86,6 +86,16 @@ export class SalesService {
       );
     }
 
+    // ── Client comptoir validation ──────────────────────────────────────────────
+    const isComptoir = dto.clientType === 'COMPTOIR';
+    if (isComptoir) {
+      if (!dto.counterClientFirstName?.trim() || !dto.counterClientLastName?.trim()) {
+        throw new BadRequestException(
+          'Veuillez saisir le nom et le prénom du client comptoir.',
+        );
+      }
+    }
+
     const reserveStock = dto.reserveStock ?? false;
     const isDevis = documentType === DocumentType.DEVIS;
     const acceptsPayment = PAYMENT_ACCEPTING_TYPES.has(documentType);
@@ -209,7 +219,8 @@ export class SalesService {
       }
 
       const remainingAmount = Math.max(total - paidAmount, 0);
-      const paymentStatus = this.paymentStatus(total, paidAmount);
+      // Only FACTURE carries a payment status; other document types are not payable
+      const paymentStatus = acceptsPayment ? this.paymentStatus(total, paidAmount) : null;
       const items = rawItems.map((item) => {
         return {
           productId: item.productId,
@@ -222,10 +233,19 @@ export class SalesService {
       });
 
       const sellerId = user?.id;
+      const counterClientFullName =
+        isComptoir && dto.counterClientFirstName && dto.counterClientLastName
+          ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
+          : undefined;
+
       const sale = await tx.sale.create({
         data: {
           invoiceNumber,
           customerId: dto.customerId,
+          clientType: dto.clientType ?? null,
+          counterClientFirstName: isComptoir ? dto.counterClientFirstName?.trim() ?? null : null,
+          counterClientLastName: isComptoir ? dto.counterClientLastName?.trim() ?? null : null,
+          counterClientFullName: counterClientFullName ?? null,
           subtotal,
           discount,
           tax,
@@ -408,11 +428,12 @@ export class SalesService {
       // Seuls FACTURE et BON_LIVRAISON non transformé sont des dettes réelles.
       // Un BL dont transformedToId != null a été converti en FACTURE : la FACTURE
       // est le document final payable, le BL ne doit plus apparaître.
+      // Les FACTURE ont un paymentStatus non-null ; les BL ont paymentStatus = null
+      // mais remainingAmount > 0 tant qu'elles ne sont pas payées.
       andConditions.push({
-        paymentStatus: { not: PaymentStatus.PAID },
         status: { not: SaleStatus.CANCELLED },
         OR: [
-          { documentType: DocumentType.FACTURE },
+          { documentType: DocumentType.FACTURE, paymentStatus: { not: PaymentStatus.PAID } },
           { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
         ],
       });
@@ -522,7 +543,9 @@ export class SalesService {
           lastSalePriceImpactDone: false,
           paidAmount: 0,
           remainingAmount: sale.total,
-          paymentStatus: PaymentStatus.UNPAID,
+          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType)
+            ? PaymentStatus.UNPAID
+            : null,
         },
         include: { items: true, payments: true },
       });
@@ -645,13 +668,17 @@ export class SalesService {
         data: {
           invoiceNumber,
           customerId: source.customerId,
+          clientType: source.clientType,
+          counterClientFirstName: source.counterClientFirstName,
+          counterClientLastName: source.counterClientLastName,
+          counterClientFullName: source.counterClientFullName,
           subtotal: source.subtotal,
           discount: source.discount,
           tax: source.tax,
           total: source.total,
           paidAmount: 0,
           remainingAmount: source.total,
-          paymentStatus: PaymentStatus.UNPAID,
+          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(targetType) ? PaymentStatus.UNPAID : null,
           status: targetAppliesStock ? SaleStatus.COMPLETED : SaleStatus.DRAFT,
           documentType: targetType,
           reserveStock: false,

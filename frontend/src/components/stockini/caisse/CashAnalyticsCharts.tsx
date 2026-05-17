@@ -77,7 +77,7 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
             <YAxis tickFormatter={(v) => fmtDT(v as number)} tick={{ fontSize: 10 }} width={72} />
             <Tooltip
-              formatter={(v: number, name: string) => [fmtDT(v), name === 'entrees' ? 'Entrées' : name === 'sorties' ? 'Sorties' : 'Profit']}
+              formatter={(v, name) => [fmtDT(Number(v)), name === 'entrees' ? 'Entrées' : name === 'sorties' ? 'Sorties' : 'Profit']}
               labelStyle={{ fontSize: 11 }}
               contentStyle={{ fontSize: 11, border: '1px solid var(--bd)', borderRadius: 8 }}
             />
@@ -99,7 +99,7 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
             <YAxis tickFormatter={(v) => fmtDT(v as number)} tick={{ fontSize: 10 }} width={72} />
             <Tooltip
-              formatter={(v: number) => [fmtDT(v), 'Profit']}
+              formatter={(v) => [fmtDT(Number(v)), 'Profit']}
               contentStyle={{ fontSize: 11, border: '1px solid var(--bd)', borderRadius: 8 }}
             />
             <Bar dataKey="profit" radius={[4, 4, 0, 0]}>
@@ -127,7 +127,7 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
                   cx="50%"
                   cy="50%"
                   outerRadius={75}
-                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                  label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
                   labelLine={false}
                   fontSize={10}
                 >
@@ -135,7 +135,7 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
                     <Cell key={i} fill={COLORS_CLIENTS[i % COLORS_CLIENTS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v: number) => fmtDT(v)} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+                <Tooltip formatter={(v) => fmtDT(Number(v))} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
               </PieChart>
             </ResponsiveContainer>
           )}
@@ -152,7 +152,7 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--bd, #e2e8f0)" />
                 <XAxis type="number" tickFormatter={(v) => fmtDT(v as number)} tick={{ fontSize: 10 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={90} />
-                <Tooltip formatter={(v: number) => fmtDT(v)} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+                <Tooltip formatter={(v) => fmtDT(Number(v))} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
                 <Bar dataKey="montant" radius={[0, 4, 4, 0]}>
                   {topFournisseurs.map((_, i) => (
                     <Cell key={i} fill={COLORS_SUPPLIERS[i % COLORS_SUPPLIERS.length]} />

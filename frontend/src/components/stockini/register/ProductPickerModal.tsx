@@ -8,8 +8,24 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Product } from '@/lib/stockini/types';
 
+export type SearchMode = 'REFERENCE' | 'DESIGNATION';
+
+const MODE_CONFIG: Record<SearchMode, { title: string; subtitle: string; placeholder: string }> = {
+  REFERENCE: {
+    title: 'Recherche par référence',
+    subtitle: 'Référence, SKU ou code-barres',
+    placeholder: 'Rechercher par référence...',
+  },
+  DESIGNATION: {
+    title: 'Recherche par désignation',
+    subtitle: 'Libellé ou désignation produit',
+    placeholder: 'Rechercher par désignation...',
+  },
+};
+
 interface ProductPickerModalProps {
   open: boolean;
+  searchMode: SearchMode;
   initialSearch?: string;
   onClose: () => void;
   onSelect: (product: Product) => void;
@@ -25,32 +41,43 @@ function normalize(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
 
-function productMatches(product: Product, search: string): boolean {
-  const reference = normalize(product.reference);
-  const designation = normalize(product.name);
-  return reference.includes(search) || designation.includes(search);
+function productMatchesMode(product: Product, search: string, mode: SearchMode): boolean {
+  if (mode === 'REFERENCE') {
+    const ref = normalize(product.reference);
+    const sku = normalize(product.sku);
+    const barcode = normalize(product.barcode);
+    return ref.includes(search) || sku.includes(search) || (!!product.barcode && barcode.includes(search));
+  }
+  return normalize(product.name).includes(search);
 }
 
-function sortProductsBySearch(products: Product[], search: string): Product[] {
+function sortProductsByMode(products: Product[], search: string, mode: SearchMode): Product[] {
   if (!search) return products;
 
   return [...products]
-    .filter((product) => productMatches(product, search))
+    .filter((p) => productMatchesMode(p, search, mode))
     .sort((a, b) => {
-      const aReference = normalize(a.reference);
-      const aDesignation = normalize(a.name);
-      const bReference = normalize(b.reference);
-      const bDesignation = normalize(b.name);
-      const aStarts = aReference.startsWith(search) || aDesignation.startsWith(search);
-      const bStarts = bReference.startsWith(search) || bDesignation.startsWith(search);
-
+      const aVal = normalize(mode === 'REFERENCE' ? a.reference : a.name);
+      const bVal = normalize(mode === 'REFERENCE' ? b.reference : b.name);
+      const aStarts = aVal.startsWith(search);
+      const bStarts = bVal.startsWith(search);
       if (aStarts !== bStarts) return aStarts ? -1 : 1;
-      return aReference.localeCompare(bReference, 'fr');
+      return aVal.localeCompare(bVal, 'fr');
     });
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
 }
 
 export function ProductPickerModal({
   open,
+  searchMode,
   initialSearch = '',
   onClose,
   onSelect,
@@ -58,6 +85,11 @@ export function ProductPickerModal({
   const [searchText, setSearchText] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const debouncedSearch = useDebounce(searchText, 250);
+  const trimmed = debouncedSearch.trim();
+  const normalizedSearch = normalize(trimmed);
+  const canSearch = normalizedSearch.length >= 1;
 
   useEffect(() => {
     if (!open) return;
@@ -69,27 +101,21 @@ export function ProductPickerModal({
 
   useEffect(() => {
     if (!open) return;
-
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
       }
     };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose, open]);
 
-  const trimmed = searchText.trim();
-  const normalizedSearch = normalize(trimmed);
-  const canSearch = normalizedSearch.length >= 1;
-
   const { data: results = [], isFetching } = useQuery<Product[]>({
-    queryKey: ['product-picker-search', trimmed],
+    queryKey: ['product-picker-search', trimmed, searchMode],
     queryFn: () =>
       api
-        .get<Product[]>('/products', { params: { search: trimmed } })
+        .get<Product[]>('/products', { params: { search: trimmed, searchMode } })
         .then((response) => response.data),
     enabled: open && canSearch,
     staleTime: 30_000,
@@ -97,13 +123,21 @@ export function ProductPickerModal({
   });
 
   const sorted = useMemo(
-    () => sortProductsBySearch(results, normalizedSearch),
-    [normalizedSearch, results],
+    () => sortProductsByMode(results, normalizedSearch, searchMode),
+    [normalizedSearch, results, searchMode],
   );
 
   useEffect(() => {
     setActiveIndex(0);
   }, [normalizedSearch]);
+
+  useEffect(() => {
+    console.log('[PRODUCT_SEARCH]', {
+      mode: searchMode,
+      query: trimmed,
+      resultsCount: sorted.length,
+    });
+  }, [searchMode, trimmed, sorted.length]);
 
   const selectProduct = useCallback(
     (product: Product) => {
@@ -116,16 +150,14 @@ export function ProductPickerModal({
   const handleInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActiveIndex((index) => Math.min(index + 1, Math.max(sorted.length - 1, 0)));
+      setActiveIndex((i) => Math.min(i + 1, Math.max(sorted.length - 1, 0)));
       return;
     }
-
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setActiveIndex((index) => Math.max(index - 1, 0));
+      setActiveIndex((i) => Math.max(i - 1, 0));
       return;
     }
-
     if (event.key === 'Enter' && sorted[activeIndex]) {
       event.preventDefault();
       selectProduct(sorted[activeIndex]);
@@ -134,12 +166,14 @@ export function ProductPickerModal({
 
   if (!open) return null;
 
+  const config = MODE_CONFIG[searchMode];
+
   return createPortal(
     <div
       className="fixed inset-0 z-[999999] flex items-center justify-center bg-slate-950/45 px-4 py-8 backdrop-blur-[1px]"
       role="dialog"
       aria-modal="true"
-      aria-label="Recherche produit"
+      aria-label={config.title}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -147,8 +181,8 @@ export function ProductPickerModal({
       <div className="w-full max-w-[700px] md:w-[700px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.35)]">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-950">Recherche produit</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Référence ou désignation</p>
+            <h2 className="text-sm font-semibold text-slate-950">{config.title}</h2>
+            <p className="mt-0.5 text-xs text-slate-500">{config.subtitle}</p>
           </div>
           <button
             type="button"
@@ -172,7 +206,7 @@ export function ProductPickerModal({
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Rechercher par référence ou désignation..."
+              placeholder={config.placeholder}
               className="h-11 w-full rounded-md border border-slate-300 bg-white pl-10 pr-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
           </div>

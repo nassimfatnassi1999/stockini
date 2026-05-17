@@ -39,8 +39,9 @@ import {
   type DocumentTotals,
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
-import { money } from '@/lib/stockini/format';
+import { getPaymentDisplay, money } from '@/lib/stockini/format';
 import { stockiniApi } from '@/lib/stockini/api';
+import { cn } from '@/lib/utils';
 import type {
   Customer,
   DropdownOption,
@@ -59,17 +60,6 @@ function round3(v: number) {
   return Math.round(v * 1000) / 1000;
 }
 
-const PAYMENT_LABELS: Record<string, string> = {
-  PAID: 'Payé',
-  PARTIAL: 'Partiel',
-  UNPAID: 'Non payé',
-};
-
-const PAYMENT_COLORS: Record<string, string> = {
-  PAID: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  PARTIAL: 'border-yellow-200 bg-yellow-50 text-yellow-700',
-  UNPAID: 'border-red-200 bg-red-50 text-red-700',
-};
 
 const SALE_STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Brouillon',
@@ -261,6 +251,8 @@ function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: Transfo
 interface VenteDraft {
   lines: RegisterLine[];
   customerId: string;
+  counterClientFirstName: string;
+  counterClientLastName: string;
   saleDate: string;
   paidAmount: string;
   paymentMethod: string;
@@ -273,6 +265,8 @@ export default function VentesPage() {
   const { can } = usePermissions();
   const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
   const [customerId, setCustomerId] = useState('');
+  const [counterClientFirstName, setCounterClientFirstName] = useState('');
+  const [counterClientLastName, setCounterClientLastName] = useState('');
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -308,13 +302,61 @@ export default function VentesPage() {
   const canViewDetails = can(PERMISSION_VIEW_DETAILS);
   const canDeleteSale = can(PERMISSION_DELETE_SALE);
 
+  const customersQuery = useQuery<Customer[]>({
+    queryKey: ['customers'],
+    queryFn: () => api.get<Customer[]>('/customers').then((r) => r.data),
+  });
+
   const filledLines = lines.filter(isFilledLine);
   const totals = calculateDocumentTotals(lines);
   const paidAmountNum = Number(paidAmount) || 0;
+  const selectedClient = (customersQuery.data ?? []).find((c) => c.id === customerId);
+  const selectedClientType = String(
+    (selectedClient as { type?: string | null } | undefined)?.type ?? '',
+  );
+  const form = {
+    clientId: customerId,
+    customerId,
+    clientType: customerId ? selectedClientType : 'COMPTOIR',
+    counterClientFirstName,
+    counterClientLastName,
+  };
+  const isComptoir =
+    form.clientType === 'COMPTOIR' ||
+    selectedClientType === 'COMPTOIR' ||
+    selectedClient?.name?.toLowerCase().includes('comptoir') ||
+    String(form.clientId || form.customerId || '')
+      .toLowerCase()
+      .includes('comptoir') ||
+    !customerId;
+
+  useEffect(() => {
+    if (isComptoir || (!counterClientFirstName && !counterClientLastName)) return;
+    setCounterClientFirstName('');
+    setCounterClientLastName('');
+  }, [isComptoir, counterClientFirstName, counterClientLastName]);
 
   const draftData = useMemo<VenteDraft>(
-    () => ({ lines, customerId, saleDate, paidAmount, paymentMethod, totals }),
-    [lines, customerId, saleDate, paidAmount, paymentMethod, totals],
+    () => ({
+      lines,
+      customerId,
+      counterClientFirstName,
+      counterClientLastName,
+      saleDate,
+      paidAmount,
+      paymentMethod,
+      totals,
+    }),
+    [
+      lines,
+      customerId,
+      counterClientFirstName,
+      counterClientLastName,
+      saleDate,
+      paidAmount,
+      paymentMethod,
+      totals,
+    ],
   );
   const draftEnabled = draftChecked && !showRestorePrompt;
   const { getDraft, hasDraft, clearDraft } = useDraftSave<VenteDraft>({
@@ -354,6 +396,8 @@ export default function VentesPage() {
         : [createEmptyLine()],
     );
     setCustomerId(draft.customerId ?? '');
+    setCounterClientFirstName(draft.counterClientFirstName ?? '');
+    setCounterClientLastName(draft.counterClientLastName ?? '');
     setSaleDate(draft.saleDate ?? new Date().toISOString());
     setPaidAmount(draft.paidAmount ?? '');
     setPaymentMethod(draft.paymentMethod ?? '');
@@ -364,11 +408,6 @@ export default function VentesPage() {
     clearDraft();
     setShowRestorePrompt(false);
   };
-
-  const customersQuery = useQuery<Customer[]>({
-    queryKey: ['customers'],
-    queryFn: () => api.get<Customer[]>('/customers').then((r) => r.data),
-  });
 
   const salesQuery = useQuery<PaginatedResponse<Sale>>({
     queryKey: ['sales'],
@@ -434,10 +473,29 @@ export default function VentesPage() {
   const resetForm = () => {
     setLines([createEmptyLine()]);
     setCustomerId('');
+    setCounterClientFirstName('');
+    setCounterClientLastName('');
     setSaleDate(new Date().toISOString());
     setPaidAmount('');
     setPaymentMethod('');
     clearDraft();
+  };
+
+  const handleCustomerChange = (nextCustomerId: string) => {
+    setCustomerId(nextCustomerId);
+
+    const nextClient = (customersQuery.data ?? []).find((c) => c.id === nextCustomerId);
+    const nextClientType = String((nextClient as { type?: string | null } | undefined)?.type ?? '');
+    const nextIsComptoir =
+      !nextCustomerId ||
+      nextClientType === 'COMPTOIR' ||
+      nextClient?.name?.toLowerCase().includes('comptoir') ||
+      nextCustomerId.toLowerCase().includes('comptoir');
+
+    if (!nextIsComptoir) {
+      setCounterClientFirstName('');
+      setCounterClientLastName('');
+    }
   };
 
   const createMutation = useMutation({
@@ -481,11 +539,22 @@ export default function VentesPage() {
       if (submittedPaidAmount > 0 && !paymentMethod) {
         throw new Error('Veuillez sélectionner une méthode de paiement.');
       }
+      const trimmedCounterFirstName = counterClientFirstName.trim();
+      const trimmedCounterLastName = counterClientLastName.trim();
+      if (isComptoir && (!trimmedCounterFirstName || !trimmedCounterLastName)) {
+        throw new Error('Veuillez saisir le prénom et le nom du client comptoir.');
+      }
 
       return api
         .post<Sale>('/sales', {
           documentType,
           customerId: customerId || undefined,
+          clientType: isComptoir ? 'COMPTOIR' : 'PERSISTENT',
+          counterClientFirstName: isComptoir ? trimmedCounterFirstName : null,
+          counterClientLastName: isComptoir ? trimmedCounterLastName : null,
+          counterClientFullName: isComptoir
+            ? `${trimmedCounterFirstName} ${trimmedCounterLastName}`.trim()
+            : null,
           paidAmount: submittedPaidAmount,
           paymentMethod:
             submittedPaidAmount > 0 && paymentMethod ? paymentMethod : undefined,
@@ -809,13 +878,20 @@ export default function VentesPage() {
 
       {/* Document header: client + date */}
       <div className="rounded-lg border border-border/70 bg-white p-4">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div className="flex-1 min-w-[200px] max-w-sm space-y-1.5">
+        <div
+          className={cn(
+            'grid gap-4',
+            isComptoir
+              ? 'grid-cols-1 md:grid-cols-[2fr_120px_1fr_1fr]'
+              : 'grid-cols-1 md:grid-cols-[2fr_120px]',
+          )}
+        >
+          <div className="space-y-1.5">
             <Label htmlFor="sale-customer">Client</Label>
             <select
               id="sale-customer"
               value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
+              onChange={(e) => handleCustomerChange(e.target.value)}
               className="app-select"
             >
               <option value="">Client comptoir</option>
@@ -832,6 +908,31 @@ export default function VentesPage() {
               {today}
             </div>
           </div>
+          {isComptoir && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="counter-client-first-name">Prénom</Label>
+                <Input
+                  id="counter-client-first-name"
+                  placeholder="Prénom client"
+                  value={form.counterClientFirstName || ''}
+                  onChange={(e) => setCounterClientFirstName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="counter-client-last-name">Nom</Label>
+                <Input
+                  id="counter-client-last-name"
+                  placeholder="Nom client"
+                  value={form.counterClientLastName || ''}
+                  onChange={(e) => setCounterClientLastName(e.target.value)}
+                  required
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1050,11 +1151,14 @@ export default function VentesPage() {
                           {money(sale.total)}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={`app-status-badge ${PAYMENT_COLORS[sale.paymentStatus] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
-                          >
-                            {PAYMENT_LABELS[sale.paymentStatus] ?? sale.paymentStatus}
-                          </span>
+                          {(() => {
+                            const pd = getPaymentDisplay(sale.documentType, sale.paymentStatus);
+                            return (
+                              <span className={`app-status-badge ${pd.className}`}>
+                                {pd.label}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3">
                           <span

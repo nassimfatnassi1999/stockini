@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SaleStatus } from '@prisma/client';
+import { DocumentType, PaymentStatus, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -18,11 +18,18 @@ export class ReportsService {
       this.lowStockProducts(),
       this.prisma.customer.count(),
       this.prisma.sale.aggregate({
-        where: { status: SaleStatus.COMPLETED },
+        where: { documentType: DocumentType.FACTURE, status: SaleStatus.COMPLETED, deletedAt: null },
         _sum: { total: true, paidAmount: true },
         _count: true,
       }),
-      this.prisma.sale.count({ where: { remainingAmount: { gt: 0 } } }),
+      this.prisma.sale.count({
+        where: {
+          documentType: DocumentType.FACTURE,
+          paymentStatus: { not: PaymentStatus.PAID },
+          status: { not: SaleStatus.CANCELLED },
+          deletedAt: null,
+        },
+      }),
     ]);
 
     return {

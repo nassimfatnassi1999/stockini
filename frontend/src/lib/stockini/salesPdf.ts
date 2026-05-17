@@ -172,7 +172,8 @@ export function generateSalesPDF(
   // ── Document info ─────────────────────────────────────────────────────────────
   const docRef = sale.invoiceNumber;
   const docDate = fmtDate(sale.createdAt);
-  const clientName = sale.customer?.name ?? 'Client comptoir';
+  const isComptoirSale = !!sale.counterClientFullName;
+  const clientName = sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir';
   const clientAddr = sale.customer?.address ?? '';
   const clientPhone = sale.customer?.phone ?? '';
   const clientEmail = sale.customer?.email ?? '';
@@ -194,6 +195,7 @@ export function generateSalesPDF(
   const boxY = y - 9;
 
   let clientBoxH = 20;
+  if (isComptoirSale) clientBoxH += 4.5;
   if (clientAddr) clientBoxH += 4.5;
   if (clientPhone) clientBoxH += 4.5;
   if (clientEmail) clientBoxH += 4.5;
@@ -216,6 +218,16 @@ export function generateSalesPDF(
   doc.setFontSize(7.5);
   doc.setTextColor(80, 80, 80);
   let clientY = boxY + 16;
+  if (isComptoirSale) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7);
+    doc.setTextColor(60, 100, 180);
+    doc.text('Client comptoir', boxX + 3, clientY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(80, 80, 80);
+    clientY += 4.5;
+  }
   if (clientAddr) {
     doc.text(clientAddr, boxX + 3, clientY);
     clientY += 4.5;

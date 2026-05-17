@@ -9,6 +9,7 @@ import {
 import {
   CreateProductDto,
   ProductQueryDto,
+  type ProductSearchMode,
   UpdateProductDto,
 } from './dto/product.dto';
 
@@ -45,13 +46,7 @@ export class ProductsService {
       deletedAt: null,
       ...(query.search
         ? {
-            OR: [
-              { reference: { contains: query.search, mode: 'insensitive' } },
-              { name: { contains: query.search, mode: 'insensitive' } },
-              { idProduct: { contains: query.search, mode: 'insensitive' } },
-              { sku: { contains: query.search, mode: 'insensitive' } },
-              { barcode: { contains: query.search, mode: 'insensitive' } },
-            ],
+            OR: this.buildSearchOR(query.search, query.searchMode),
           }
         : {}),
       ...(query.sku
@@ -138,6 +133,32 @@ export class ProductsService {
     });
     this.logger.log(`Product ${id} archived by ${userId ?? 'unknown'}`);
     return { id };
+  }
+
+  private buildSearchOR(
+    search: string,
+    mode?: 'REFERENCE' | 'DESIGNATION',
+  ): Prisma.ProductWhereInput['OR'] {
+    if (mode === 'REFERENCE') {
+      return [
+        { reference: { contains: search, mode: 'insensitive' } },
+        { idProduct: { contains: search, mode: 'insensitive' } },
+        { sku: { contains: search, mode: 'insensitive' } },
+        { barcode: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    if (mode === 'DESIGNATION') {
+      return [
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    return [
+      { reference: { contains: search, mode: 'insensitive' } },
+      { name: { contains: search, mode: 'insensitive' } },
+      { idProduct: { contains: search, mode: 'insensitive' } },
+      { sku: { contains: search, mode: 'insensitive' } },
+      { barcode: { contains: search, mode: 'insensitive' } },
+    ];
   }
 
   private derivePrices(purchasePrice: number, tva: number = 19) {

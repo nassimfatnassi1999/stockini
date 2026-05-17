@@ -104,6 +104,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
       <td className={`min-w-[110px] ${CELL}`}>
         <ProductSearchAutocomplete
           value={line.reference}
+          searchMode="REFERENCE"
           onChange={(v) => update({ reference: v })}
           onSelect={handleProductSelect}
           placeholder="Référence…"
@@ -115,6 +116,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, onCha
       <td className={`min-w-[170px] ${CELL}`}>
         <ProductSearchAutocomplete
           value={line.designation}
+          searchMode="DESIGNATION"
           onChange={(v) => update({ designation: v })}
           onSelect={handleProductSelect}
           placeholder="Désignation…"

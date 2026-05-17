@@ -1,12 +1,15 @@
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Min,
 } from 'class-validator';
+
+export type ProductSearchMode = 'REFERENCE' | 'DESIGNATION';
 
 export class CreateProductDto {
   @IsString()
@@ -148,6 +151,11 @@ export class ProductQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['REFERENCE', 'DESIGNATION'])
+  searchMode?: ProductSearchMode;
 
   @IsOptional()
   @IsString()

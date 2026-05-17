@@ -93,7 +93,7 @@ export interface Sale {
   total: number | string;
   paidAmount: number | string;
   remainingAmount: number | string;
-  paymentStatus: string;
+  paymentStatus: string | null;
   status: string;
   documentType: SalesDocumentType;
   stockImpactDone: boolean;
@@ -103,6 +103,10 @@ export interface Sale {
   transformedToId?: string | null;
   createdAt: string;
   customer?: Customer | null;
+  clientType?: 'PERSISTENT' | 'COMPTOIR' | null;
+  counterClientFirstName?: string | null;
+  counterClientLastName?: string | null;
+  counterClientFullName?: string | null;
   items?: Array<{ id: Id; quantity: number }>;
   deletedAt?: string | null;
   deletedBy?: string | null;
@@ -127,16 +131,21 @@ export interface SaleItemDetail {
 export interface SaleDetail {
   id: Id;
   invoiceNumber: string;
+  documentType: SalesDocumentType;
   subtotal: number | string;
   discount: number | string;
   tax: number | string;
   total: number | string;
   paidAmount: number | string;
   remainingAmount: number | string;
-  paymentStatus: string;
+  paymentStatus: string | null;
   status: string;
   createdAt: string;
   customer?: Customer | null;
+  clientType?: 'PERSISTENT' | 'COMPTOIR' | null;
+  counterClientFirstName?: string | null;
+  counterClientLastName?: string | null;
+  counterClientFullName?: string | null;
   items: SaleItemDetail[];
 }
 

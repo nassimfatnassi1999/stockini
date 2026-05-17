@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRightLeft, Ban, Check, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, ArrowRightLeft, Ban, Check, Plus, Trash2, X } from 'lucide-react';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { stockiniApi } from '@/lib/stockini/api';
-import { dateTime, money, statusLabel } from '@/lib/stockini/format';
+import { dateTime, getPaymentDisplay, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
-import type { PaginatedResponse, Sale, SalesDocumentType } from '@/lib/stockini/types';
-import { CrudModal } from '../shared/CrudModal';
+import type { Sale, SalesDocumentType } from '@/lib/stockini/types';
 import { PageHeader } from '../shared/PageHeader';
 import { SimpleTable } from '../shared/SimpleTable';
 import { Status } from '../shared/Status';
@@ -274,6 +275,8 @@ export function SalesPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [docTypeFilter, setDocTypeFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
   const [activeDocType, setActiveDocType] = useState<SalesDocumentType>(DOCUMENT_TYPES.DEVIS);
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
@@ -293,7 +296,7 @@ export function SalesPage() {
   const productOptions = (products.data ?? []).map((p) => ({ value: p.id, label: p.name }));
 
   // ── Form fields ─────────────────────────────────────────────────────────────
-  const buildFields = (docType: string): FieldConfig[] => {
+  const buildFields = (docType: string, withComptoir = false): FieldConfig[] => {
     const withPayment = docType === 'FACTURE';
     const withReserve = docType === 'BON_COMMANDE';
 
@@ -313,6 +316,16 @@ export function SalesPage() {
         required: true,
         options: customerOptions,
       },
+    ];
+
+    if (withComptoir) {
+      base.push(
+        { name: 'counterClientFirstName', label: 'Prénom du client comptoir *', type: 'text', required: true },
+        { name: 'counterClientLastName', label: 'Nom du client comptoir *', type: 'text', required: true },
+      );
+    }
+
+    base.push(
       {
         name: 'productId',
         label: 'Produit',
@@ -328,7 +341,7 @@ export function SalesPage() {
         required: true,
         options: discountOptions,
       },
-    ];
+    );
 
     if (withPayment) {
       base.push(
@@ -356,12 +369,62 @@ export function SalesPage() {
     discountPercent: '0',
     paidAmount: '0.00',
     reserveStock: false,
+    clientType: '',
+    counterClientFirstName: '',
+    counterClientLastName: '',
   });
 
   const [form, setForm] = useState<FormState>(() => makeInitialForm('DEVIS'));
 
   const currentDocType = String(form.documentType || 'DEVIS') as SalesDocumentType;
-  const fields = buildFields(currentDocType);
+  const selectedClientId = String(form.clientId || form.customerId || '');
+  const selectedClient = (customers.data ?? []).find((c) => c.id === selectedClientId);
+  const selectedClientType = String(
+    (selectedClient as { type?: string | null } | undefined)?.type ?? '',
+  );
+  const selectedClientName = selectedClient?.name?.toLowerCase() ?? '';
+  const selectedClientValue = selectedClientId.toLowerCase();
+  const isComptoir =
+    form.clientType === 'COMPTOIR' ||
+    selectedClientType === 'COMPTOIR' ||
+    selectedClientName.includes('comptoir') ||
+    selectedClientValue.includes('comptoir');
+
+  useEffect(() => {
+    if (form.customerId || form.clientId) return;
+
+    const defaultComptoirClient = (customers.data ?? []).find((client) => {
+      const clientType = String((client as { type?: string | null }).type ?? '');
+      return clientType === 'COMPTOIR' || client.name?.toLowerCase().includes('comptoir');
+    });
+
+    if (!defaultComptoirClient) return;
+
+    setForm((prev) => ({
+      ...prev,
+      customerId: defaultComptoirClient.id,
+      clientType: 'COMPTOIR',
+      counterClientFirstName: prev.counterClientFirstName || '',
+      counterClientLastName: prev.counterClientLastName || '',
+    }));
+  }, [customers.data, form.clientId, form.customerId]);
+
+  useEffect(() => {
+    if (!selectedClient) return;
+
+    const selectedIsComptoir =
+      selectedClientType === 'COMPTOIR' ||
+      selectedClient?.name?.toLowerCase().includes('comptoir');
+
+    if (selectedIsComptoir && form.clientType !== 'COMPTOIR') {
+      setForm((prev) => ({
+        ...prev,
+        clientType: 'COMPTOIR',
+        counterClientFirstName: prev.counterClientFirstName || '',
+        counterClientLastName: prev.counterClientLastName || '',
+      }));
+    }
+  }, [selectedClient?.id, selectedClientType, form.clientType]);
 
   // ── Reference preview ────────────────────────────────────────────────────────
   const nextRefQuery = useQuery({
@@ -396,6 +459,30 @@ export function SalesPage() {
       return;
     }
 
+    if (name === 'customerId') {
+      const selectedCustomer = (customers.data ?? []).find((c) => c.id === String(value));
+      const normalizedName = selectedCustomer?.name?.toLowerCase().trim() ?? '';
+      const normalizedValue = String(value).toLowerCase();
+      const selectedCustomerType = String(
+        (selectedCustomer as { type?: string | null } | undefined)?.type ?? '',
+      );
+      const KNOWN_COMPTOIR_IDS = ['comptoir', 'counter', 'client-comptoir'];
+      const newIsComptoir =
+        selectedCustomerType === 'COMPTOIR' ||
+        normalizedName.includes('comptoir') ||
+        KNOWN_COMPTOIR_IDS.includes(normalizedValue) ||
+        normalizedValue.includes('comptoir');
+
+      setForm((current) => ({
+        ...current,
+        customerId: String(value),
+        clientType: newIsComptoir ? 'COMPTOIR' : 'PERSISTENT',
+        counterClientFirstName: newIsComptoir ? (current.counterClientFirstName ?? '') : '',
+        counterClientLastName: newIsComptoir ? (current.counterClientLastName ?? '') : '',
+      }));
+      return;
+    }
+
     setForm((current) => {
       const next = { ...current, [name]: value };
       if (['productId', 'quantity', 'discountPercent'].includes(name)) {
@@ -416,11 +503,20 @@ export function SalesPage() {
   };
 
   // ── Data query ───────────────────────────────────────────────────────────────
-  const query = useQuery({ queryKey: ['stockini-sales'], queryFn: () => stockiniApi.sales() });
+  const query = useQuery({
+    queryKey: ['stockini-sales', page, limit, docTypeFilter],
+    queryFn: () =>
+      stockiniApi.sales({
+        page,
+        limit,
+        ...(docTypeFilter && { documentType: docTypeFilter }),
+      }),
+    placeholderData: keepPreviousData,
+  });
   const salesData: Sale[] = Array.isArray(query.data?.data) ? query.data.data : [];
-  const data: Sale[] = salesData.filter(
-    (s) => !docTypeFilter || s.documentType === docTypeFilter,
-  );
+  const data: Sale[] = salesData;
+  const totalItems = query.data?.total ?? 0;
+  const totalPages = query.data?.totalPages ?? 1;
 
   // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
@@ -444,10 +540,17 @@ export function SalesPage() {
       const unitPriceHt =
         productTva > -100 ? numberValue(calc.product?.salePrice) / (1 + productTva / 100) : 0;
 
+      const isComptoirAtSubmit = String(submitForm.clientType) === 'COMPTOIR';
+
       const finalPayload = {
         documentType: docType,
         reserveStock: Boolean(payload.reserveStock),
         customerId: String(payload.customerId ?? ''),
+        clientType: isComptoirAtSubmit ? 'COMPTOIR' : 'PERSISTENT',
+        ...(isComptoirAtSubmit && {
+          counterClientFirstName: String(submitForm.counterClientFirstName ?? '').trim(),
+          counterClientLastName: String(submitForm.counterClientLastName ?? '').trim(),
+        }),
         paidAmount: acceptsPayment ? Number(calc.paidAmount.toFixed(3)) : 0,
         paymentMethod: acceptsPayment ? paymentMethodValue : undefined,
         items: [
@@ -509,10 +612,8 @@ export function SalesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: stockiniApi.deleteSale,
-    onSuccess: (_data, id) => {
-      queryClient.setQueryData<PaginatedResponse<Sale>>(['stockini-sales'], (prev) =>
-        prev ? { ...prev, data: prev.data.filter((s) => s.id !== id) } : prev,
-      );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['trash'] });
       toast.success('Document déplacé dans la corbeille');
       setTrashTarget(null);
@@ -556,6 +657,17 @@ export function SalesPage() {
       toast.error('Veuillez sélectionner un client.');
       return;
     }
+
+    if (isComptoir) {
+      if (!String(snapshot.counterClientFirstName ?? '').trim()) {
+        toast.error('Veuillez saisir le prénom du client comptoir.');
+        return;
+      }
+      if (!String(snapshot.counterClientLastName ?? '').trim()) {
+        toast.error('Veuillez saisir le nom du client comptoir.');
+        return;
+      }
+    }
     if (!calc.product) {
       toast.error('Veuillez sélectionner un produit.');
       return;
@@ -595,13 +707,16 @@ export function SalesPage() {
         </Button>
       </div>
 
-      {/* Filter tabs */}
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      {/* Filter tabs + limit selector */}
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.value}
             type="button"
-            onClick={() => setDocTypeFilter(tab.value)}
+            onClick={() => {
+              setDocTypeFilter(tab.value);
+              setPage(1);
+            }}
             className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
               docTypeFilter === tab.value
                 ? 'border-primary bg-primary text-white'
@@ -612,8 +727,21 @@ export function SalesPage() {
           </button>
         ))}
         <span className="ml-auto self-center text-xs text-text-muted">
-          {data.length} document(s)
+          {totalItems} document(s)
         </span>
+        <select
+          value={limit}
+          onChange={(e) => {
+            setLimit(Number(e.target.value));
+            setPage(1);
+          }}
+          className="rounded border border-border bg-white px-2 py-1 text-xs text-text-secondary focus:outline-none"
+          aria-label="Éléments par page"
+        >
+          {[5, 10, 20, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} / page</option>
+          ))}
+        </select>
       </div>
 
       {/* Table */}
@@ -654,7 +782,14 @@ export function SalesPage() {
             </span>,
 
             /* Client */
-            sale.customer?.name ?? 'Client comptoir',
+            sale.counterClientFullName ? (
+              <div key="client" className="flex flex-col gap-0.5">
+                <span className="font-medium">{sale.counterClientFullName}</span>
+                <span className="text-xs text-blue-600">Client comptoir</span>
+              </div>
+            ) : (
+              sale.customer?.name ?? 'Client comptoir'
+            ),
 
             /* Date */
             dateTime(sale.createdAt),
@@ -666,7 +801,17 @@ export function SalesPage() {
             money(sale.total),
 
             /* Paiement */
-            statusLabel(sale.paymentStatus),
+            (() => {
+              const pd = getPaymentDisplay(sale.documentType, sale.paymentStatus);
+              return (
+                <span
+                  key="payment"
+                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${pd.className}`}
+                >
+                  {pd.label}
+                </span>
+              );
+            })(),
 
             /* Statut */
             <Status key="status" value={sale.status} />,
@@ -716,17 +861,229 @@ export function SalesPage() {
         })}
       />
 
+      {/* Pagination controls */}
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1 || query.isFetching}
+            className="rounded border border-border bg-white px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ← Précédent
+          </button>
+          <span className="text-xs text-text-secondary">
+            Page <span className="font-semibold text-text-primary">{page}</span> / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages || query.isFetching}
+            className="rounded border border-border bg-white px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Suivant →
+          </button>
+        </div>
+      )}
+
       {/* Create modal */}
       {modalOpen && (
-        <CrudModal
-          title={`Nouveau — ${DOC_TYPE_LABEL[currentDocType] ?? currentDocType}`}
-          fields={fields}
-          form={{ ...form, referencePreview }}
-          onChange={updateForm}
-          onClose={() => setModalOpen(false)}
-          onSubmit={handleSubmit}
-          saving={createMutation.isPending}
-        />
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget) setModalOpen(false); }}
+        >
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold text-text-primary">
+                Nouveau — {DOC_TYPE_LABEL[currentDocType] ?? currentDocType}
+              </h2>
+              <button
+                type="button"
+                aria-label="Fermer"
+                onClick={() => setModalOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4 px-5 py-4">
+
+              {/* Document type + Reference */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="f-documentType">Type de document *</Label>
+                  <select
+                    id="f-documentType"
+                    value={String(form.documentType ?? '')}
+                    onChange={(e) => updateForm('documentType', e.target.value)}
+                    required
+                    className="app-select"
+                  >
+                    {DOC_TYPE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="f-ref">Référence</Label>
+                  <Input id="f-ref" value={referencePreview} readOnly placeholder="Générée automatiquement" onChange={() => {}} />
+                </div>
+              </div>
+
+              {/* Client + Date + (Prénom + Nom si comptoir) */}
+              <div className={`grid gap-4 ${isComptoir ? 'grid-cols-1 md:grid-cols-[2fr_120px_1fr_1fr]' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                <div className="space-y-1.5">
+                  <Label htmlFor="f-customerId">Client *</Label>
+                  <select
+                    id="f-customerId"
+                    value={String(form.customerId ?? '')}
+                    onChange={(e) => updateForm('customerId', e.target.value)}
+                    required
+                    className="app-select"
+                  >
+                    <option value="">Sélectionner</option>
+                    {customerOptions.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Date</Label>
+                  <Input value={new Date().toLocaleDateString('fr-TN')} readOnly onChange={() => {}} />
+                </div>
+                {isComptoir && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="f-firstName">Prénom *</Label>
+                      <Input
+                        id="f-firstName"
+                        value={String(form.counterClientFirstName ?? '')}
+                        onChange={(e) => setForm((prev) => ({ ...prev, counterClientFirstName: e.target.value }))}
+                        placeholder="Prénom client"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="f-lastName">Nom *</Label>
+                      <Input
+                        id="f-lastName"
+                        value={String(form.counterClientLastName ?? '')}
+                        onChange={(e) => setForm((prev) => ({ ...prev, counterClientLastName: e.target.value }))}
+                        placeholder="Nom client"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Product + Quantity + Discount */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="f-productId">Produit *</Label>
+                  <select
+                    id="f-productId"
+                    value={String(form.productId ?? '')}
+                    onChange={(e) => updateForm('productId', e.target.value)}
+                    required
+                    className="app-select"
+                  >
+                    <option value="">Sélectionner</option>
+                    {productOptions.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="f-quantity">Quantité *</Label>
+                  <Input
+                    id="f-quantity"
+                    type="number"
+                    min={0}
+                    step="0.001"
+                    value={String(form.quantity ?? '')}
+                    onChange={(e) => updateForm('quantity', e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="f-discount">Remise *</Label>
+                  <select
+                    id="f-discount"
+                    value={String(form.discountPercent ?? '0')}
+                    onChange={(e) => updateForm('discountPercent', e.target.value)}
+                    required
+                    className="app-select"
+                  >
+                    {discountOptions.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* FACTURE: Paid Amount + Payment Method */}
+              {currentDocType === 'FACTURE' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="f-paidAmount">Montant payé</Label>
+                    <Input
+                      id="f-paidAmount"
+                      type="number"
+                      min={0}
+                      step="0.001"
+                      value={String(form.paidAmount ?? '0.00')}
+                      readOnly
+                      onChange={() => {}}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="f-paymentMethod">Méthode de paiement *</Label>
+                    <select
+                      id="f-paymentMethod"
+                      value={String(form.paymentMethod ?? '')}
+                      onChange={(e) => updateForm('paymentMethod', e.target.value)}
+                      required
+                      className="app-select"
+                    >
+                      <option value="">Sélectionner</option>
+                      {paymentMethodOptions.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* BON_COMMANDE: Reserve Stock */}
+              {currentDocType === 'BON_COMMANDE' && (
+                <div className="flex items-center gap-2 py-2">
+                  <input
+                    id="f-reserveStock"
+                    type="checkbox"
+                    checked={Boolean(form.reserveStock)}
+                    onChange={(e) => updateForm('reserveStock', e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <Label htmlFor="f-reserveStock">Réserver le stock</Label>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setModalOpen(false)}>
+                  Annuler
+                </Button>
+                <Button type="submit" disabled={createMutation.isPending}>
+                  <Check size={14} />
+                  {createMutation.isPending ? 'Enregistrement...' : 'Enregistrer'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Transform dialog */}

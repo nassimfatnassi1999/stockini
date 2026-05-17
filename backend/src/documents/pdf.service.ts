@@ -18,6 +18,7 @@ export interface PdfSaleData {
   tax: number;
   total: number;
   customerName: string;
+  isCounterClient?: boolean;
   customerAddress?: string | null;
   customerPhone?: string | null;
   customerEmail?: string | null;
@@ -40,6 +41,7 @@ export interface PdfAvoirData {
   dateAvoir: Date | string;
   factureOrigine: string;
   customerName: string;
+  isCounterClient?: boolean;
   customerAddress?: string | null;
   customerPhone?: string | null;
   customerEmail?: string | null;
@@ -354,6 +356,7 @@ export class PdfService {
       const boxY = headerBottom + 10;
 
       let clientBoxH = 38;
+      if (sale.isCounterClient) clientBoxH += 12;
       if (sale.customerAddress) clientBoxH += 12;
       if (sale.customerPhone) clientBoxH += 12;
       if (sale.customerEmail) clientBoxH += 12;
@@ -379,6 +382,11 @@ export class PdfService {
 
       doc.fontSize(7).fillColor('#505050').font('Helvetica');
       let cY = boxY + 27;
+      if (sale.isCounterClient) {
+        doc.fillColor('#3c64b4').font('Helvetica-Oblique').text('Client comptoir', boxX + 6, cY, { width: boxW - 12 });
+        doc.font('Helvetica').fillColor('#505050');
+        cY += 12;
+      }
       if (sale.customerAddress) {
         doc.text(sale.customerAddress, boxX + 6, cY, { width: boxW - 12 });
         cY += 12;
@@ -661,6 +669,7 @@ export class PdfService {
       const boxY = headerBottom + 10;
 
       let clientBoxH = 38;
+      if (avoir.isCounterClient) clientBoxH += 12;
       if (avoir.customerAddress) clientBoxH += 12;
       if (avoir.customerPhone) clientBoxH += 12;
       if (avoir.customerEmail) clientBoxH += 12;
@@ -686,6 +695,11 @@ export class PdfService {
 
       doc.fontSize(7).fillColor('#505050').font('Helvetica');
       let cY = boxY + 27;
+      if (avoir.isCounterClient) {
+        doc.fillColor('#3c64b4').font('Helvetica-Oblique').text('Client comptoir', boxX + 6, cY, { width: boxW - 12 });
+        doc.font('Helvetica').fillColor('#505050');
+        cY += 12;
+      }
       if (avoir.customerAddress) {
         doc.text(avoir.customerAddress, boxX + 6, cY, { width: boxW - 12 });
         cY += 12;

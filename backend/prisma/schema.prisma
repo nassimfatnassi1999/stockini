@@ -309,7 +309,7 @@ model Sale {
   total                   Decimal               @db.Decimal(12, 3)
   paidAmount              Decimal               @default(0) @db.Decimal(12, 3)
   remainingAmount         Decimal               @default(0) @db.Decimal(12, 3)
-  paymentStatus           PaymentStatus         @default(UNPAID)
+  paymentStatus           PaymentStatus?
   status                  SaleStatus            @default(DRAFT)
   documentType            DocumentType          @default(DEVIS)
   stockImpactDone         Boolean               @default(false)
@@ -318,6 +318,10 @@ model Sale {
   sourceDocumentId        String?               @map("source_document_id")
   transformedToId         String?               @map("transformed_to_id")
   sellerId                String?
+  clientType              String?               @map("client_type")
+  counterClientFirstName  String?               @map("counter_client_first_name")
+  counterClientLastName   String?               @map("counter_client_last_name")
+  counterClientFullName   String?               @map("counter_client_full_name")
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   deletedAt               DateTime?

@@ -108,7 +108,8 @@ export class DocumentsService {
       const documentNumber = `${prefix}-${sale.invoiceNumber}`;
       const fileName = `${documentNumber}.pdf`;
       const clientId = sale.customerId ?? undefined;
-      const clientName = sale.customer?.name ?? 'Client comptoir';
+      const clientName =
+        sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir';
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -124,6 +125,7 @@ export class DocumentsService {
           tax: Number(sale.tax),
           total: Number(sale.total),
           customerName: clientName,
+          isCounterClient: sale.clientType === 'COMPTOIR',
           customerAddress: sale.customer?.address,
           customerPhone: sale.customer?.phone,
           customerEmail: sale.customer?.email,
@@ -596,7 +598,9 @@ export class DocumentsService {
         discount: Number(sale.discount),
         tax: Number(sale.tax),
         total: Number(sale.total),
-        customerName: sale.customer?.name ?? 'Client comptoir',
+        customerName:
+          sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir',
+        isCounterClient: sale.clientType === 'COMPTOIR',
         customerAddress: sale.customer?.address,
         customerPhone: sale.customer?.phone,
         customerEmail: sale.customer?.email,

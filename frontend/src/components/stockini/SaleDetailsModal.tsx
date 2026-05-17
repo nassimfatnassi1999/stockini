@@ -4,14 +4,8 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { api } from '@/lib/api';
-import { money } from '@/lib/stockini/format';
+import { getPaymentDisplay, money } from '@/lib/stockini/format';
 import type { SaleDetail } from '@/lib/stockini/types';
-
-const PAYMENT_LABELS: Record<string, string> = {
-  PAID: 'Payé',
-  PARTIAL: 'Partiel',
-  UNPAID: 'Non payé',
-};
 
 const SALE_STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Brouillon',
@@ -25,12 +19,6 @@ const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'border-yellow-200 bg-yellow-50 text-yellow-700',
   CANCELLED: 'border-red-200 bg-red-50 text-red-700',
   RETURNED: 'border-orange-200 bg-orange-50 text-orange-700',
-};
-
-const PAYMENT_COLORS: Record<string, string> = {
-  PAID: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  PARTIAL: 'border-yellow-200 bg-yellow-50 text-yellow-700',
-  UNPAID: 'border-red-200 bg-red-50 text-red-700',
 };
 
 interface Props {
@@ -102,7 +90,14 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
               {/* Info grid */}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 <InfoField label="Numéro facture" value={sale.invoiceNumber} mono />
-                <InfoField label="Client" value={sale.customer?.name ?? 'Comptoir'} />
+                <InfoField
+                  label="Client"
+                  value={
+                    sale.counterClientFullName
+                      ? `${sale.counterClientFullName} — Client comptoir`
+                      : (sale.customer?.name ?? 'Client comptoir')
+                  }
+                />
                 <InfoField
                   label="Date"
                   value={new Date(sale.createdAt).toLocaleDateString('fr-TN', {
@@ -119,16 +114,21 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                     {SALE_STATUS_LABELS[sale.status] ?? sale.status}
                   </span>
                 </div>
-                <div className="space-y-0.5">
-                  <p className="text-xs text-text-muted">Paiement</p>
-                  <span
-                    className={`app-status-badge ${PAYMENT_COLORS[sale.paymentStatus] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
-                  >
-                    {PAYMENT_LABELS[sale.paymentStatus] ?? sale.paymentStatus}
-                  </span>
-                </div>
-                <InfoField label="Montant payé" value={money(sale.paidAmount)} mono />
-                {Number(sale.remainingAmount) > 0 && (
+                {(() => {
+                  const pd = getPaymentDisplay(sale.documentType, sale.paymentStatus);
+                  return (
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-text-muted">Paiement</p>
+                      <span className={`app-status-badge ${pd.className}`}>
+                        {pd.label}
+                      </span>
+                    </div>
+                  );
+                })()}
+                {sale.documentType === 'FACTURE' && (
+                  <InfoField label="Montant payé" value={money(sale.paidAmount)} mono />
+                )}
+                {sale.documentType === 'FACTURE' && Number(sale.remainingAmount) > 0 && (
                   <InfoField
                     label="Reste à payer"
                     value={money(sale.remainingAmount)}

@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsEnum,
   IsIn,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -67,6 +68,24 @@ export class CreateSaleDto {
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  @IsOptional()
+  @IsIn(['PERSISTENT', 'COMPTOIR'])
+  clientType?: 'PERSISTENT' | 'COMPTOIR';
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  counterClientFirstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  counterClientLastName?: string;
+
+  @IsOptional()
+  @IsString()
+  counterClientFullName?: string;
 
   @IsOptional()
   @Type(() => Number)
