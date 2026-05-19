@@ -340,6 +340,10 @@ export class AvoirsService {
             customerId: true,
             clientType: true,
             counterClientFullName: true,
+            counterClientPhone: true,
+            counterClientAddress: true,
+            counterClientTaxId: true,
+            counterClientNote: true,
           },
         },
         items: {
@@ -357,16 +361,19 @@ export class AvoirsService {
       avoir.customer?.name ??
       'Client comptoir';
 
+    const isAvoirComptoir = avoir.sale?.clientType === 'COMPTOIR';
     const pdfBuffer = await this.pdf.generateAvoirDocument(
       {
         numero: avoir.numero,
         dateAvoir: avoir.dateAvoir,
         factureOrigine: avoir.sale.invoiceNumber,
         customerName,
-        isCounterClient: avoir.sale?.clientType === 'COMPTOIR',
-        customerAddress: avoir.customer?.address ?? null,
-        customerPhone: avoir.customer?.phone ?? null,
-        customerEmail: avoir.customer?.email ?? null,
+        isCounterClient: isAvoirComptoir,
+        customerAddress: isAvoirComptoir ? avoir.sale?.counterClientAddress : avoir.customer?.address ?? null,
+        customerPhone: isAvoirComptoir ? avoir.sale?.counterClientPhone : avoir.customer?.phone ?? null,
+        customerEmail: isAvoirComptoir ? null : avoir.customer?.email ?? null,
+        customerTaxId: isAvoirComptoir ? avoir.sale?.counterClientTaxId : null,
+        customerNote: isAvoirComptoir ? avoir.sale?.counterClientNote : null,
         motif: avoir.motif,
         items: avoir.items.map((item) => ({
           reference: item.product?.reference ?? '—',

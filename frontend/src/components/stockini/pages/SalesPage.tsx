@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRightLeft, Ban, Check, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, Ban, Check, ChevronDown, Plus, Trash2, UserCircle, X } from 'lucide-react';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -282,6 +282,8 @@ export function SalesPage() {
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
   const [validateTarget, setValidateTarget] = useState<{ id: string; name: string } | null>(null);
   const [transformTarget, setTransformTarget] = useState<Sale | null>(null);
+  const [showCounterPanel, setShowCounterPanel] = useState(false);
+  const [counterClientErrors, setCounterClientErrors] = useState<Record<string, string>>({});
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const customers = useQuery({ queryKey: ['stockini-customers'], queryFn: stockiniApi.customers });
@@ -372,6 +374,10 @@ export function SalesPage() {
     clientType: '',
     counterClientFirstName: '',
     counterClientLastName: '',
+    counterClientPhone: '',
+    counterClientAddress: '',
+    counterClientTaxId: '',
+    counterClientNote: '',
   });
 
   const [form, setForm] = useState<FormState>(() => makeInitialForm('DEVIS'));
@@ -389,6 +395,12 @@ export function SalesPage() {
     selectedClientType === 'COMPTOIR' ||
     selectedClientName.includes('comptoir') ||
     selectedClientValue.includes('comptoir');
+
+  const isCounterInfoComplete = isComptoir &&
+    Boolean(String(form.counterClientFirstName ?? '').trim()) &&
+    Boolean(String(form.counterClientLastName ?? '').trim()) &&
+    Boolean(String(form.counterClientPhone ?? '').trim()) &&
+    Boolean(String(form.counterClientAddress ?? '').trim());
 
   useEffect(() => {
     if (form.customerId || form.clientId) return;
@@ -425,6 +437,15 @@ export function SalesPage() {
       }));
     }
   }, [selectedClient?.id, selectedClientType, form.clientType]);
+
+  useEffect(() => {
+    if (isComptoir) {
+      setShowCounterPanel(true);
+    } else {
+      setShowCounterPanel(false);
+      setCounterClientErrors({});
+    }
+  }, [isComptoir]);
 
   // ── Reference preview ────────────────────────────────────────────────────────
   const nextRefQuery = useQuery({
@@ -479,6 +500,10 @@ export function SalesPage() {
         clientType: newIsComptoir ? 'COMPTOIR' : 'PERSISTENT',
         counterClientFirstName: newIsComptoir ? (current.counterClientFirstName ?? '') : '',
         counterClientLastName: newIsComptoir ? (current.counterClientLastName ?? '') : '',
+        counterClientPhone: newIsComptoir ? (current.counterClientPhone ?? '') : '',
+        counterClientAddress: newIsComptoir ? (current.counterClientAddress ?? '') : '',
+        counterClientTaxId: newIsComptoir ? (current.counterClientTaxId ?? '') : '',
+        counterClientNote: newIsComptoir ? (current.counterClientNote ?? '') : '',
       }));
       return;
     }
@@ -550,6 +575,10 @@ export function SalesPage() {
         ...(isComptoirAtSubmit && {
           counterClientFirstName: String(submitForm.counterClientFirstName ?? '').trim(),
           counterClientLastName: String(submitForm.counterClientLastName ?? '').trim(),
+          counterClientPhone: String(submitForm.counterClientPhone ?? '').trim() || undefined,
+          counterClientAddress: String(submitForm.counterClientAddress ?? '').trim() || undefined,
+          counterClientTaxId: String(submitForm.counterClientTaxId ?? '').trim() || undefined,
+          counterClientNote: String(submitForm.counterClientNote ?? '').trim() || undefined,
         }),
         paidAmount: acceptsPayment ? Number(calc.paidAmount.toFixed(3)) : 0,
         paymentMethod: acceptsPayment ? paymentMethodValue : undefined,
@@ -659,14 +688,25 @@ export function SalesPage() {
     }
 
     if (isComptoir) {
+      const errors: Record<string, string> = {};
       if (!String(snapshot.counterClientFirstName ?? '').trim()) {
-        toast.error('Veuillez saisir le prénom du client comptoir.');
-        return;
+        errors.counterClientFirstName = 'Prénom obligatoire';
       }
       if (!String(snapshot.counterClientLastName ?? '').trim()) {
-        toast.error('Veuillez saisir le nom du client comptoir.');
+        errors.counterClientLastName = 'Nom obligatoire';
+      }
+      if (!String(snapshot.counterClientPhone ?? '').trim()) {
+        errors.counterClientPhone = 'Téléphone obligatoire';
+      }
+      if (!String(snapshot.counterClientAddress ?? '').trim()) {
+        errors.counterClientAddress = 'Adresse obligatoire';
+      }
+      if (Object.keys(errors).length > 0) {
+        setCounterClientErrors(errors);
+        setShowCounterPanel(true);
         return;
       }
+      setCounterClientErrors({});
     }
     if (!calc.product) {
       toast.error('Veuillez sélectionner un produit.');
@@ -934,8 +974,8 @@ export function SalesPage() {
                 </div>
               </div>
 
-              {/* Client + Date + (Prénom + Nom si comptoir) */}
-              <div className={`grid gap-4 ${isComptoir ? 'grid-cols-1 md:grid-cols-[2fr_120px_1fr_1fr]' : 'grid-cols-1 sm:grid-cols-2'}`}>
+              {/* Client + Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="f-customerId">Client *</Label>
                   <select
@@ -955,29 +995,140 @@ export function SalesPage() {
                   <Label>Date</Label>
                   <Input value={new Date().toLocaleDateString('fr-TN')} readOnly onChange={() => {}} />
                 </div>
-                {isComptoir && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="f-firstName">Prénom *</Label>
-                      <Input
-                        id="f-firstName"
-                        value={String(form.counterClientFirstName ?? '')}
-                        onChange={(e) => setForm((prev) => ({ ...prev, counterClientFirstName: e.target.value }))}
-                        placeholder="Prénom client"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="f-lastName">Nom *</Label>
-                      <Input
-                        id="f-lastName"
-                        value={String(form.counterClientLastName ?? '')}
-                        onChange={(e) => setForm((prev) => ({ ...prev, counterClientLastName: e.target.value }))}
-                        placeholder="Nom client"
-                      />
-                    </div>
-                  </>
-                )}
               </div>
+
+              {/* Comptoir client toggle + collapsible panel */}
+              {isComptoir && (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCounterPanel((v) => !v)}
+                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                      isCounterInfoComplete
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <UserCircle size={15} />
+                      {isCounterInfoComplete ? 'Infos client complètes' : 'Compléter infos client *'}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${showCounterPanel ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+
+                  {showCounterPanel && (
+                    <div className="rounded-lg border border-border bg-slate-50 p-4 space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="f-firstName" className="text-xs">Prénom *</Label>
+                          <Input
+                            id="f-firstName"
+                            value={String(form.counterClientFirstName ?? '')}
+                            onChange={(e) => {
+                              setForm((prev) => ({ ...prev, counterClientFirstName: e.target.value }));
+                              if (counterClientErrors.counterClientFirstName) {
+                                setCounterClientErrors((prev) => ({ ...prev, counterClientFirstName: '' }));
+                              }
+                            }}
+                            placeholder="Prénom"
+                            className={`h-8 text-sm ${counterClientErrors.counterClientFirstName ? 'border-red-400 focus-visible:ring-red-400' : ''}`}
+                          />
+                          {counterClientErrors.counterClientFirstName && (
+                            <p className="text-xs text-red-500">{counterClientErrors.counterClientFirstName}</p>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="f-lastName" className="text-xs">Nom *</Label>
+                          <Input
+                            id="f-lastName"
+                            value={String(form.counterClientLastName ?? '')}
+                            onChange={(e) => {
+                              setForm((prev) => ({ ...prev, counterClientLastName: e.target.value }));
+                              if (counterClientErrors.counterClientLastName) {
+                                setCounterClientErrors((prev) => ({ ...prev, counterClientLastName: '' }));
+                              }
+                            }}
+                            placeholder="Nom"
+                            className={`h-8 text-sm ${counterClientErrors.counterClientLastName ? 'border-red-400 focus-visible:ring-red-400' : ''}`}
+                          />
+                          {counterClientErrors.counterClientLastName && (
+                            <p className="text-xs text-red-500">{counterClientErrors.counterClientLastName}</p>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="f-phone" className="text-xs">Téléphone *</Label>
+                          <Input
+                            id="f-phone"
+                            value={String(form.counterClientPhone ?? '')}
+                            onChange={(e) => {
+                              setForm((prev) => ({ ...prev, counterClientPhone: e.target.value }));
+                              if (counterClientErrors.counterClientPhone) {
+                                setCounterClientErrors((prev) => ({ ...prev, counterClientPhone: '' }));
+                              }
+                            }}
+                            placeholder="+216 xx xxx xxx"
+                            className={`h-8 text-sm ${counterClientErrors.counterClientPhone ? 'border-red-400 focus-visible:ring-red-400' : ''}`}
+                          />
+                          {counterClientErrors.counterClientPhone && (
+                            <p className="text-xs text-red-500">{counterClientErrors.counterClientPhone}</p>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="f-taxId" className="text-xs">Matricule fiscal (MF)</Label>
+                          <Input
+                            id="f-taxId"
+                            value={String(form.counterClientTaxId ?? '')}
+                            onChange={(e) => setForm((prev) => ({ ...prev, counterClientTaxId: e.target.value }))}
+                            placeholder="MF optionnel"
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="f-address" className="text-xs">Adresse *</Label>
+                        <Input
+                          id="f-address"
+                          value={String(form.counterClientAddress ?? '')}
+                          onChange={(e) => {
+                            setForm((prev) => ({ ...prev, counterClientAddress: e.target.value }));
+                            if (counterClientErrors.counterClientAddress) {
+                              setCounterClientErrors((prev) => ({ ...prev, counterClientAddress: '' }));
+                            }
+                          }}
+                          placeholder="Adresse complète"
+                          className={`h-8 text-sm ${counterClientErrors.counterClientAddress ? 'border-red-400 focus-visible:ring-red-400' : ''}`}
+                        />
+                        {counterClientErrors.counterClientAddress && (
+                          <p className="text-xs text-red-500">{counterClientErrors.counterClientAddress}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="f-note" className="text-xs">Note (optionnel)</Label>
+                        <Input
+                          id="f-note"
+                          value={String(form.counterClientNote ?? '')}
+                          onChange={(e) => setForm((prev) => ({ ...prev, counterClientNote: e.target.value }))}
+                          placeholder="Note libre"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowCounterPanel(false)}
+                        >
+                          Masquer
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Product + Quantity + Discount */}
               <div className="grid grid-cols-3 gap-4">

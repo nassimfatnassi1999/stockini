@@ -1,12 +1,18 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import type { DocumentType } from '@prisma/client';
+
+// ── Interfaces ────────────────────────────────────────────────────────────────
 
 export interface PdfSaleItem {
   reference: string;
   name: string;
   quantity: number;
   unitPrice: number;
+  discountPercent?: number;
+  tvaPercent?: number;
   total: number;
 }
 
@@ -17,11 +23,14 @@ export interface PdfSaleData {
   discount: number;
   tax: number;
   total: number;
+  timbreFiscal?: number;
   customerName: string;
   isCounterClient?: boolean;
   customerAddress?: string | null;
   customerPhone?: string | null;
   customerEmail?: string | null;
+  customerTaxId?: string | null;
+  customerNote?: string | null;
   items: PdfSaleItem[];
 }
 
@@ -45,6 +54,8 @@ export interface PdfAvoirData {
   customerAddress?: string | null;
   customerPhone?: string | null;
   customerEmail?: string | null;
+  customerTaxId?: string | null;
+  customerNote?: string | null;
   motif?: string | null;
   items: PdfAvoirItem[];
   subtotal: number;
@@ -61,13 +72,19 @@ export interface PdfCompanyInfo {
   taxNumber?: string;
 }
 
+// ── MSP Palette ───────────────────────────────────────────────────────────────
+const MSP_RED = '#C0202A';
+const MSP_BLACK = '#1A1A1A';
+const MSP_DARK_GRAY = '#3D3D3D';
+const MSP_GRAY = '#6B6B6B';
+const MSP_LIGHT_GRAY = '#F2F2F2';
+const MSP_BORDER = '#D0D0D0';
+const WHITE = '#FFFFFF';
+
 // ── Layout constants ──────────────────────────────────────────────────────────
-const MARGIN = 40;
-const ROW_H = 18;
-// Footer reserve: space kept at the bottom of EVERY page for the footer block
-// (drawn only on the last page). Must be large enough so that all footer
-// elements stay within page.height − MARGIN (= PDFKit's bottom boundary).
-const FOOTER_H = 92;
+const MARGIN = 36;
+const ROW_H = 17;
+const FOOTER_H = 85;
 const DEFAULT_COMPANY = 'Moumna spare part';
 
 const DOC_TITLES: Record<DocumentType, string> = {
@@ -78,7 +95,8 @@ const DOC_TITLES: Record<DocumentType, string> = {
   AVOIR: 'AVOIR',
 };
 
-// ── Utility formatters ────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function fmt3(v: number): string {
   return v.toFixed(3);
 }
@@ -91,80 +109,287 @@ function fmtDate(d: Date | string): string {
   });
 }
 
-// ── Layout helpers ────────────────────────────────────────────────────────────
+function resolveLogoPath(): string | null {
+  const candidates = [
+    path.join(__dirname, '..', '..', '..', 'public', 'assets', 'MSP.png'),
+    path.join(process.cwd(), 'public', 'assets', 'MSP.png'),
+    path.join(__dirname, '..', 'public', 'assets', 'MSP.png'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
-/** Y below which content must not go (footer is reserved below this line). */
+/** Convert a number to French words (for "arrêté à la somme de") */
+function numberToFrenchWords(n: number): string {
+  const units = ['', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf',
+    'dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf'];
+  const tens = ['', '', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', 'soixante', 'quatre-vingt', 'quatre-vingt'];
+
+  if (n === 0) return 'zéro';
+
+  function convertHundreds(num: number): string {
+    let result = '';
+    if (num >= 100) {
+      const h = Math.floor(num / 100);
+      result += (h > 1 ? units[h] + ' ' : '') + 'cent';
+      num %= 100;
+      if (num > 0) result += ' ';
+    }
+    if (num >= 20) {
+      const t = Math.floor(num / 10);
+      const u = num % 10;
+      if (t === 7 || t === 9) {
+        result += tens[t] + '-' + units[10 + u];
+      } else {
+        result += tens[t] + (u > 0 ? (t === 8 ? '-' : '-') + units[u] : '');
+      }
+    } else if (num > 0) {
+      result += units[num];
+    }
+    return result;
+  }
+
+  const intPart = Math.floor(n);
+  const decPart = Math.round((n - intPart) * 1000);
+
+  let result = '';
+  if (intPart >= 1000) {
+    const thousands = Math.floor(intPart / 1000);
+    result += (thousands === 1 ? 'mille' : convertHundreds(thousands) + ' mille');
+    const rem = intPart % 1000;
+    if (rem > 0) result += ' ' + convertHundreds(rem);
+  } else {
+    result = convertHundreds(intPart);
+  }
+
+  result += ' dinars';
+  if (decPart > 0) {
+    result += ' et ' + convertHundreds(decPart) + ' millimes';
+  }
+  return result.charAt(0).toUpperCase() + result.slice(1);
+}
+
 function contentBottom(doc: PDFKit.PDFDocument): number {
   return doc.page.height - MARGIN - FOOTER_H;
 }
 
-/** Y where the footer separator line starts. */
 function footerStartY(doc: PDFKit.PDFDocument): number {
   return doc.page.height - MARGIN - FOOTER_H + 4;
 }
 
+// ── Page header helpers ───────────────────────────────────────────────────────
+
 /**
- * Draw the compact header shown on continuation pages (pages 2+).
- * Returns the Y position right after the header separator.
+ * Draw the full first-page header with logo, company info, and document title band.
+ * Returns the Y coordinate after the header block.
  */
+function drawFirstPageHeader(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  docNumber: string,
+  docDate: Date | string,
+  company: PdfCompanyInfo,
+  logoPath: string | null,
+): number {
+  const pageW = doc.page.width;
+  const companyName = company.name ?? DEFAULT_COMPANY;
+
+  // ── Red top band ──────────────────────────────────────────────────────────
+  doc.rect(0, 0, pageW, 6).fillColor(MSP_RED).fill();
+
+  const headerTop = MARGIN + 4;
+  const headerHeight = 58;
+
+  // ── Left: Document type frame ─────────────────────────────────────────────
+  const docFrameW = 130;
+  const docFrameX = MARGIN;
+
+  doc.rect(docFrameX, headerTop, docFrameW, headerHeight)
+    .fillColor(WHITE).strokeColor(MSP_RED).lineWidth(0.8).fillAndStroke();
+
+  // Red title bar inside frame
+  doc.rect(docFrameX, headerTop, docFrameW, 18).fillColor(MSP_RED).fill();
+  doc.fontSize(11).fillColor(WHITE).font('Helvetica-Bold')
+    .text(title, docFrameX, headerTop + 4, { width: docFrameW, align: 'center' });
+
+  // Document number
+  doc.fontSize(7.5).fillColor(MSP_BLACK).font('Helvetica-Bold')
+    .text(`N° ${docNumber}`, docFrameX + 6, headerTop + 24, { width: docFrameW - 12 });
+
+  // Date
+  doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica')
+    .text(`Date : ${fmtDate(docDate)}`, docFrameX + 6, headerTop + 36, { width: docFrameW - 12 });
+
+  // ── Right: Logo (bigger) ──────────────────────────────────────────────────
+  const logoW = 125;
+  const logoX = pageW - MARGIN - logoW;
+
+  if (logoPath) {
+    try {
+      doc.image(logoPath, logoX, headerTop, {
+        width: logoW,
+        height: headerHeight,
+        fit: [logoW, headerHeight],
+      });
+    } catch {
+      doc.fontSize(10).fillColor(MSP_RED).font('Helvetica-Bold')
+        .text('MSP', logoX, headerTop + 20, { width: logoW, align: 'center' });
+    }
+  } else {
+    doc.fontSize(10).fillColor(MSP_RED).font('Helvetica-Bold')
+      .text('MSP', logoX, headerTop + 20, { width: logoW, align: 'center' });
+  }
+
+  // ── Center: Company name ──────────────────────────────────────────────────
+  const centerX = docFrameX + docFrameW + 8;
+  const centerW = logoX - centerX - 8;
+  const nameY = headerTop + Math.floor((headerHeight - 16) / 2) - 6;
+
+  doc.fontSize(14).fillColor(MSP_BLACK).font('Helvetica-Bold')
+    .text(companyName, centerX, nameY, { width: centerW, align: 'center' });
+
+  const subParts: string[] = [];
+  if (company.address) subParts.push(company.address);
+  if (company.phone) subParts.push(`Tél : ${company.phone}`);
+  if (subParts.length > 0) {
+    doc.fontSize(6.5).fillColor(MSP_GRAY).font('Helvetica')
+      .text(subParts.join('  |  '), centerX, nameY + 18, { width: centerW, align: 'center' });
+  }
+  if (company.taxNumber) {
+    const taxY = nameY + 18 + (subParts.length > 0 ? 10 : 0);
+    doc.fontSize(6.5).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+      .text(`MF : ${company.taxNumber}`, centerX, taxY, { width: centerW, align: 'center' });
+  }
+
+  // ── Separator line ────────────────────────────────────────────────────────
+  const headerBottom = headerTop + headerHeight + 6;
+  doc.moveTo(MARGIN, headerBottom).lineTo(pageW - MARGIN, headerBottom)
+    .strokeColor(MSP_RED).lineWidth(0.5).stroke();
+
+  return headerBottom + 8;
+}
+
+/** Compact header for continuation pages. Returns Y after header. */
 function drawCompactHeader(
   doc: PDFKit.PDFDocument,
   title: string,
   docNumber: string,
   company: PdfCompanyInfo,
-  accentColor: string,
 ): number {
   const pageW = doc.page.width;
-  const companyName = company.name ?? DEFAULT_COMPANY;
-  const y = MARGIN;
 
-  doc
-    .fontSize(9)
-    .fillColor(accentColor)
-    .font('Helvetica-Bold')
+  doc.rect(0, 0, pageW, 5).fillColor(MSP_RED).fill();
+
+  const y = MARGIN - 4;
+  doc.fontSize(8).fillColor(MSP_RED).font('Helvetica-Bold')
     .text(`${title} N° ${docNumber}`, MARGIN, y);
 
-  doc
-    .fontSize(8)
-    .fillColor('#323232')
-    .font('Helvetica-Bold')
-    .text(companyName, MARGIN, y, {
+  doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+    .text(company.name ?? DEFAULT_COMPANY, MARGIN, y, {
       align: 'right',
       width: pageW - MARGIN * 2,
     });
 
-  doc
-    .moveTo(MARGIN, y + 14)
-    .lineTo(pageW - MARGIN, y + 14)
-    .strokeColor('#c8d2e6')
-    .lineWidth(0.3)
-    .stroke();
+  const sepY = y + 13;
+  doc.moveTo(MARGIN, sepY).lineTo(pageW - MARGIN, sepY)
+    .strokeColor(MSP_BORDER).lineWidth(0.3).stroke();
 
-  return y + 22;
+  return sepY + 8;
 }
 
-/**
- * Draw the blue/colored table header row.
- * Returns the Y position right after the header row.
- */
+// ── Client block ──────────────────────────────────────────────────────────────
+
+function drawClientBlock(
+  doc: PDFKit.PDFDocument,
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  customerName: string,
+  isCounterClient: boolean,
+  address?: string | null,
+  phone?: string | null,
+  email?: string | null,
+  taxId?: string | null,
+  note?: string | null,
+): number {
+  let lines = 2;
+  if (address) lines++;
+  if (phone) lines++;
+  if (email) lines++;
+  if (taxId) lines++;
+  if (note) lines++;
+  if (isCounterClient) lines++;
+
+  const boxH = Math.max(44, 14 + lines * 11 + 6);
+
+  doc.rect(boxX, boxY, boxW, boxH).fillColor(MSP_LIGHT_GRAY)
+    .strokeColor(MSP_BORDER).lineWidth(0.4).fillAndStroke();
+
+  // Red "CLIENT" label bar
+  doc.rect(boxX, boxY, boxW, 14).fillColor(MSP_RED).fill();
+  doc.fontSize(7).fillColor(WHITE).font('Helvetica-Bold')
+    .text('CLIENT', boxX + 6, boxY + 4);
+
+  let cy = boxY + 18;
+  doc.fontSize(8.5).fillColor(MSP_BLACK).font('Helvetica-Bold')
+    .text(customerName, boxX + 6, cy, { width: boxW - 12 });
+  cy += 12;
+
+  doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica');
+
+  if (isCounterClient) {
+    doc.fillColor(MSP_RED).font('Helvetica-Oblique')
+      .text('Client comptoir', boxX + 6, cy, { width: boxW - 12 });
+    doc.font('Helvetica').fillColor(MSP_DARK_GRAY);
+    cy += 11;
+  }
+  if (taxId) {
+    doc.text(`MF : ${taxId}`, boxX + 6, cy, { width: boxW - 12 });
+    cy += 11;
+  }
+  if (address) {
+    doc.text(address, boxX + 6, cy, { width: boxW - 12 });
+    cy += 11;
+  }
+  if (phone) {
+    doc.text(`Tél : ${phone}`, boxX + 6, cy, { width: boxW - 12 });
+    cy += 11;
+  }
+  if (email) {
+    doc.text(email, boxX + 6, cy, { width: boxW - 12 });
+    cy += 11;
+  }
+  if (note) {
+    doc.fillColor(MSP_GRAY).font('Helvetica-Oblique')
+      .text(note, boxX + 6, cy, { width: boxW - 12 });
+  }
+
+  return boxY + boxH;
+}
+
+// ── Table header ──────────────────────────────────────────────────────────────
+
 function drawTableHeader(
   doc: PDFKit.PDFDocument,
   y: number,
   colWidths: number[],
   headers: string[],
   tableW: number,
-  fillColor: string,
   numericStartIdx = 2,
 ): number {
-  doc.rect(MARGIN, y, tableW, ROW_H).fillColor(fillColor).fill();
+  // Dark header background
+  doc.rect(MARGIN, y, tableW, ROW_H).fillColor(MSP_BLACK).fill();
+
+  // Red left accent stripe
+  doc.rect(MARGIN, y, 3, ROW_H).fillColor(MSP_RED).fill();
+
   let colX = MARGIN;
   headers.forEach((h, i) => {
-    doc
-      .fontSize(7)
-      .fillColor('#ffffff')
-      .font('Helvetica-Bold')
-      .text(h, colX + 3, y + 5, {
-        width: colWidths[i] - 6,
+    doc.fontSize(6.5).fillColor(WHITE).font('Helvetica-Bold')
+      .text(h, colX + (i === 0 ? 6 : 3), y + 5, {
+        width: colWidths[i] - 9,
         align: i >= numericStartIdx ? 'right' : 'left',
       });
     colX += colWidths[i];
@@ -172,99 +397,110 @@ function drawTableHeader(
   return y + ROW_H;
 }
 
-/**
- * Draw the footer + cachet block on the CURRENT (last) page.
- * All content is positioned within footerStartY .. page.height − MARGIN.
- */
+// ── Footer ────────────────────────────────────────────────────────────────────
+
 function drawPageFooter(
   doc: PDFKit.PDFDocument,
   company: PdfCompanyInfo,
-  accentColor: string,
   mainText: string,
   pageNum: number,
+  totalPages?: number,
 ): void {
   const pageW = doc.page.width;
   const fy = footerStartY(doc);
   const companyName = company.name ?? DEFAULT_COMPANY;
 
-  // Separator line
-  doc
-    .moveTo(MARGIN, fy)
-    .lineTo(pageW - MARGIN, fy)
-    .strokeColor(accentColor)
-    .lineWidth(0.3)
-    .stroke();
+  // Red footer line
+  doc.rect(MARGIN, fy, pageW - MARGIN * 2, 1.5).fillColor(MSP_RED).fill();
 
-  // Left column text (60 % width)
-  const textW = (pageW - MARGIN * 2) * 0.62;
-  let ty = fy + 8;
+  const textW = (pageW - MARGIN * 2) * 0.60;
+  let ty = fy + 7;
 
-  doc
-    .fontSize(7.5)
-    .fillColor('#787878')
-    .font('Helvetica-Oblique')
+  doc.fontSize(7).fillColor(MSP_GRAY).font('Helvetica-Oblique')
     .text(mainText, MARGIN, ty, { width: textW });
   ty += 11;
 
-  doc
-    .fontSize(7.5)
-    .fillColor('#323232')
-    .font('Helvetica-Bold')
+  doc.fontSize(7.5).fillColor(MSP_BLACK).font('Helvetica-Bold')
     .text(companyName, MARGIN, ty, { width: textW });
   ty += 10;
 
-  const infoLine = [company.address, company.phone, company.email]
-    .filter(Boolean)
-    .join('  |  ');
+  const infoLine = [company.address, company.phone, company.email].filter(Boolean).join('  |  ');
   if (infoLine) {
-    doc
-      .fontSize(6.5)
-      .fillColor('#646464')
-      .font('Helvetica')
+    doc.fontSize(6.5).fillColor(MSP_GRAY).font('Helvetica')
       .text(infoLine, MARGIN, ty, { width: textW });
     ty += 9;
   }
-
   if (company.taxNumber) {
-    doc
-      .fontSize(6.5)
-      .fillColor('#646464')
-      .font('Helvetica')
+    doc.fontSize(6.5).fillColor(MSP_GRAY).font('Helvetica')
       .text(`MF : ${company.taxNumber}`, MARGIN, ty, { width: textW });
     ty += 9;
   }
 
-  doc
-    .fontSize(6)
-    .fillColor('#aaaaaa')
-    .font('Helvetica')
-    .text(
-      `Page ${pageNum}  —  Document généré le ${fmtDate(new Date())}`,
-      MARGIN,
-      ty,
-      { width: textW },
-    );
+  const pageLabel = totalPages ? `Page ${pageNum} / ${totalPages}` : `Page ${pageNum}`;
+  doc.fontSize(6).fillColor('#AAAAAA').font('Helvetica')
+    .text(`${pageLabel}  —  Généré le ${fmtDate(new Date())}`, MARGIN, ty, { width: textW });
 
-  // Right column: Cachet box
-  const cachetW = 148;
-  const cachetH = 58;
+  // Cachet box (right)
+  const cachetW = 140;
+  const cachetH = 55;
   const cachetX = pageW - MARGIN - cachetW;
-  const cachetY = fy + 6;
+  const cachetY = fy + 5;
 
-  doc
-    .rect(cachetX, cachetY, cachetW, cachetH)
-    .strokeColor(accentColor)
-    .lineWidth(0.5)
-    .stroke();
+  doc.rect(cachetX, cachetY, cachetW, cachetH)
+    .strokeColor(MSP_RED).lineWidth(0.5).stroke();
 
-  doc
-    .fontSize(7)
-    .fillColor('#505050')
-    .font('Helvetica-Bold')
-    .text('Cachet et signature', cachetX, cachetY + 6, {
-      width: cachetW,
-      align: 'center',
-    });
+  doc.fontSize(6.5).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+    .text('Cachet et signature', cachetX, cachetY + 5, { width: cachetW, align: 'center' });
+
+  // Small red underline under "Cachet et signature"
+  doc.moveTo(cachetX + 20, cachetY + 15).lineTo(cachetX + cachetW - 20, cachetY + 15)
+    .strokeColor(MSP_RED).lineWidth(0.3).stroke();
+}
+
+// ── Totals block ──────────────────────────────────────────────────────────────
+
+interface SummaryRow {
+  label: string;
+  value: string;
+  bold?: boolean;
+  highlight?: boolean;
+  color?: string;
+}
+
+function drawTotals(
+  doc: PDFKit.PDFDocument,
+  y: number,
+  summaryRows: SummaryRow[],
+  pageW: number,
+): number {
+  const summaryW = 170;
+  const summaryH = summaryRows.length * 16 + 10;
+  const summaryX = pageW - MARGIN - summaryW;
+
+  doc.rect(summaryX, y, summaryW, summaryH)
+    .fillColor(MSP_LIGHT_GRAY).strokeColor(MSP_BORDER).lineWidth(0.3).fillAndStroke();
+
+  summaryRows.forEach((row, i) => {
+    const ry = y + 6 + i * 16;
+
+    if (row.highlight) {
+      doc.rect(summaryX, ry - 2, summaryW, 16).fillColor(MSP_RED).fill();
+    } else if (row.bold) {
+      doc.moveTo(summaryX + 4, ry - 1).lineTo(summaryX + summaryW - 4, ry - 1)
+        .strokeColor(MSP_BORDER).lineWidth(0.3).stroke();
+    }
+
+    const fColor = row.highlight ? WHITE : (row.color ?? (row.bold ? MSP_BLACK : MSP_DARK_GRAY));
+    const fSize = row.highlight ? 9 : (row.bold ? 8.5 : 7.5);
+    const fFont = (row.bold || row.highlight) ? 'Helvetica-Bold' : 'Helvetica';
+
+    doc.fontSize(fSize).fillColor(fColor).font(fFont)
+      .text(row.label, summaryX + 6, ry);
+    doc.fontSize(fSize).fillColor(fColor).font(fFont)
+      .text(row.value, summaryX + 6, ry, { width: summaryW - 12, align: 'right' });
+  });
+
+  return y + summaryH;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -280,7 +516,7 @@ export class PdfService {
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
-      const doc = new PDFDocument({ margin: MARGIN, size: 'A4' });
+      const doc = new PDFDocument({ margin: MARGIN, size: 'A4', autoFirstPage: true });
 
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -289,180 +525,80 @@ export class PdfService {
       const title = DOC_TITLES[documentType];
       const pageW = doc.page.width;
       const tableW = pageW - MARGIN * 2;
-      const accentColor = '#1e50a0';
-      const companyName = company.name ?? DEFAULT_COMPANY;
+      const logoPath = resolveLogoPath();
       let pageNum = 1;
 
       // ── Page 1 full header ─────────────────────────────────────────────────
-      doc
-        .fontSize(22)
-        .fillColor(accentColor)
-        .font('Helvetica-Bold')
-        .text(title, MARGIN, MARGIN);
+      let y = drawFirstPageHeader(doc, title, sale.invoiceNumber, sale.createdAt, company, logoPath);
 
-      doc
-        .fontSize(10)
-        .fillColor('#323232')
-        .font('Helvetica-Bold')
-        .text(companyName, MARGIN, MARGIN, {
-          align: 'right',
-          width: pageW - MARGIN * 2,
-        });
+      // ── Two-column: meta left, client right ────────────────────────────────
+      const colMid = pageW / 2 - 8;
+      const metaW = colMid - MARGIN;
+      const clientX = colMid + 8;
+      const clientW = pageW - MARGIN - clientX;
+      const sectionY = y;
 
-      let rightY = MARGIN + 14;
-      const companyLines: string[] = [];
-      if (company.address) companyLines.push(company.address);
-      if (company.phone) companyLines.push(`Tél : ${company.phone}`);
-      if (company.email) companyLines.push(company.email);
-      if (company.taxNumber) companyLines.push(`MF : ${company.taxNumber}`);
-
-      doc.fontSize(8).fillColor('#646464').font('Helvetica');
-      companyLines.forEach((line) => {
-        doc.text(line, MARGIN, rightY, {
-          align: 'right',
-          width: pageW - MARGIN * 2,
-        });
-        rightY += 11;
-      });
-
-      const headerBottom = Math.max(MARGIN + 32, rightY + 6);
-      doc
-        .moveTo(MARGIN, headerBottom)
-        .lineTo(pageW - MARGIN, headerBottom)
-        .strokeColor('#c8d2e6')
-        .lineWidth(0.5)
-        .stroke();
-
-      // ── Document meta ──────────────────────────────────────────────────────
-      let y = headerBottom + 10;
-
-      doc
-        .fontSize(11)
-        .fillColor('#1e1e1e')
-        .font('Helvetica-Bold')
-        .text(`${title} N° ${sale.invoiceNumber}`, MARGIN, y);
-      y += 15;
-
-      doc
-        .fontSize(8)
-        .fillColor('#505050')
-        .font('Helvetica')
-        .text(`Date : ${fmtDate(sale.createdAt)}`, MARGIN, y);
+      // Left: document meta
+      doc.fontSize(7).fillColor(MSP_GRAY).font('Helvetica').text('Date :', MARGIN, y);
+      doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+        .text(fmtDate(sale.createdAt), MARGIN + 30, y, { width: metaW - 30 });
       y += 12;
 
-      // Client box (right side, same row as meta)
-      const boxX = pageW / 2 + 8;
-      const boxW = pageW - MARGIN - boxX;
-      const boxY = headerBottom + 10;
+      // Right: client box
+      const clientBoxBottom = drawClientBlock(
+        doc,
+        clientX, sectionY, clientW,
+        sale.customerName,
+        sale.isCounterClient ?? false,
+        sale.customerAddress,
+        sale.customerPhone,
+        sale.customerEmail,
+        sale.customerTaxId,
+        sale.customerNote,
+      );
 
-      let clientBoxH = 38;
-      if (sale.isCounterClient) clientBoxH += 12;
-      if (sale.customerAddress) clientBoxH += 12;
-      if (sale.customerPhone) clientBoxH += 12;
-      if (sale.customerEmail) clientBoxH += 12;
-
-      doc
-        .rect(boxX, boxY, boxW, clientBoxH)
-        .fillColor('#f5f7fc')
-        .strokeColor('#c8d2e6')
-        .lineWidth(0.5)
-        .fillAndStroke();
-
-      doc
-        .fontSize(7)
-        .fillColor('#5064a0')
-        .font('Helvetica-Bold')
-        .text('CLIENT', boxX + 6, boxY + 5);
-
-      doc
-        .fontSize(9)
-        .fillColor('#1e1e1e')
-        .font('Helvetica-Bold')
-        .text(sale.customerName, boxX + 6, boxY + 15, { width: boxW - 12 });
-
-      doc.fontSize(7).fillColor('#505050').font('Helvetica');
-      let cY = boxY + 27;
-      if (sale.isCounterClient) {
-        doc.fillColor('#3c64b4').font('Helvetica-Oblique').text('Client comptoir', boxX + 6, cY, { width: boxW - 12 });
-        doc.font('Helvetica').fillColor('#505050');
-        cY += 12;
-      }
-      if (sale.customerAddress) {
-        doc.text(sale.customerAddress, boxX + 6, cY, { width: boxW - 12 });
-        cY += 12;
-      }
-      if (sale.customerPhone) {
-        doc.text(`Tél : ${sale.customerPhone}`, boxX + 6, cY, {
-          width: boxW - 12,
-        });
-        cY += 12;
-      }
-      if (sale.customerEmail) {
-        doc.text(sale.customerEmail, boxX + 6, cY, { width: boxW - 12 });
-      }
-
-      y = Math.max(y + 8, boxY + clientBoxH + 10);
+      y = Math.max(y + 6, clientBoxBottom + 10);
 
       // ── Items table ────────────────────────────────────────────────────────
-      const colWidths = [50, 0, 30, 55, 55, 35, 55];
+      // Cols: Désignation | Qté | PU HT | Remise% | Total HT | TVA% | Total TTC
+      const colWidths = [0, 28, 52, 38, 52, 32, 55];
       const fixedW = colWidths.reduce((s, w) => s + w, 0);
-      colWidths[1] = tableW - fixedW;
+      colWidths[0] = tableW - fixedW;
 
-      const headers = [
-        'Réf',
-        'Désignation',
-        'Qté',
-        'PU HT',
-        'Total HT',
-        'TVA',
-        'Total TTC',
-      ];
+      const headers = ['Désignation', 'Qté', 'PU HT', 'Remise%', 'Total HT', 'TVA%', 'Total TTC'];
 
-      // Draw first table header
-      let sectionTopY = y; // top of current page's table block (includes header row)
-      y = drawTableHeader(doc, y, colWidths, headers, tableW, accentColor);
+      let sectionTopY = y;
+      y = drawTableHeader(doc, y, colWidths, headers, tableW, 1);
 
-      // Draw rows with automatic pagination
       sale.items.forEach((item, idx) => {
         if (y + ROW_H > contentBottom(doc)) {
-          // Close the table section border on this page
-          doc
-            .rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
-            .strokeColor('#c8d2e6')
-            .lineWidth(0.3)
-            .stroke();
+          doc.rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
+            .strokeColor(MSP_BORDER).lineWidth(0.3).stroke();
 
-          // New page
           doc.addPage();
           pageNum++;
-          const afterCompact = drawCompactHeader(
-            doc,
-            title,
-            sale.invoiceNumber,
-            company,
-            accentColor,
-          );
+          const afterCompact = drawCompactHeader(doc, title, sale.invoiceNumber, company);
           sectionTopY = afterCompact;
-          y = drawTableHeader(
-            doc,
-            afterCompact,
-            colWidths,
-            headers,
-            tableW,
-            accentColor,
-          );
+          y = drawTableHeader(doc, afterCompact, colWidths, headers, tableW, 1);
         }
 
-        const tvaRate = 19;
+        const tvaRate = item.tvaPercent ?? 19;
+        const discPct = item.discountPercent ?? 0;
         const totalTtc = item.total * (1 + tvaRate / 100);
-        const bg = idx % 2 === 0 ? '#ffffff' : '#f7f9ff';
+        const bg = idx % 2 === 0 ? WHITE : MSP_LIGHT_GRAY;
+
         doc.rect(MARGIN, y, tableW, ROW_H).fillColor(bg).fill();
 
+        // Red accent stripe on alternating rows
+        if (idx % 2 !== 0) {
+          doc.rect(MARGIN, y, 3, ROW_H).fillColor(MSP_RED).fill();
+        }
+
         const rowData = [
-          item.reference,
           item.name,
           String(item.quantity),
           fmt3(item.unitPrice),
+          discPct > 0 ? `${discPct}%` : '—',
           fmt3(item.total),
           `${tvaRate}%`,
           fmt3(totalTtc),
@@ -470,13 +606,10 @@ export class PdfService {
 
         let colX = MARGIN;
         rowData.forEach((cell, i) => {
-          doc
-            .fontSize(7)
-            .fillColor('#282828')
-            .font('Helvetica')
-            .text(cell, colX + 3, y + 5, {
-              width: colWidths[i] - 6,
-              align: i >= 2 ? 'right' : 'left',
+          doc.fontSize(7).fillColor(MSP_BLACK).font('Helvetica')
+            .text(cell, colX + (i === 0 ? 6 : 3), y + 5, {
+              width: colWidths[i] - 9,
+              align: i >= 1 ? 'right' : 'left',
               ellipsis: true,
             });
           colX += colWidths[i];
@@ -484,90 +617,49 @@ export class PdfService {
         y += ROW_H;
       });
 
-      // Close final table section border
-      doc
-        .rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
-        .strokeColor('#c8d2e6')
-        .lineWidth(0.3)
-        .stroke();
+      doc.rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
+        .strokeColor(MSP_BORDER).lineWidth(0.3).stroke();
 
-      y += 10;
+      y += 8;
 
       // ── Totals ─────────────────────────────────────────────────────────────
-      const summaryRows: Array<{
-        label: string;
-        value: string;
-        bold?: boolean;
-      }> = [{ label: 'Total HT', value: `${fmt3(sale.subtotal)} DT` }];
-
+      const summaryRows: SummaryRow[] = [
+        { label: 'Total HT', value: `${fmt3(sale.subtotal)} DT` },
+      ];
       if (sale.discount > 0) {
-        summaryRows.push({
-          label: 'Remise',
-          value: `- ${fmt3(sale.discount)} DT`,
-        });
+        summaryRows.push({ label: 'Remise', value: `- ${fmt3(sale.discount)} DT`, color: MSP_RED });
       }
-      summaryRows.push({
-        label: 'Total TVA (19%)',
-        value: `${fmt3(sale.tax)} DT`,
-      });
-      summaryRows.push({
-        label: 'Total TTC',
-        value: `${fmt3(sale.total)} DT`,
-        bold: true,
-      });
+      summaryRows.push({ label: 'Total TVA (19%)', value: `${fmt3(sale.tax)} DT` });
+      if ((sale.timbreFiscal ?? 0) > 0) {
+        summaryRows.push({ label: 'Timbre fiscal', value: `${fmt3(sale.timbreFiscal!)} DT` });
+      }
+      summaryRows.push({ label: 'Total TTC', value: `${fmt3(sale.total)} DT`, highlight: true });
 
-      const summaryW = 165;
-      const summaryH = summaryRows.length * 16 + 12;
-
-      // Move to new page if totals block doesn't fit
-      if (y + summaryH > contentBottom(doc)) {
+      const summaryH = summaryRows.length * 16 + 10;
+      if (y + summaryH + 28 > contentBottom(doc)) {
         doc.addPage();
         pageNum++;
-        y = drawCompactHeader(doc, title, sale.invoiceNumber, company, accentColor);
+        y = drawCompactHeader(doc, title, sale.invoiceNumber, company);
         y += 6;
       }
 
-      const summaryX = pageW - MARGIN - summaryW;
-      doc
-        .rect(summaryX, y, summaryW, summaryH)
-        .fillColor('#f5f7fc')
-        .strokeColor('#c8d2e6')
-        .lineWidth(0.3)
-        .fillAndStroke();
+      const afterTotals = drawTotals(doc, y, summaryRows, pageW);
+      y = afterTotals + 10;
 
-      summaryRows.forEach((row, i) => {
-        const ry = y + 7 + i * 16;
-        if (row.bold) {
-          doc
-            .moveTo(summaryX + 4, ry - 3)
-            .lineTo(summaryX + summaryW - 4, ry - 3)
-            .strokeColor('#b4c8e6')
-            .lineWidth(0.3)
-            .stroke();
-        }
-        doc
-          .fontSize(row.bold ? 9 : 7.5)
-          .fillColor(row.bold ? '#1e1e1e' : '#505050')
-          .font(row.bold ? 'Helvetica-Bold' : 'Helvetica')
-          .text(row.label, summaryX + 6, ry);
-        doc
-          .fontSize(row.bold ? 9 : 7.5)
-          .fillColor(row.bold ? '#1e1e1e' : '#505050')
-          .font(row.bold ? 'Helvetica-Bold' : 'Helvetica')
-          .text(row.value, summaryX + 6, ry, {
-            width: summaryW - 12,
-            align: 'right',
-          });
-      });
+      // ── Montant en lettres ─────────────────────────────────────────────────
+      if (y + 16 < contentBottom(doc)) {
+        const amountWords = numberToFrenchWords(sale.total);
+        const docLabel = DOC_TITLES[documentType].toLowerCase();
+        doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Oblique')
+          .text(
+            `Arrêté le présent ${docLabel} à la somme de : ${amountWords}`,
+            MARGIN, y,
+            { width: pageW - MARGIN * 2 },
+          );
+      }
 
-      // ── Footer + cachet (last page only) ───────────────────────────────────
-      drawPageFooter(
-        doc,
-        company,
-        accentColor,
-        'Merci pour votre confiance.',
-        pageNum,
-      );
+      // ── Footer ─────────────────────────────────────────────────────────────
+      drawPageFooter(doc, company, 'Merci pour votre confiance.', pageNum);
 
       doc.end();
     });
@@ -581,7 +673,7 @@ export class PdfService {
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
-      const doc = new PDFDocument({ margin: MARGIN, size: 'A4' });
+      const doc = new PDFDocument({ margin: MARGIN, size: 'A4', autoFirstPage: true });
 
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -589,204 +681,95 @@ export class PdfService {
 
       const pageW = doc.page.width;
       const tableW = pageW - MARGIN * 2;
-      const accentColor = '#c0392b';
-      const borderColor = '#e8b4b0';
-      const companyName = company.name ?? DEFAULT_COMPANY;
+      const logoPath = resolveLogoPath();
       let pageNum = 1;
 
       // ── Page 1 full header ─────────────────────────────────────────────────
-      doc
-        .fontSize(22)
-        .fillColor(accentColor)
-        .font('Helvetica-Bold')
-        .text('AVOIR', MARGIN, MARGIN);
+      let y = drawFirstPageHeader(doc, 'AVOIR', avoir.numero, avoir.dateAvoir, company, logoPath);
 
-      doc
-        .fontSize(10)
-        .fillColor('#323232')
-        .font('Helvetica-Bold')
-        .text(companyName, MARGIN, MARGIN, {
-          align: 'right',
-          width: pageW - MARGIN * 2,
-        });
+      // ── Two-column: meta left, client right ────────────────────────────────
+      const colMid = pageW / 2 - 8;
+      const clientX = colMid + 8;
+      const clientW = pageW - MARGIN - clientX;
+      const sectionY = y;
 
-      let rightY = MARGIN + 14;
-      const companyLines: string[] = [];
-      if (company.address) companyLines.push(company.address);
-      if (company.phone) companyLines.push(`Tél : ${company.phone}`);
-      if (company.email) companyLines.push(company.email);
-      if (company.taxNumber) companyLines.push(`MF : ${company.taxNumber}`);
+      doc.fontSize(7).fillColor(MSP_GRAY).font('Helvetica').text('Date :', MARGIN, y);
+      doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+        .text(fmtDate(avoir.dateAvoir), MARGIN + 30, y);
+      y += 12;
 
-      doc.fontSize(8).fillColor('#646464').font('Helvetica');
-      companyLines.forEach((line) => {
-        doc.text(line, MARGIN, rightY, {
-          align: 'right',
-          width: pageW - MARGIN * 2,
-        });
-        rightY += 11;
-      });
-
-      const headerBottom = Math.max(MARGIN + 32, rightY + 6);
-      doc
-        .moveTo(MARGIN, headerBottom)
-        .lineTo(pageW - MARGIN, headerBottom)
-        .strokeColor(borderColor)
-        .lineWidth(0.5)
-        .stroke();
-
-      // ── Document meta ──────────────────────────────────────────────────────
-      let y = headerBottom + 10;
-
-      doc
-        .fontSize(11)
-        .fillColor('#1e1e1e')
-        .font('Helvetica-Bold')
-        .text(`AVOIR N° ${avoir.numero}`, MARGIN, y);
-      y += 15;
-
-      doc
-        .fontSize(8)
-        .fillColor('#505050')
-        .font('Helvetica')
-        .text(`Date : ${fmtDate(avoir.dateAvoir)}`, MARGIN, y);
-      y += 11;
-
-      doc.text(
-        `Facture d'origine : ${avoir.factureOrigine}`,
-        MARGIN,
-        y,
-      );
-      y += 11;
+      doc.fontSize(7).fillColor(MSP_GRAY).font('Helvetica').text("Facture d'origine :", MARGIN, y);
+      doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+        .text(avoir.factureOrigine, MARGIN + 80, y);
+      y += 12;
 
       if (avoir.motif) {
-        doc.text(`Motif : ${avoir.motif}`, MARGIN, y);
-        y += 11;
+        doc.fontSize(7).fillColor(MSP_GRAY).font('Helvetica').text('Motif :', MARGIN, y);
+        doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica')
+          .text(avoir.motif, MARGIN + 35, y, { width: colMid - MARGIN - 35 });
+        y += 12;
       }
 
-      // Client box (right side)
-      const boxX = pageW / 2 + 8;
-      const boxW = pageW - MARGIN - boxX;
-      const boxY = headerBottom + 10;
+      const clientBoxBottom = drawClientBlock(
+        doc,
+        clientX, sectionY, clientW,
+        avoir.customerName,
+        avoir.isCounterClient ?? false,
+        avoir.customerAddress,
+        avoir.customerPhone,
+        avoir.customerEmail,
+        avoir.customerTaxId,
+        avoir.customerNote,
+      );
 
-      let clientBoxH = 38;
-      if (avoir.isCounterClient) clientBoxH += 12;
-      if (avoir.customerAddress) clientBoxH += 12;
-      if (avoir.customerPhone) clientBoxH += 12;
-      if (avoir.customerEmail) clientBoxH += 12;
-
-      doc
-        .rect(boxX, boxY, boxW, clientBoxH)
-        .fillColor('#fdf5f5')
-        .strokeColor(borderColor)
-        .lineWidth(0.5)
-        .fillAndStroke();
-
-      doc
-        .fontSize(7)
-        .fillColor('#a04040')
-        .font('Helvetica-Bold')
-        .text('CLIENT', boxX + 6, boxY + 5);
-
-      doc
-        .fontSize(9)
-        .fillColor('#1e1e1e')
-        .font('Helvetica-Bold')
-        .text(avoir.customerName, boxX + 6, boxY + 15, { width: boxW - 12 });
-
-      doc.fontSize(7).fillColor('#505050').font('Helvetica');
-      let cY = boxY + 27;
-      if (avoir.isCounterClient) {
-        doc.fillColor('#3c64b4').font('Helvetica-Oblique').text('Client comptoir', boxX + 6, cY, { width: boxW - 12 });
-        doc.font('Helvetica').fillColor('#505050');
-        cY += 12;
-      }
-      if (avoir.customerAddress) {
-        doc.text(avoir.customerAddress, boxX + 6, cY, { width: boxW - 12 });
-        cY += 12;
-      }
-      if (avoir.customerPhone) {
-        doc.text(`Tél : ${avoir.customerPhone}`, boxX + 6, cY, {
-          width: boxW - 12,
-        });
-        cY += 12;
-      }
-      if (avoir.customerEmail) {
-        doc.text(avoir.customerEmail, boxX + 6, cY, { width: boxW - 12 });
-      }
-
-      y = Math.max(y + 8, boxY + clientBoxH + 10);
+      y = Math.max(y + 6, clientBoxBottom + 10);
 
       // ── Items table ────────────────────────────────────────────────────────
-      const colWidths = [50, 0, 30, 50, 45, 35, 50, 50];
+      // Cols: Désignation | Qté | PU HT | Total HT | TVA% | Total TTC | Motif
+      const colWidths = [0, 28, 50, 44, 32, 50, 50];
       const fixedW = colWidths.reduce((s, w) => s + w, 0);
-      colWidths[1] = tableW - fixedW;
+      colWidths[0] = tableW - fixedW;
 
-      const headers = [
-        'Réf',
-        'Désignation',
-        'Qté',
-        'PU HT',
-        'Total HT',
-        'TVA',
-        'Total TTC',
-        'Motif',
-      ];
+      const headers = ['Désignation', 'Qté', 'PU HT', 'Total HT', 'TVA%', 'Total TTC', 'Motif'];
 
       let sectionTopY = y;
-      y = drawTableHeader(doc, y, colWidths, headers, tableW, accentColor, 2);
+      y = drawTableHeader(doc, y, colWidths, headers, tableW, 1);
 
       avoir.items.forEach((item, idx) => {
         if (y + ROW_H > contentBottom(doc)) {
-          doc
-            .rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
-            .strokeColor(borderColor)
-            .lineWidth(0.3)
-            .stroke();
+          doc.rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
+            .strokeColor(MSP_BORDER).lineWidth(0.3).stroke();
 
           doc.addPage();
           pageNum++;
-          const afterCompact = drawCompactHeader(
-            doc,
-            'AVOIR',
-            avoir.numero,
-            company,
-            accentColor,
-          );
+          const afterCompact = drawCompactHeader(doc, 'AVOIR', avoir.numero, company);
           sectionTopY = afterCompact;
-          y = drawTableHeader(
-            doc,
-            afterCompact,
-            colWidths,
-            headers,
-            tableW,
-            accentColor,
-            2,
-          );
+          y = drawTableHeader(doc, afterCompact, colWidths, headers, tableW, 1);
         }
 
-        const bg = idx % 2 === 0 ? '#ffffff' : '#fdf5f5';
+        const bg = idx % 2 === 0 ? WHITE : MSP_LIGHT_GRAY;
         doc.rect(MARGIN, y, tableW, ROW_H).fillColor(bg).fill();
 
+        if (idx % 2 !== 0) {
+          doc.rect(MARGIN, y, 3, ROW_H).fillColor(MSP_RED).fill();
+        }
+
         const rowData = [
-          item.reference,
           item.name,
           String(item.quantiteRetournee),
           fmt3(item.prixUnitaireHt),
           fmt3(item.totalHt),
           `${item.tva}%`,
           fmt3(item.totalTtc),
-          item.motifLigne ?? '',
+          item.motifLigne ?? '—',
         ];
 
         let colX = MARGIN;
         rowData.forEach((cell, i) => {
-          doc
-            .fontSize(7)
-            .fillColor('#282828')
-            .font('Helvetica')
-            .text(cell, colX + 3, y + 5, {
-              width: colWidths[i] - 6,
-              align: i >= 2 && i <= 6 ? 'right' : 'left',
+          doc.fontSize(7).fillColor(MSP_BLACK).font('Helvetica')
+            .text(cell, colX + (i === 0 ? 6 : 3), y + 5, {
+              width: colWidths[i] - 9,
+              align: i >= 1 && i <= 5 ? 'right' : 'left',
               ellipsis: true,
             });
           colX += colWidths[i];
@@ -794,85 +777,45 @@ export class PdfService {
         y += ROW_H;
       });
 
-      doc
-        .rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
-        .strokeColor(borderColor)
-        .lineWidth(0.3)
-        .stroke();
+      doc.rect(MARGIN, sectionTopY, tableW, y - sectionTopY)
+        .strokeColor(MSP_BORDER).lineWidth(0.3).stroke();
 
-      y += 10;
+      y += 8;
 
       // ── Totals ─────────────────────────────────────────────────────────────
-      const summaryRows: Array<{
-        label: string;
-        value: string;
-        bold?: boolean;
-        color?: string;
-      }> = [
+      const summaryRows: SummaryRow[] = [
         { label: 'Total HT', value: `${fmt3(avoir.subtotal)} DT` },
         { label: 'Total TVA', value: `${fmt3(avoir.tax)} DT` },
-        {
-          label: 'Total TTC',
-          value: `${fmt3(avoir.total)} DT`,
-          bold: true,
-        },
-        {
-          label: 'Montant remboursé',
-          value: `${fmt3(avoir.montantRembourse)} DT`,
-          bold: true,
-          color: accentColor,
-        },
+        { label: 'Total TTC', value: `${fmt3(avoir.total)} DT`, bold: true },
+        { label: 'Montant remboursé', value: `${fmt3(avoir.montantRembourse)} DT`, highlight: true },
       ];
 
-      const summaryW = 175;
-      const summaryH = summaryRows.length * 16 + 12;
-
-      if (y + summaryH > contentBottom(doc)) {
+      const summaryH = summaryRows.length * 16 + 10;
+      if (y + summaryH + 16 > contentBottom(doc)) {
         doc.addPage();
         pageNum++;
-        y = drawCompactHeader(doc, 'AVOIR', avoir.numero, company, accentColor);
+        y = drawCompactHeader(doc, 'AVOIR', avoir.numero, company);
         y += 6;
       }
 
-      const summaryX = pageW - MARGIN - summaryW;
-      doc
-        .rect(summaryX, y, summaryW, summaryH)
-        .fillColor('#fdf5f5')
-        .strokeColor(borderColor)
-        .lineWidth(0.3)
-        .fillAndStroke();
+      const afterTotals = drawTotals(doc, y, summaryRows, pageW);
+      y = afterTotals + 10;
 
-      summaryRows.forEach((row, i) => {
-        const ry = y + 7 + i * 16;
-        if (row.bold) {
-          doc
-            .moveTo(summaryX + 4, ry - 3)
-            .lineTo(summaryX + summaryW - 4, ry - 3)
-            .strokeColor(borderColor)
-            .lineWidth(0.3)
-            .stroke();
-        }
-        const color = row.color ?? (row.bold ? '#1e1e1e' : '#505050');
-        doc
-          .fontSize(row.bold ? 9 : 7.5)
-          .fillColor(color)
-          .font(row.bold ? 'Helvetica-Bold' : 'Helvetica')
-          .text(row.label, summaryX + 6, ry);
-        doc
-          .fontSize(row.bold ? 9 : 7.5)
-          .fillColor(color)
-          .font(row.bold ? 'Helvetica-Bold' : 'Helvetica')
-          .text(row.value, summaryX + 6, ry, {
-            width: summaryW - 12,
-            align: 'right',
-          });
-      });
+      // ── Montant en lettres ─────────────────────────────────────────────────
+      if (y + 16 < contentBottom(doc)) {
+        const amountWords = numberToFrenchWords(avoir.total);
+        doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Oblique')
+          .text(
+            `Arrêté le présent avoir à la somme de : ${amountWords}`,
+            MARGIN, y,
+            { width: pageW - MARGIN * 2 },
+          );
+      }
 
-      // ── Footer + cachet (last page only) ───────────────────────────────────
+      // ── Footer ─────────────────────────────────────────────────────────────
       drawPageFooter(
         doc,
         company,
-        accentColor,
         "Ce document annule et remplace partiellement la facture d'origine.",
         pageNum,
       );

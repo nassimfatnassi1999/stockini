@@ -166,11 +166,18 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
               setPuHtRaw(line.puHt > 0 ? String(line.puHt) : '');
               setIsPuHtFocused(true);
             }}
-            onChange={(e) => setPuHtRaw(e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setPuHtRaw(raw);
+              // Recalcul immédiat à chaque frappe
+              const newPuHt = Math.max(0, parseFloat(raw.replace(',', '.')) || 0);
+              const manual = newPuHt > 0;
+              onChange(recalculateSaleLine({ ...line, puHt: manual ? newPuHt : 0, manualUnitPriceHt: manual }));
+            }}
             onBlur={() => {
               setIsPuHtFocused(false);
+              // Recalcul final pour assurer la cohérence (ex: focus sans frappe)
               const newPuHt = Math.max(0, parseFloat(puHtRaw.replace(',', '.')) || 0);
-              // Empty field → revert to auto-computed mode
               const manual = newPuHt > 0;
               onChange(recalculateSaleLine({ ...line, puHt: manual ? newPuHt : 0, manualUnitPriceHt: manual }));
             }}

@@ -15,6 +15,7 @@ import {
   Mail,
   RotateCcw,
   Trash2,
+  UserCircle,
   X,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -258,6 +259,10 @@ interface VenteDraft {
   customerId: string;
   counterClientFirstName: string;
   counterClientLastName: string;
+  counterClientPhone: string;
+  counterClientAddress: string;
+  counterClientTaxId: string;
+  counterClientNote: string;
   saleDate: string;
   paidAmount: string;
   paymentMethod: string;
@@ -272,6 +277,12 @@ export default function VentesPage() {
   const [customerId, setCustomerId] = useState('');
   const [counterClientFirstName, setCounterClientFirstName] = useState('');
   const [counterClientLastName, setCounterClientLastName] = useState('');
+  const [counterClientPhone, setCounterClientPhone] = useState('');
+  const [counterClientAddress, setCounterClientAddress] = useState('');
+  const [counterClientTaxId, setCounterClientTaxId] = useState('');
+  const [counterClientNote, setCounterClientNote] = useState('');
+  const [showCounterPanel, setShowCounterPanel] = useState(true);
+  const [counterClientErrors, setCounterClientErrors] = useState<Record<string, string>>({});
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -355,11 +366,30 @@ export default function VentesPage() {
       .includes('comptoir') ||
     !customerId;
 
+  const isCounterInfoComplete = isComptoir &&
+    Boolean(counterClientFirstName.trim()) &&
+    Boolean(counterClientLastName.trim()) &&
+    Boolean(counterClientPhone.trim()) &&
+    Boolean(counterClientAddress.trim());
+
   useEffect(() => {
     if (isComptoir || (!counterClientFirstName && !counterClientLastName)) return;
     setCounterClientFirstName('');
     setCounterClientLastName('');
+    setCounterClientPhone('');
+    setCounterClientAddress('');
+    setCounterClientTaxId('');
+    setCounterClientNote('');
   }, [isComptoir, counterClientFirstName, counterClientLastName]);
+
+  useEffect(() => {
+    if (isComptoir) {
+      setShowCounterPanel(true);
+    } else {
+      setShowCounterPanel(false);
+      setCounterClientErrors({});
+    }
+  }, [isComptoir]);
 
   const draftData = useMemo<VenteDraft>(
     () => ({
@@ -367,6 +397,10 @@ export default function VentesPage() {
       customerId,
       counterClientFirstName,
       counterClientLastName,
+      counterClientPhone,
+      counterClientAddress,
+      counterClientTaxId,
+      counterClientNote,
       saleDate,
       paidAmount,
       paymentMethod,
@@ -377,6 +411,10 @@ export default function VentesPage() {
       customerId,
       counterClientFirstName,
       counterClientLastName,
+      counterClientPhone,
+      counterClientAddress,
+      counterClientTaxId,
+      counterClientNote,
       saleDate,
       paidAmount,
       paymentMethod,
@@ -423,6 +461,10 @@ export default function VentesPage() {
     setCustomerId(draft.customerId ?? '');
     setCounterClientFirstName(draft.counterClientFirstName ?? '');
     setCounterClientLastName(draft.counterClientLastName ?? '');
+    setCounterClientPhone(draft.counterClientPhone ?? '');
+    setCounterClientAddress(draft.counterClientAddress ?? '');
+    setCounterClientTaxId(draft.counterClientTaxId ?? '');
+    setCounterClientNote(draft.counterClientNote ?? '');
     setSaleDate(draft.saleDate ?? new Date().toISOString());
     setPaidAmount(draft.paidAmount ?? '');
     setPaymentMethod(draft.paymentMethod ?? '');
@@ -509,6 +551,11 @@ export default function VentesPage() {
     setCustomerId('');
     setCounterClientFirstName('');
     setCounterClientLastName('');
+    setCounterClientPhone('');
+    setCounterClientAddress('');
+    setCounterClientTaxId('');
+    setCounterClientNote('');
+    setCounterClientErrors({});
     setSaleDate(new Date().toISOString());
     setPaidAmount('');
     setPaymentMethod('');
@@ -529,7 +576,29 @@ export default function VentesPage() {
     if (!nextIsComptoir) {
       setCounterClientFirstName('');
       setCounterClientLastName('');
+      setCounterClientPhone('');
+      setCounterClientAddress('');
+      setCounterClientTaxId('');
+      setCounterClientNote('');
+      setCounterClientErrors({});
     }
+  };
+
+  const handleSave = () => {
+    if (isComptoir) {
+      const errors: Record<string, string> = {};
+      if (!counterClientFirstName.trim()) errors.counterClientFirstName = 'Prénom obligatoire';
+      if (!counterClientLastName.trim()) errors.counterClientLastName = 'Nom obligatoire';
+      if (!counterClientPhone.trim()) errors.counterClientPhone = 'Téléphone obligatoire';
+      if (!counterClientAddress.trim()) errors.counterClientAddress = 'Adresse obligatoire';
+      if (Object.keys(errors).length > 0) {
+        setCounterClientErrors(errors);
+        setShowCounterPanel(true);
+        return;
+      }
+      setCounterClientErrors({});
+    }
+    createMutation.mutate();
   };
 
   const createMutation = useMutation({
@@ -573,22 +642,25 @@ export default function VentesPage() {
       if (submittedPaidAmount > 0 && !paymentMethod) {
         throw new Error('Veuillez sélectionner une méthode de paiement.');
       }
-      const trimmedCounterFirstName = counterClientFirstName.trim();
-      const trimmedCounterLastName = counterClientLastName.trim();
-      if (isComptoir && (!trimmedCounterFirstName || !trimmedCounterLastName)) {
-        throw new Error('Veuillez saisir le prénom et le nom du client comptoir.');
-      }
+      const trimmedFirstName = counterClientFirstName.trim();
+      const trimmedLastName = counterClientLastName.trim();
+      const trimmedPhone = counterClientPhone.trim();
+      const trimmedAddress = counterClientAddress.trim();
 
       return api
         .post<Sale>('/sales', {
           documentType,
           customerId: customerId || undefined,
           clientType: isComptoir ? 'COMPTOIR' : 'PERSISTENT',
-          counterClientFirstName: isComptoir ? trimmedCounterFirstName : null,
-          counterClientLastName: isComptoir ? trimmedCounterLastName : null,
+          counterClientFirstName: isComptoir ? trimmedFirstName : null,
+          counterClientLastName: isComptoir ? trimmedLastName : null,
           counterClientFullName: isComptoir
-            ? `${trimmedCounterFirstName} ${trimmedCounterLastName}`.trim()
+            ? `${trimmedFirstName} ${trimmedLastName}`.trim()
             : null,
+          counterClientPhone: isComptoir ? trimmedPhone || null : null,
+          counterClientAddress: isComptoir ? trimmedAddress || null : null,
+          counterClientTaxId: isComptoir ? counterClientTaxId.trim() || null : null,
+          counterClientNote: isComptoir ? counterClientNote.trim() || null : null,
           paidAmount: submittedPaidAmount,
           paymentMethod:
             submittedPaidAmount > 0 && paymentMethod ? paymentMethod : undefined,
@@ -909,15 +981,8 @@ export default function VentesPage() {
       <>
 
       {/* Document header: client + date */}
-      <div className="rounded-lg border border-border/70 bg-white p-4">
-        <div
-          className={cn(
-            'grid gap-4',
-            isComptoir
-              ? 'grid-cols-1 md:grid-cols-[2fr_120px_1fr_1fr]'
-              : 'grid-cols-1 md:grid-cols-[2fr_120px]',
-          )}
-        >
+      <div className="rounded-lg border border-border/70 bg-white p-4 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-[2fr_120px] gap-4">
           <div className="space-y-1.5">
             <Label htmlFor="sale-customer">Client</Label>
             <select
@@ -940,32 +1005,140 @@ export default function VentesPage() {
               {today}
             </div>
           </div>
-          {isComptoir && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="counter-client-first-name">Prénom</Label>
-                <Input
-                  id="counter-client-first-name"
-                  placeholder="Prénom client"
-                  value={form.counterClientFirstName || ''}
-                  onChange={(e) => setCounterClientFirstName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="counter-client-last-name">Nom</Label>
-                <Input
-                  id="counter-client-last-name"
-                  placeholder="Nom client"
-                  value={form.counterClientLastName || ''}
-                  onChange={(e) => setCounterClientLastName(e.target.value)}
-                  required
-                />
-              </div>
-            </>
-          )}
         </div>
+
+        {/* Comptoir client toggle + collapsible panel */}
+        {isComptoir && (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowCounterPanel((v) => !v)}
+              className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                isCounterInfoComplete
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <UserCircle size={15} />
+                {isCounterInfoComplete ? 'Infos client complètes ✓' : 'Compléter infos client *'}
+              </span>
+              <ChevronDown
+                size={14}
+                className={`transition-transform duration-200 ${showCounterPanel ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {showCounterPanel && (
+              <div className="rounded-lg border border-border bg-slate-50 p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="ccf-firstName" className="text-xs">Prénom *</Label>
+                    <Input
+                      id="ccf-firstName"
+                      value={counterClientFirstName}
+                      onChange={(e) => {
+                        setCounterClientFirstName(e.target.value);
+                        if (counterClientErrors.counterClientFirstName) {
+                          setCounterClientErrors((p) => ({ ...p, counterClientFirstName: '' }));
+                        }
+                      }}
+                      placeholder="Prénom"
+                      className={`h-8 text-sm ${counterClientErrors.counterClientFirstName ? 'border-red-400' : ''}`}
+                    />
+                    {counterClientErrors.counterClientFirstName && (
+                      <p className="text-xs text-red-500">{counterClientErrors.counterClientFirstName}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="ccf-lastName" className="text-xs">Nom *</Label>
+                    <Input
+                      id="ccf-lastName"
+                      value={counterClientLastName}
+                      onChange={(e) => {
+                        setCounterClientLastName(e.target.value);
+                        if (counterClientErrors.counterClientLastName) {
+                          setCounterClientErrors((p) => ({ ...p, counterClientLastName: '' }));
+                        }
+                      }}
+                      placeholder="Nom"
+                      className={`h-8 text-sm ${counterClientErrors.counterClientLastName ? 'border-red-400' : ''}`}
+                    />
+                    {counterClientErrors.counterClientLastName && (
+                      <p className="text-xs text-red-500">{counterClientErrors.counterClientLastName}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="ccf-phone" className="text-xs">Téléphone *</Label>
+                    <Input
+                      id="ccf-phone"
+                      value={counterClientPhone}
+                      onChange={(e) => {
+                        setCounterClientPhone(e.target.value);
+                        if (counterClientErrors.counterClientPhone) {
+                          setCounterClientErrors((p) => ({ ...p, counterClientPhone: '' }));
+                        }
+                      }}
+                      placeholder="+216 xx xxx xxx"
+                      className={`h-8 text-sm ${counterClientErrors.counterClientPhone ? 'border-red-400' : ''}`}
+                    />
+                    {counterClientErrors.counterClientPhone && (
+                      <p className="text-xs text-red-500">{counterClientErrors.counterClientPhone}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="ccf-taxId" className="text-xs">Matricule fiscal (MF)</Label>
+                    <Input
+                      id="ccf-taxId"
+                      value={counterClientTaxId}
+                      onChange={(e) => setCounterClientTaxId(e.target.value)}
+                      placeholder="MF optionnel"
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="ccf-address" className="text-xs">Adresse *</Label>
+                  <Input
+                    id="ccf-address"
+                    value={counterClientAddress}
+                    onChange={(e) => {
+                      setCounterClientAddress(e.target.value);
+                      if (counterClientErrors.counterClientAddress) {
+                        setCounterClientErrors((p) => ({ ...p, counterClientAddress: '' }));
+                      }
+                    }}
+                    placeholder="Adresse complète"
+                    className={`h-8 text-sm ${counterClientErrors.counterClientAddress ? 'border-red-400' : ''}`}
+                  />
+                  {counterClientErrors.counterClientAddress && (
+                    <p className="text-xs text-red-500">{counterClientErrors.counterClientAddress}</p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="ccf-note" className="text-xs">Note (optionnel)</Label>
+                  <Input
+                    id="ccf-note"
+                    value={counterClientNote}
+                    onChange={(e) => setCounterClientNote(e.target.value)}
+                    placeholder="Note libre"
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowCounterPanel(false)}
+                  >
+                    Masquer
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Register grid */}
@@ -1036,7 +1209,7 @@ export default function VentesPage() {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => createMutation.mutate()}
+                onClick={handleSave}
                 disabled={!canSave || createMutation.isPending}
               >
                 {createMutation.isPending ? 'Enregistrement…' : currentDocConfig.saveLabel}

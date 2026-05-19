@@ -88,6 +88,22 @@ export class CreateSaleDto {
   counterClientFullName?: string;
 
   @IsOptional()
+  @IsString()
+  counterClientPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  counterClientAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  counterClientTaxId?: string;
+
+  @IsOptional()
+  @IsString()
+  counterClientNote?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

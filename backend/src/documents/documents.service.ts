@@ -116,6 +116,7 @@ export class DocumentsService {
       const folder = DOC_FOLDER[dto.documentType];
       const objectKey = `documents/ventes/${folder}/${year}/${month}/${fileName}`;
 
+      const isComptoir = sale.clientType === 'COMPTOIR';
       const pdfBuffer = await this.pdf.generateSaleDocument(
         {
           invoiceNumber: sale.invoiceNumber,
@@ -125,15 +126,18 @@ export class DocumentsService {
           tax: Number(sale.tax),
           total: Number(sale.total),
           customerName: clientName,
-          isCounterClient: sale.clientType === 'COMPTOIR',
-          customerAddress: sale.customer?.address,
-          customerPhone: sale.customer?.phone,
-          customerEmail: sale.customer?.email,
+          isCounterClient: isComptoir,
+          customerAddress: isComptoir ? sale.counterClientAddress : sale.customer?.address,
+          customerPhone: isComptoir ? sale.counterClientPhone : sale.customer?.phone,
+          customerEmail: isComptoir ? null : sale.customer?.email,
+          customerTaxId: isComptoir ? sale.counterClientTaxId : (sale.customer as { taxId?: string | null } | null)?.taxId,
+          customerNote: isComptoir ? sale.counterClientNote : null,
           items: sale.items.map((item) => ({
             reference: item.product?.reference ?? '—',
             name: item.product?.name ?? '—',
             quantity: item.quantity,
             unitPrice: Number(item.unitPrice),
+            discountPercent: Number(item.discountPercent ?? 0),
             total: Number(item.total),
           })),
         },
@@ -606,6 +610,7 @@ export class DocumentsService {
     const sale = existing.sale;
     if (!sale) throw new BadRequestException('Aucune vente liée à ce document');
 
+    const isRegenerateComptoir = sale.clientType === 'COMPTOIR';
     const pdfBuffer = await this.pdf.generateSaleDocument(
       {
         invoiceNumber: sale.invoiceNumber,
@@ -616,15 +621,18 @@ export class DocumentsService {
         total: Number(sale.total),
         customerName:
           sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir',
-        isCounterClient: sale.clientType === 'COMPTOIR',
-        customerAddress: sale.customer?.address,
-        customerPhone: sale.customer?.phone,
-        customerEmail: sale.customer?.email,
+        isCounterClient: isRegenerateComptoir,
+        customerAddress: isRegenerateComptoir ? sale.counterClientAddress : sale.customer?.address,
+        customerPhone: isRegenerateComptoir ? sale.counterClientPhone : sale.customer?.phone,
+        customerEmail: isRegenerateComptoir ? null : sale.customer?.email,
+        customerTaxId: isRegenerateComptoir ? sale.counterClientTaxId : (sale.customer as { taxId?: string | null } | null)?.taxId,
+        customerNote: isRegenerateComptoir ? sale.counterClientNote : null,
         items: sale.items.map((item) => ({
           reference: item.product?.reference ?? '—',
           name: item.product?.name ?? '—',
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice),
+          discountPercent: Number(item.discountPercent ?? 0),
           total: Number(item.total),
         })),
       },
