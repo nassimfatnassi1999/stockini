@@ -2,7 +2,6 @@ export { StockiniDashboardPage } from './pages/DashboardPage';
 export { ProductsPage } from './pages/ProductsPage';
 export { CustomersPage } from './pages/CustomersPage';
 export { SuppliersPage } from './pages/SuppliersPage';
-export { SalesPage } from './pages/SalesPage';
 export { PurchasesPage } from './pages/PurchasesPage';
 export { PaymentsPage } from './pages/PaymentsPage';
 export { StockMovementsPage } from './pages/StockMovementsPage';

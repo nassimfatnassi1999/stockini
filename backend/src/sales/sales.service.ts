@@ -254,10 +254,11 @@ export class SalesService {
       });
 
       const sellerId = user?.id;
-      const counterClientFullName =
-        isComptoir && dto.counterClientFirstName && dto.counterClientLastName
+      const counterClientFullName = isComptoir
+        ? dto.counterClientFirstName && dto.counterClientLastName
           ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
-          : undefined;
+          : undefined
+        : dto.counterClientFullName?.trim() || undefined;
 
       const sale = await tx.sale.create({
         data: {
@@ -267,10 +268,10 @@ export class SalesService {
           counterClientFirstName: isComptoir ? dto.counterClientFirstName?.trim() ?? null : null,
           counterClientLastName: isComptoir ? dto.counterClientLastName?.trim() ?? null : null,
           counterClientFullName: counterClientFullName ?? null,
-          counterClientPhone: isComptoir ? dto.counterClientPhone?.trim() ?? null : null,
-          counterClientAddress: isComptoir ? dto.counterClientAddress?.trim() ?? null : null,
-          counterClientTaxId: isComptoir ? dto.counterClientTaxId?.trim() ?? null : null,
-          counterClientNote: isComptoir ? dto.counterClientNote?.trim() ?? null : null,
+          counterClientPhone: dto.counterClientPhone?.trim() ?? null,
+          counterClientAddress: dto.counterClientAddress?.trim() ?? null,
+          counterClientTaxId: dto.counterClientTaxId?.trim() ?? null,
+          counterClientNote: dto.counterClientNote?.trim() ?? null,
           subtotal,
           discount,
           tax,

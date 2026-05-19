@@ -77,6 +77,7 @@ export class DocumentsService {
         include: {
           customer: true,
           items: { include: { product: true } },
+          seller: { select: { fullName: true } },
         },
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
@@ -117,6 +118,7 @@ export class DocumentsService {
       const objectKey = `documents/ventes/${folder}/${year}/${month}/${fileName}`;
 
       const isComptoir = sale.clientType === 'COMPTOIR';
+      // Snapshot fields take priority over live customer data for all client types
       const pdfBuffer = await this.pdf.generateSaleDocument(
         {
           invoiceNumber: sale.invoiceNumber,
@@ -127,11 +129,12 @@ export class DocumentsService {
           total: Number(sale.total),
           customerName: clientName,
           isCounterClient: isComptoir,
-          customerAddress: isComptoir ? sale.counterClientAddress : sale.customer?.address,
-          customerPhone: isComptoir ? sale.counterClientPhone : sale.customer?.phone,
-          customerEmail: isComptoir ? null : sale.customer?.email,
-          customerTaxId: isComptoir ? sale.counterClientTaxId : (sale.customer as { taxId?: string | null } | null)?.taxId,
-          customerNote: isComptoir ? sale.counterClientNote : null,
+          customerAddress: sale.counterClientAddress ?? sale.customer?.address ?? null,
+          customerPhone: sale.counterClientPhone ?? sale.customer?.phone ?? null,
+          customerEmail: isComptoir ? null : (sale.customer?.email ?? null),
+          customerTaxId: sale.counterClientTaxId ?? (sale.customer as { taxNumber?: string | null } | null)?.taxNumber ?? null,
+          customerNote: sale.counterClientNote ?? null,
+          representant: (sale as any).seller?.fullName ?? null,
           items: sale.items.map((item) => ({
             reference: item.product?.reference ?? '—',
             name: item.product?.name ?? '—',
@@ -601,7 +604,11 @@ export class DocumentsService {
       where: { id },
       include: {
         sale: {
-          include: { customer: true, items: { include: { product: true } } },
+          include: {
+            customer: true,
+            items: { include: { product: true } },
+            seller: { select: { fullName: true } },
+          },
         },
       },
     });
@@ -627,6 +634,7 @@ export class DocumentsService {
         customerEmail: isRegenerateComptoir ? null : sale.customer?.email,
         customerTaxId: isRegenerateComptoir ? sale.counterClientTaxId : (sale.customer as { taxId?: string | null } | null)?.taxId,
         customerNote: isRegenerateComptoir ? sale.counterClientNote : null,
+        representant: (sale as any).seller?.fullName ?? null,
         items: sale.items.map((item) => ({
           reference: item.product?.reference ?? '—',
           name: item.product?.name ?? '—',
@@ -694,6 +702,10 @@ export class DocumentsService {
         map['tax_number'] ??
         map['matricule_fiscal'] ??
         process.env.COMPANY_TAX_ID ??
+        undefined,
+      logoUrl:
+        map['company_logo_url'] ??
+        process.env.COMPANY_LOGO_URL ??
         undefined,
     };
   }

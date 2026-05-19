@@ -3,7 +3,6 @@ export {
   ProductsPage,
   CustomersPage,
   SuppliersPage,
-  SalesPage,
   PurchasesPage,
   PaymentsPage,
   StockMovementsPage,

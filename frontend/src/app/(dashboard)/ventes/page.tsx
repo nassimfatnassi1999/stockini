@@ -257,6 +257,7 @@ function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: Transfo
 interface VenteDraft {
   lines: RegisterLine[];
   customerId: string;
+  clientInfoName: string;
   counterClientFirstName: string;
   counterClientLastName: string;
   counterClientPhone: string;
@@ -275,13 +276,14 @@ export default function VentesPage() {
   const { can } = usePermissions();
   const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
   const [customerId, setCustomerId] = useState('');
+  const [clientInfoName, setClientInfoName] = useState('');
   const [counterClientFirstName, setCounterClientFirstName] = useState('');
   const [counterClientLastName, setCounterClientLastName] = useState('');
   const [counterClientPhone, setCounterClientPhone] = useState('');
   const [counterClientAddress, setCounterClientAddress] = useState('');
   const [counterClientTaxId, setCounterClientTaxId] = useState('');
   const [counterClientNote, setCounterClientNote] = useState('');
-  const [showCounterPanel, setShowCounterPanel] = useState(true);
+  const [showCounterPanel, setShowCounterPanel] = useState(false);
   const [counterClientErrors, setCounterClientErrors] = useState<Record<string, string>>({});
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [paidAmount, setPaidAmount] = useState('');
@@ -373,28 +375,19 @@ export default function VentesPage() {
     Boolean(counterClientAddress.trim());
 
   useEffect(() => {
-    if (isComptoir || (!counterClientFirstName && !counterClientLastName)) return;
-    setCounterClientFirstName('');
-    setCounterClientLastName('');
-    setCounterClientPhone('');
-    setCounterClientAddress('');
-    setCounterClientTaxId('');
-    setCounterClientNote('');
-  }, [isComptoir, counterClientFirstName, counterClientLastName]);
-
-  useEffect(() => {
-    if (isComptoir) {
+    if (isComptoir && customerId) {
+      // Named COMPTOIR client selected: auto-open panel
       setShowCounterPanel(true);
-    } else {
-      setShowCounterPanel(false);
       setCounterClientErrors({});
     }
-  }, [isComptoir]);
+    // Implicit comptoir (!customerId) and persistent: don't auto-change panel state
+  }, [isComptoir, customerId]);
 
   const draftData = useMemo<VenteDraft>(
     () => ({
       lines,
       customerId,
+      clientInfoName,
       counterClientFirstName,
       counterClientLastName,
       counterClientPhone,
@@ -409,6 +402,7 @@ export default function VentesPage() {
     [
       lines,
       customerId,
+      clientInfoName,
       counterClientFirstName,
       counterClientLastName,
       counterClientPhone,
@@ -459,6 +453,7 @@ export default function VentesPage() {
         : [createEmptyLine()],
     );
     setCustomerId(draft.customerId ?? '');
+    setClientInfoName(draft.clientInfoName ?? '');
     setCounterClientFirstName(draft.counterClientFirstName ?? '');
     setCounterClientLastName(draft.counterClientLastName ?? '');
     setCounterClientPhone(draft.counterClientPhone ?? '');
@@ -549,6 +544,7 @@ export default function VentesPage() {
   const resetForm = () => {
     setLines([createEmptyLine()]);
     setCustomerId('');
+    setClientInfoName('');
     setCounterClientFirstName('');
     setCounterClientLastName('');
     setCounterClientPhone('');
@@ -556,6 +552,7 @@ export default function VentesPage() {
     setCounterClientTaxId('');
     setCounterClientNote('');
     setCounterClientErrors({});
+    setShowCounterPanel(false);
     setSaleDate(new Date().toISOString());
     setPaidAmount('');
     setPaymentMethod('');
@@ -573,7 +570,19 @@ export default function VentesPage() {
       nextClient?.name?.toLowerCase().includes('comptoir') ||
       nextCustomerId.toLowerCase().includes('comptoir');
 
-    if (!nextIsComptoir) {
+    if (!nextIsComptoir && nextCustomerId) {
+      // Pre-fill snapshot from persistent customer data
+      const clientWithTax = nextClient as (typeof nextClient & { taxNumber?: string | null }) | undefined;
+      setClientInfoName(nextClient?.name ?? '');
+      setCounterClientPhone(nextClient?.phone ?? '');
+      setCounterClientAddress(nextClient?.address ?? '');
+      setCounterClientTaxId(clientWithTax?.taxNumber ?? '');
+      setCounterClientNote('');
+      setCounterClientFirstName('');
+      setCounterClientLastName('');
+      setCounterClientErrors({});
+    } else {
+      setClientInfoName('');
       setCounterClientFirstName('');
       setCounterClientLastName('');
       setCounterClientPhone('');
@@ -655,12 +664,12 @@ export default function VentesPage() {
           counterClientFirstName: isComptoir ? trimmedFirstName : null,
           counterClientLastName: isComptoir ? trimmedLastName : null,
           counterClientFullName: isComptoir
-            ? `${trimmedFirstName} ${trimmedLastName}`.trim()
-            : null,
-          counterClientPhone: isComptoir ? trimmedPhone || null : null,
-          counterClientAddress: isComptoir ? trimmedAddress || null : null,
-          counterClientTaxId: isComptoir ? counterClientTaxId.trim() || null : null,
-          counterClientNote: isComptoir ? counterClientNote.trim() || null : null,
+            ? `${trimmedFirstName} ${trimmedLastName}`.trim() || null
+            : clientInfoName.trim() || null,
+          counterClientPhone: trimmedPhone || null,
+          counterClientAddress: trimmedAddress || null,
+          counterClientTaxId: counterClientTaxId.trim() || null,
+          counterClientNote: counterClientNote.trim() || null,
           paidAmount: submittedPaidAmount,
           paymentMethod:
             submittedPaidAmount > 0 && paymentMethod ? paymentMethod : undefined,
@@ -1007,21 +1016,25 @@ export default function VentesPage() {
           </div>
         </div>
 
-        {/* Comptoir client toggle + collapsible panel */}
-        {isComptoir && (
+        {/* Client info panel — always visible (comptoir implicit when no client, or any selected client) */}
+        {(isComptoir || customerId) && (
           <div className="space-y-2">
             <button
               type="button"
               onClick={() => setShowCounterPanel((v) => !v)}
               className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                isCounterInfoComplete
-                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                  : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                isComptoir
+                  ? isCounterInfoComplete
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                  : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
               }`}
             >
               <span className="flex items-center gap-2">
                 <UserCircle size={15} />
-                {isCounterInfoComplete ? 'Infos client complètes ✓' : 'Compléter infos client *'}
+                {isComptoir
+                  ? isCounterInfoComplete ? 'Infos client complètes ✓' : 'Compléter infos client *'
+                  : 'Informations client'}
               </span>
               <ChevronDown
                 size={14}
@@ -1031,100 +1044,160 @@ export default function VentesPage() {
 
             {showCounterPanel && (
               <div className="rounded-lg border border-border bg-slate-50 p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="ccf-firstName" className="text-xs">Prénom *</Label>
-                    <Input
-                      id="ccf-firstName"
-                      value={counterClientFirstName}
-                      onChange={(e) => {
-                        setCounterClientFirstName(e.target.value);
-                        if (counterClientErrors.counterClientFirstName) {
-                          setCounterClientErrors((p) => ({ ...p, counterClientFirstName: '' }));
-                        }
-                      }}
-                      placeholder="Prénom"
-                      className={`h-8 text-sm ${counterClientErrors.counterClientFirstName ? 'border-red-400' : ''}`}
-                    />
-                    {counterClientErrors.counterClientFirstName && (
-                      <p className="text-xs text-red-500">{counterClientErrors.counterClientFirstName}</p>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="ccf-lastName" className="text-xs">Nom *</Label>
-                    <Input
-                      id="ccf-lastName"
-                      value={counterClientLastName}
-                      onChange={(e) => {
-                        setCounterClientLastName(e.target.value);
-                        if (counterClientErrors.counterClientLastName) {
-                          setCounterClientErrors((p) => ({ ...p, counterClientLastName: '' }));
-                        }
-                      }}
-                      placeholder="Nom"
-                      className={`h-8 text-sm ${counterClientErrors.counterClientLastName ? 'border-red-400' : ''}`}
-                    />
-                    {counterClientErrors.counterClientLastName && (
-                      <p className="text-xs text-red-500">{counterClientErrors.counterClientLastName}</p>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="ccf-phone" className="text-xs">Téléphone *</Label>
-                    <Input
-                      id="ccf-phone"
-                      value={counterClientPhone}
-                      onChange={(e) => {
-                        setCounterClientPhone(e.target.value);
-                        if (counterClientErrors.counterClientPhone) {
-                          setCounterClientErrors((p) => ({ ...p, counterClientPhone: '' }));
-                        }
-                      }}
-                      placeholder="+216 xx xxx xxx"
-                      className={`h-8 text-sm ${counterClientErrors.counterClientPhone ? 'border-red-400' : ''}`}
-                    />
-                    {counterClientErrors.counterClientPhone && (
-                      <p className="text-xs text-red-500">{counterClientErrors.counterClientPhone}</p>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="ccf-taxId" className="text-xs">Matricule fiscal (MF)</Label>
-                    <Input
-                      id="ccf-taxId"
-                      value={counterClientTaxId}
-                      onChange={(e) => setCounterClientTaxId(e.target.value)}
-                      placeholder="MF optionnel"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="ccf-address" className="text-xs">Adresse *</Label>
-                  <Input
-                    id="ccf-address"
-                    value={counterClientAddress}
-                    onChange={(e) => {
-                      setCounterClientAddress(e.target.value);
-                      if (counterClientErrors.counterClientAddress) {
-                        setCounterClientErrors((p) => ({ ...p, counterClientAddress: '' }));
-                      }
-                    }}
-                    placeholder="Adresse complète"
-                    className={`h-8 text-sm ${counterClientErrors.counterClientAddress ? 'border-red-400' : ''}`}
-                  />
-                  {counterClientErrors.counterClientAddress && (
-                    <p className="text-xs text-red-500">{counterClientErrors.counterClientAddress}</p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="ccf-note" className="text-xs">Note (optionnel)</Label>
-                  <Input
-                    id="ccf-note"
-                    value={counterClientNote}
-                    onChange={(e) => setCounterClientNote(e.target.value)}
-                    placeholder="Note libre"
-                    className="h-8 text-sm"
-                  />
-                </div>
+                {isComptoir ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="ccf-firstName" className="text-xs">Prénom *</Label>
+                        <Input
+                          id="ccf-firstName"
+                          value={counterClientFirstName}
+                          onChange={(e) => {
+                            setCounterClientFirstName(e.target.value);
+                            if (counterClientErrors.counterClientFirstName) {
+                              setCounterClientErrors((p) => ({ ...p, counterClientFirstName: '' }));
+                            }
+                          }}
+                          placeholder="Prénom"
+                          className={`h-8 text-sm ${counterClientErrors.counterClientFirstName ? 'border-red-400' : ''}`}
+                        />
+                        {counterClientErrors.counterClientFirstName && (
+                          <p className="text-xs text-red-500">{counterClientErrors.counterClientFirstName}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ccf-lastName" className="text-xs">Nom *</Label>
+                        <Input
+                          id="ccf-lastName"
+                          value={counterClientLastName}
+                          onChange={(e) => {
+                            setCounterClientLastName(e.target.value);
+                            if (counterClientErrors.counterClientLastName) {
+                              setCounterClientErrors((p) => ({ ...p, counterClientLastName: '' }));
+                            }
+                          }}
+                          placeholder="Nom"
+                          className={`h-8 text-sm ${counterClientErrors.counterClientLastName ? 'border-red-400' : ''}`}
+                        />
+                        {counterClientErrors.counterClientLastName && (
+                          <p className="text-xs text-red-500">{counterClientErrors.counterClientLastName}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ccf-phone" className="text-xs">Téléphone *</Label>
+                        <Input
+                          id="ccf-phone"
+                          value={counterClientPhone}
+                          onChange={(e) => {
+                            setCounterClientPhone(e.target.value);
+                            if (counterClientErrors.counterClientPhone) {
+                              setCounterClientErrors((p) => ({ ...p, counterClientPhone: '' }));
+                            }
+                          }}
+                          placeholder="+216 xx xxx xxx"
+                          className={`h-8 text-sm ${counterClientErrors.counterClientPhone ? 'border-red-400' : ''}`}
+                        />
+                        {counterClientErrors.counterClientPhone && (
+                          <p className="text-xs text-red-500">{counterClientErrors.counterClientPhone}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ccf-taxId" className="text-xs">Matricule fiscal (MF)</Label>
+                        <Input
+                          id="ccf-taxId"
+                          value={counterClientTaxId}
+                          onChange={(e) => setCounterClientTaxId(e.target.value)}
+                          placeholder="MF optionnel"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ccf-address" className="text-xs">Adresse *</Label>
+                      <Input
+                        id="ccf-address"
+                        value={counterClientAddress}
+                        onChange={(e) => {
+                          setCounterClientAddress(e.target.value);
+                          if (counterClientErrors.counterClientAddress) {
+                            setCounterClientErrors((p) => ({ ...p, counterClientAddress: '' }));
+                          }
+                        }}
+                        placeholder="Adresse complète"
+                        className={`h-8 text-sm ${counterClientErrors.counterClientAddress ? 'border-red-400' : ''}`}
+                      />
+                      {counterClientErrors.counterClientAddress && (
+                        <p className="text-xs text-red-500">{counterClientErrors.counterClientAddress}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ccf-note" className="text-xs">Note (optionnel)</Label>
+                      <Input
+                        id="ccf-note"
+                        value={counterClientNote}
+                        onChange={(e) => setCounterClientNote(e.target.value)}
+                        placeholder="Note libre"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-text-muted">Modifiable pour cette vente uniquement — la fiche client reste inchangée.</p>
+                    <div className="space-y-1">
+                      <Label htmlFor="cif-name" className="text-xs">Nom / Société</Label>
+                      <Input
+                        id="cif-name"
+                        value={clientInfoName}
+                        onChange={(e) => setClientInfoName(e.target.value)}
+                        placeholder="Nom ou société"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="cif-phone" className="text-xs">Téléphone</Label>
+                        <Input
+                          id="cif-phone"
+                          value={counterClientPhone}
+                          onChange={(e) => setCounterClientPhone(e.target.value)}
+                          placeholder="+216 xx xxx xxx"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="cif-taxId" className="text-xs">Matricule fiscal (MF)</Label>
+                        <Input
+                          id="cif-taxId"
+                          value={counterClientTaxId}
+                          onChange={(e) => setCounterClientTaxId(e.target.value)}
+                          placeholder="MF optionnel"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="cif-address" className="text-xs">Adresse</Label>
+                      <Input
+                        id="cif-address"
+                        value={counterClientAddress}
+                        onChange={(e) => setCounterClientAddress(e.target.value)}
+                        placeholder="Adresse complète"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="cif-note" className="text-xs">Note (optionnel)</Label>
+                      <Input
+                        id="cif-note"
+                        value={counterClientNote}
+                        onChange={(e) => setCounterClientNote(e.target.value)}
+                        placeholder="Note libre"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-end pt-1">
                   <Button
                     type="button"
