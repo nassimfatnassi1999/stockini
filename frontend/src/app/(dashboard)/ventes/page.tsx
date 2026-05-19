@@ -12,7 +12,6 @@ import {
   Eye,
   FileText,
   Loader2,
-  Mail,
   RotateCcw,
   Trash2,
   UserCircle,
@@ -46,6 +45,7 @@ import { getPaymentDisplay, money } from '@/lib/stockini/format';
 import { stockiniApi } from '@/lib/stockini/api';
 import { cn } from '@/lib/utils';
 import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
+import { BulkActionsBar } from '@/components/stockini/shared/BulkActionsBar';
 import type {
   Customer,
   DropdownOption,
@@ -682,10 +682,16 @@ export default function VentesPage() {
         })
         .then((r) => r.data);
     },
-    onSuccess: () => {
+    onSuccess: (newSale) => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+      // Invalidate caisse when a payment was included at sale creation
+      if (Number((newSale as { paidAmount?: unknown }).paidAmount) > 0) {
+        queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
+        queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
+      }
       toast.success('Vente enregistrée avec succès');
       clearDraft();
       resetForm();
@@ -709,6 +715,8 @@ export default function VentesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['trash'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
       toast.success('Vente déplacée dans la corbeille');
       setDeleteTarget(null);
     },
@@ -1046,7 +1054,7 @@ export default function VentesPage() {
               <div className="rounded-lg border border-border bg-slate-50 p-4 space-y-3">
                 {isComptoir ? (
                   <>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label htmlFor="ccf-firstName" className="text-xs">Prénom *</Label>
                         <Input
@@ -1154,7 +1162,7 @@ export default function VentesPage() {
                         className="h-8 text-sm"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label htmlFor="cif-phone" className="text-xs">Téléphone</Label>
                         <Input
@@ -1293,51 +1301,39 @@ export default function VentesPage() {
       </div>
 
       {/* Sales history */}
-      <div className="rounded-lg border border-border/70 bg-white overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border/70">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* Card header */}
+        <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-slate-100 px-5 py-2.5">
+          {/* Title + count + collapse */}
           <button
             type="button"
             onClick={() => setShowHistory((v) => !v)}
-            className="flex items-center gap-2 text-sm font-semibold text-text-primary hover:text-primary transition-colors"
+            className="flex items-center gap-2 text-sm font-semibold text-slate-800 transition-colors hover:text-primary"
           >
-            <span>Historique des ventes ({salesQuery.data?.total ?? salesList.length})</span>
-            {showHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            <span>Historique des ventes</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+              {salesQuery.data?.total ?? salesList.length}
+            </span>
+            <ChevronUp
+              size={14}
+              className={cn(
+                'text-slate-400 transition-transform duration-200',
+                showHistory ? '' : 'rotate-180',
+              )}
+            />
           </button>
 
-          {/* Action buttons — visible only when at least one invoice is selected */}
+          {/* Bulk actions bar — appears when rows are selected */}
           {selectedInvoiceIds.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleDownloadClick}
-                className="flex items-center gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
-              >
-                <Download size={14} />
-                Générer document ({selectedInvoiceIds.length})
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleEmailClick}
-                disabled={emailPreviewLoading}
-                className="flex items-center gap-1.5 text-blue-600 border-blue-300 hover:bg-blue-50"
-              >
-                <Mail size={14} />
-                Envoyer par email ({selectedInvoiceIds.length})
-              </Button>
-              {canTransform && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setTransformDialogOpen(true)}
-                  className="flex items-center gap-1.5 text-violet-600 border-violet-300 hover:bg-violet-50"
-                >
-                  <ArrowRightLeft size={14} />
-                  Transformer document ({selectedTransformableSales.length})
-                </Button>
-              )}
-            </div>
+            <BulkActionsBar
+              count={selectedInvoiceIds.length}
+              onDownload={handleDownloadClick}
+              onEmail={handleEmailClick}
+              emailLoading={emailPreviewLoading}
+              canTransform={canTransform}
+              onTransform={() => setTransformDialogOpen(true)}
+              onClear={() => setSelectedInvoiceIds([])}
+            />
           )}
         </div>
 
@@ -1386,9 +1382,9 @@ export default function VentesPage() {
           />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-surface">
-                <tr className="border-b border-border/60">
-                  <th className="px-3 py-3 w-10 text-center">
+              <thead className="border-b border-slate-100 bg-slate-50">
+                <tr>
+                  <th className="w-10 px-3 py-2.5 text-center">
                     <span className="sr-only">Sélection</span>
                   </th>
                   {[
@@ -1403,23 +1399,23 @@ export default function VentesPage() {
                   ].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted"
+                      className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/40">
+              <tbody className="divide-y divide-slate-100">
                 {salesQuery.isLoading ? (
                   <tr>
-                    <td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-text-muted">
+                    <td colSpan={colSpan} className="px-4 py-10 text-center text-sm text-slate-400">
                       Chargement…
                     </td>
                   </tr>
                 ) : salesList.length === 0 ? (
                   <tr>
-                    <td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-text-muted">
+                    <td colSpan={colSpan} className="px-4 py-10 text-center text-sm text-slate-400">
                       Aucune vente enregistrée
                     </td>
                   </tr>
@@ -1429,21 +1425,26 @@ export default function VentesPage() {
                     return (
                       <tr
                         key={sale.id}
-                        className={`hover:bg-muted/40 transition-colors ${isSelected ? 'bg-primary/5 ring-1 ring-inset ring-primary/20' : ''}`}
+                        className={cn(
+                          'transition-colors duration-100',
+                          isSelected
+                            ? 'bg-orange-50/70 hover:bg-orange-50'
+                            : 'hover:bg-slate-50/80',
+                        )}
                       >
-                        {/* Checkbox — selection only, never opens menu */}
-                        <td className="px-3 py-3 text-center">
+                        {/* Checkbox */}
+                        <td className="px-3 py-2.5 text-center">
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleInvoiceSelection(sale.id)}
-                            className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                            className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 accent-orange-500"
                             aria-label={`Sélectionner la vente ${sale.invoiceNumber}`}
                           />
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <span className="font-mono font-semibold text-xs">{sale.invoiceNumber}</span>
+                        <td className="px-4 py-2.5">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-mono text-xs font-semibold text-slate-800">{sale.invoiceNumber}</span>
                             <div className="flex items-center gap-1">
                               <span
                                 className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${DOC_TYPE_BADGE[sale.documentType] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}
@@ -1451,27 +1452,27 @@ export default function VentesPage() {
                                 {DOC_TYPE_SHORT[sale.documentType] ?? sale.documentType}
                               </span>
                               {sale.transformedToId && (
-                                <span className="text-[10px] text-emerald-600 font-medium">Transformé</span>
+                                <span className="text-[10px] font-medium text-emerald-600">Transformé</span>
                               )}
                               {sale.sourceDocumentId && !sale.transformedToId && (
-                                <span className="text-[10px] text-violet-600 font-medium">Issu d'une transf.</span>
+                                <span className="text-[10px] font-medium text-violet-600">Issu d'une transf.</span>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-text-secondary">
+                        <td className="px-4 py-2.5 text-[13px] text-slate-600">
                           {sale.customer?.name ?? 'Comptoir'}
                         </td>
-                        <td className="px-4 py-3 text-text-secondary text-xs">
+                        <td className="px-4 py-2.5 text-xs text-slate-500">
                           {new Date(sale.createdAt).toLocaleDateString('fr-TN')}
                         </td>
-                        <td className="px-4 py-3 text-center text-text-secondary">
+                        <td className="px-4 py-2.5 text-center text-xs text-slate-500">
                           {sale.items?.length ?? 0}
                         </td>
-                        <td className="px-4 py-3 tabular-nums font-medium">
+                        <td className="px-4 py-2.5 font-medium tabular-nums text-slate-800">
                           {money(sale.total)}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-2.5">
                           {(() => {
                             const pd = getPaymentDisplay(sale.documentType, sale.paymentStatus);
                             return (
@@ -1481,7 +1482,7 @@ export default function VentesPage() {
                             );
                           })()}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-2.5">
                           <span
                             className={`app-status-badge ${STATUS_COLORS[sale.status] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
                           >
@@ -1489,7 +1490,7 @@ export default function VentesPage() {
                           </span>
                         </td>
                         {hasActions && (
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-2.5">
                             <div className="flex items-center gap-1">
                               {canViewDetails && (
                                 <Button
@@ -1521,21 +1522,22 @@ export default function VentesPage() {
               </tbody>
             </table>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-sm">
-            <div className="flex items-center gap-2 text-text-muted">
-              <span className="text-xs">Lignes par page&nbsp;:</span>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-2.5 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-slate-400">Lignes&nbsp;:</span>
               <select
                 value={salesLimit}
                 onChange={(e) => { setSalesLimit(Number(e.target.value)); setSalesPage(1); }}
-                className="h-7 rounded-md border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-7 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400/25 hover:border-slate-300 transition-colors"
               >
                 {[10, 20, 50, 100].map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
-            <div className="flex items-center gap-3 text-text-muted">
+            <div className="flex items-center gap-3">
               {(salesQuery.data?.total ?? 0) > 0 && (
-                <span className="text-xs">
-                  {(salesPage - 1) * salesLimit + 1}–{Math.min(salesPage * salesLimit, salesQuery.data?.total ?? 0)} sur {salesQuery.data?.total ?? 0}
+                <span className="text-[12px] text-slate-400">
+                  {(salesPage - 1) * salesLimit + 1}–{Math.min(salesPage * salesLimit, salesQuery.data?.total ?? 0)}{' '}
+                  sur {salesQuery.data?.total ?? 0}
                 </span>
               )}
               <div className="flex items-center gap-1">
@@ -1543,19 +1545,19 @@ export default function VentesPage() {
                   type="button"
                   onClick={() => setSalesPage((p) => p - 1)}
                   disabled={salesPage <= 1 || salesQuery.isFetching}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label="Page précédente"
                 >
                   <ChevronLeft size={13} />
                 </button>
-                <span className="min-w-[80px] text-center text-xs font-medium text-text-primary">
+                <span className="min-w-[76px] text-center text-[12px] font-medium text-slate-600">
                   Page {salesPage} / {Math.max(salesQuery.data?.totalPages ?? 1, 1)}
                 </span>
                 <button
                   type="button"
                   onClick={() => setSalesPage((p) => p + 1)}
                   disabled={salesPage >= (salesQuery.data?.totalPages ?? 1) || salesQuery.isFetching}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label="Page suivante"
                 >
                   <ChevronRight size={13} />

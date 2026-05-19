@@ -291,7 +291,10 @@ export function PaymentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
-      queryClient.invalidateQueries({ queryKey: ['stockini-caisse'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
       setPayTarget(null);
       setPayForm({ amount: '', method: 'CASH', note: '' });
       toast.success('Paiement enregistré avec succès');

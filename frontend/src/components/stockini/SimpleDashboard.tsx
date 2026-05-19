@@ -334,7 +334,7 @@ export function SimpleDashboard() {
       ══════════════════════════════════════════════════════════════════════ */}
       <div>
         <SectionDivider label="Activité commerciale" />
-        <div className="mt-3 grid gap-4 grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           <KpiCard
             icon={ShoppingCart}
             label="Ventes (période)"
@@ -373,7 +373,7 @@ export function SimpleDashboard() {
       ══════════════════════════════════════════════════════════════════════ */}
       <div>
         <SectionDivider label="Stock & Alertes" />
-        <div className="mt-3 grid gap-4 grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           <KpiCard
             icon={Package}
             label="Produits en stock"
@@ -412,7 +412,7 @@ export function SimpleDashboard() {
         <SectionDivider label="Graphiques" />
 
         {/* ── Row 1 : Évolution ventes + Ventes par jour ──────────────────── */}
-        <div className="mt-3 grid gap-4 xl:grid-cols-2">
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
 
           <Card className="shadow-card">
             <CardHeader className="p-4 pb-2">
@@ -468,7 +468,7 @@ export function SimpleDashboard() {
         </div>
 
         {/* ── Row 2 : Achats par période + Top produits ────────────────────── */}
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
 
           <Card className="shadow-card">
             <CardHeader className="p-4 pb-2">

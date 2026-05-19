@@ -474,7 +474,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={DollarSign} title="Synthèse financière" />
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KpiCard icon={DollarSign}    label="Chiffre d'affaires"    value={money(salesTotal)}          trend={trendPct(salesTotal, prevSalesTotal)}  color="orange" />
           <KpiCard icon={TrendingUp}    label="Encaissements clients"  value={money(salesPaid)}           color="green" />
           <KpiCard icon={AlertTriangle} label="Impayé clients"         value={money(salesUnpaid)}                                                       color="red" />
@@ -491,7 +491,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={DollarSign} title="Ventes" />
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           <KpiCard icon={DollarSign}   label="CA période"      value={money(salesTotal)}        trend={trendPct(salesTotal, prevSalesTotal)}          color="orange" />
           <KpiCard icon={TrendingUp}   label="Nb ventes"       value={filteredSales.length}      trend={trendPct(filteredSales.length, prevSales.length)} color="blue" />
           <KpiCard icon={Activity}     label="Panier moyen"    value={money(avgBasket)}                                                                color="purple" />
@@ -506,7 +506,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={Package} title="Produits & Stock" />
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           <KpiCard icon={Package}      label="Total produits"   value={products.length}              color="blue" />
           <KpiCard icon={Package}      label="Produits actifs"  value={activeProds.length}           color="green" />
           <KpiCard icon={AlertTriangle} label="Ruptures stock"  value={ruptureProds.length}          color="red" />
@@ -521,7 +521,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={ShoppingCart} title="Achats" />
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KpiCard icon={ShoppingCart} label="Total achats"     value={money(purchTotal)}          trend={trendPct(purchTotal, prevPurchTotal)} color="blue" />
           <KpiCard icon={Layers}       label="Nb commandes"     value={filteredPurch.length}        trend={trendPct(filteredPurch.length, prevPurch.length)} color="purple" />
           <KpiCard icon={Truck}        label="Fournisseurs actifs" value={activeSuppIds.size}       color="teal" />
@@ -534,7 +534,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={Users} title="Clients & Alertes" />
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KpiCard icon={Users}        label="Total clients"    value={activeCustomers.length}      color="blue" />
           <KpiCard icon={Users}        label="Garages"          value={garageCount}                 color="green" />
           <KpiCard icon={Users}        label="Entreprises"      value={companyCount}                color="purple" />
@@ -547,7 +547,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={Boxes} title="Mouvements stock (période)" />
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KpiCard icon={TrendingUp}   label="Entrées stock"    value={stockEntries.toLocaleString()} color="green" />
           <KpiCard icon={TrendingDown} label="Sorties stock"    value={stockExits.toLocaleString()}   color="red" />
           <KpiCard icon={RefreshCw}    label="Mouvements total" value={filteredMovs.length}           color="blue" />
@@ -561,7 +561,7 @@ export function AnalyticsDashboard() {
       <section>
         <SectionHead icon={BarChart2} title="Graphiques analytiques" />
 
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2">
 
           {/* Chart 1 — Évolution des ventes */}
           <Card className="shadow-card">
@@ -621,7 +621,7 @@ export function AnalyticsDashboard() {
         </div>
 
         {/* ─── ROW 2: Top products + Category donut ─────────────────────── */}
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_360px]">
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_360px]">
 
           {/* Chart 3 — Top produits */}
           <Card className="shadow-card">
@@ -693,7 +693,7 @@ export function AnalyticsDashboard() {
         </div>
 
         {/* ─── ROW 3: Achats vs Ventes + Activité hebdomadaire ─────────────── */}
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
 
           {/* Chart 7 — Achats vs Ventes (+ bénéfice) */}
           <Card className="shadow-card">
@@ -804,7 +804,7 @@ export function AnalyticsDashboard() {
         </div>
 
         {/* ─── ROW 5: Top Clients + Top Fournisseurs ────────────────────── */}
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
 
           {/* Top clients par CA */}
           <Card className="shadow-card">

@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { CaisseMovementType, Prisma } from '@prisma/client';
+import { CaisseMovementType, PaymentType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
+import { CustomersService } from '../customers/customers.service';
 import type {
   CashPeriod,
   CashQueryDto,
@@ -12,6 +13,9 @@ import type {
 
 type DbClient = PrismaService | Prisma.TransactionClient;
 
+// Africa/Tunis is permanently UTC+1 (no DST)
+const TZ_OFFSET_MS = 60 * 60_000;
+
 // ─── Centralized date-range resolver ──────────────────────────────────────────
 
 export function resolveCashDateRange(
@@ -20,13 +24,18 @@ export function resolveCashDateRange(
   endDate: string | undefined,
 ): { gte: Date; lte: Date } {
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // Shift now into Tunisia local time so we can extract the correct calendar date
+  const localNow = new Date(now.getTime() + TZ_OFFSET_MS);
+  // Start of today in Tunisia time, expressed as a UTC timestamp
+  const today = new Date(
+    Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - TZ_OFFSET_MS,
+  );
 
   if (period === 'custom' && startDate && endDate) {
-    return {
-      gte: new Date(startDate),
-      lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
-    };
+    // YYYY-MM-DD parsed by new Date() is UTC midnight; shift left by offset to get local midnight as UTC
+    const start = new Date(new Date(startDate).getTime() - TZ_OFFSET_MS);
+    const end   = new Date(new Date(endDate).getTime() - TZ_OFFSET_MS + 86_400_000 - 1);
+    return { gte: start, lte: end };
   }
 
   switch (period) {
@@ -41,15 +50,18 @@ export function resolveCashDateRange(
       return { gte: weekAgo, lte: now };
     }
     case 'month': {
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStart = new Date(
+        Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), 1) - TZ_OFFSET_MS,
+      );
       return { gte: monthStart, lte: now };
     }
     case 'year': {
-      const yearStart = new Date(now.getFullYear(), 0, 1);
+      const yearStart = new Date(
+        Date.UTC(localNow.getUTCFullYear(), 0, 1) - TZ_OFFSET_MS,
+      );
       return { gte: yearStart, lte: now };
     }
     default:
-      // Fallback: today
       return { gte: today, lte: new Date(today.getTime() + 86_400_000 - 1) };
   }
 }
@@ -61,6 +73,7 @@ export class CaisseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
+    private readonly customers: CustomersService,
   ) {}
 
   // ─── Balance ─────────────────────────────────────────────────────────────────
@@ -127,97 +140,68 @@ export class CaisseService {
 
     const [
       balance,
-      salesTotal,
-      purchasesTotal,
-      expensesTotal,
-      creditNotesTotal,
+      entreesTotal,
+      sortiesAchatsTotal,
+      sortiesDepensesTotal,
+      totalClientDebt,
     ] = await Promise.all([
       this.prisma.caisseConfig.findFirst(),
 
-      // Entrées : ventes COMPLETED payées dans la période
-      this.prisma.sale.aggregate({
-        _sum: { paidAmount: true },
-        where: { status: 'COMPLETED', createdAt: range },
+      // Entrées : encaissements ventes (date du paiement, pas de la vente)
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: range },
       }),
 
-      // Sorties : achats RECEIVED payés
-      this.prisma.purchase.aggregate({
-        _sum: { paidAmount: true },
-        where: { status: 'RECEIVED', createdAt: range },
+      // Sorties : décaissements fournisseurs
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: range },
       }),
 
-      // Sorties : dépenses
+      // Sorties : retraits manuels
       this.prisma.caisseMovement.aggregate({
         _sum: { montant: true },
         where: { type: CaisseMovementType.RETRAIT_MANUEL, createdAt: range },
       }),
 
-      // Sorties : avoirs remboursés
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: {
-          type: CaisseMovementType.DECAISSEMENT_ACHAT,
-          createdAt: range,
-        },
-      }),
+      // KPI dettes clients : somme des restes à payer sur FACTURE non soldées
+      this.customers.getTotalClientDebt(),
     ]);
 
     const soldeGlobal = Number(balance?.solde ?? 0);
-    const entrees = Number(salesTotal._sum.paidAmount ?? 0);
-    const sortiesAchats = Number(purchasesTotal._sum.paidAmount ?? 0);
-    const sortiesDepenses = Number(expensesTotal._sum.montant ?? 0);
-    const sortiesAvoirs = Number(creditNotesTotal._sum.montant ?? 0);
-    const sorties = sortiesAchats + sortiesDepenses + sortiesAvoirs;
+    const entrees = Number(entreesTotal._sum.montant ?? 0);
+    const sortiesAchats = Number(sortiesAchatsTotal._sum.montant ?? 0);
+    const sortiesDepenses = Number(sortiesDepensesTotal._sum.montant ?? 0);
+    const sorties = sortiesAchats + sortiesDepenses;
 
     const [
-      weekSales,
-      monthSales,
-      yearSales,
-      weekPurchases,
-      monthPurchases,
-      yearPurchases,
+      weekIn, monthIn, yearIn,
+      weekOut, monthOut, yearOut,
     ] = await Promise.all([
-      this.prisma.sale.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'COMPLETED',
-          createdAt: resolveCashDateRange('week', undefined, undefined),
-        },
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: resolveCashDateRange('week', undefined, undefined) },
       }),
-      this.prisma.sale.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'COMPLETED',
-          createdAt: resolveCashDateRange('month', undefined, undefined),
-        },
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: resolveCashDateRange('month', undefined, undefined) },
       }),
-      this.prisma.sale.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'COMPLETED',
-          createdAt: resolveCashDateRange('year', undefined, undefined),
-        },
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: resolveCashDateRange('year', undefined, undefined) },
       }),
-      this.prisma.purchase.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'RECEIVED',
-          createdAt: resolveCashDateRange('week', undefined, undefined),
-        },
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: resolveCashDateRange('week', undefined, undefined) },
       }),
-      this.prisma.purchase.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'RECEIVED',
-          createdAt: resolveCashDateRange('month', undefined, undefined),
-        },
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: resolveCashDateRange('month', undefined, undefined) },
       }),
-      this.prisma.purchase.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'RECEIVED',
-          createdAt: resolveCashDateRange('year', undefined, undefined),
-        },
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: resolveCashDateRange('year', undefined, undefined) },
       }),
     ]);
 
@@ -225,16 +209,14 @@ export class CaisseService {
       soldeGlobal,
       entrees,
       sorties,
+      totalClientDebt,
       profitPeriode: entrees - sorties,
       profitSemaine:
-        Number(weekSales._sum.paidAmount ?? 0) -
-        Number(weekPurchases._sum.paidAmount ?? 0),
+        Number(weekIn._sum.montant ?? 0) - Number(weekOut._sum.montant ?? 0),
       profitMois:
-        Number(monthSales._sum.paidAmount ?? 0) -
-        Number(monthPurchases._sum.paidAmount ?? 0),
+        Number(monthIn._sum.montant ?? 0) - Number(monthOut._sum.montant ?? 0),
       profitAnnee:
-        Number(yearSales._sum.paidAmount ?? 0) -
-        Number(yearPurchases._sum.paidAmount ?? 0),
+        Number(yearIn._sum.montant ?? 0) - Number(yearOut._sum.montant ?? 0),
       period: query.period ?? 'today',
     };
   }
@@ -324,26 +306,22 @@ export class CaisseService {
   async getAnalytics(query: CashAnalyticsQueryDto) {
     const period = query.period ?? 'month';
     const now = new Date();
+    // Tunisia-aware start of today (UTC timestamp)
+    const localNow = new Date(now.getTime() + TZ_OFFSET_MS);
+    const todayStart = new Date(
+      Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - TZ_OFFSET_MS,
+    );
     const days: Date[] = [];
 
     if (period === 'today') {
-      // 6 four-hour buckets for today
-      const dayStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-      );
+      // 6 four-hour buckets for today (in Tunisia local time)
       for (let h = 0; h < 24; h += 4) {
-        const d = new Date(dayStart);
-        d.setHours(h, 0, 0, 0);
-        days.push(d);
+        days.push(new Date(todayStart.getTime() + h * 3_600_000));
       }
     } else if (period === 'yesterday') {
-      const yd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const ydStart = new Date(todayStart.getTime() - 86_400_000);
       for (let h = 0; h < 24; h += 4) {
-        const d = new Date(yd);
-        d.setHours(h, 0, 0, 0);
-        days.push(d);
+        days.push(new Date(ydStart.getTime() + h * 3_600_000));
       }
     } else if (period === 'week') {
       for (let i = 6; i >= 0; i--) {
@@ -404,19 +382,19 @@ export class CaisseService {
 
         const range = { gte: bucketStart, lte: bucketEnd };
 
-        const [sales, purchases] = await Promise.all([
-          this.prisma.sale.aggregate({
-            _sum: { paidAmount: true },
-            where: { status: 'COMPLETED', createdAt: range },
+        const [inMvt, outMvt] = await Promise.all([
+          this.prisma.caisseMovement.aggregate({
+            _sum: { montant: true },
+            where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: range },
           }),
-          this.prisma.purchase.aggregate({
-            _sum: { paidAmount: true },
-            where: { status: 'RECEIVED', createdAt: range },
+          this.prisma.caisseMovement.aggregate({
+            _sum: { montant: true },
+            where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: range },
           }),
         ]);
 
-        const entrees = Number(sales._sum.paidAmount ?? 0);
-        const sorties = Number(purchases._sum.paidAmount ?? 0);
+        const entrees = Number(inMvt._sum.montant ?? 0);
+        const sorties = Number(outMvt._sum.montant ?? 0);
 
         let label: string;
         if (isYearly) {
@@ -442,22 +420,24 @@ export class CaisseService {
       }),
     );
 
-    // Top clients + fournisseurs always use the resolved date range
+    // Top clients + fournisseurs — use payment date (not sale/purchase creation date)
     const analyticsRange = resolveCashDateRange(
       query.period,
       query.startDate,
       query.endDate,
     );
 
-    const topClients = await this.prisma.sale.groupBy({
+    const topClients = await this.prisma.payment.groupBy({
       by: ['customerId'],
-      _sum: { paidAmount: true },
+      _sum: { amount: true },
       where: {
-        status: 'COMPLETED',
+        type: PaymentType.CUSTOMER_PAYMENT,
+        deletedAt: null,
+        cashImpactDone: true,
         customerId: { not: null },
         createdAt: analyticsRange,
       },
-      orderBy: { _sum: { paidAmount: 'desc' } },
+      orderBy: { _sum: { amount: 'desc' } },
       take: 5,
     });
 
@@ -470,15 +450,23 @@ export class CaisseService {
     });
     const clientMap = new Map(clients.map((c) => [c.id, c.name]));
 
-    const topSuppliers = await this.prisma.purchase.groupBy({
+    const topSuppliers = await this.prisma.payment.groupBy({
       by: ['supplierId'],
-      _sum: { paidAmount: true },
-      where: { status: 'RECEIVED', createdAt: analyticsRange },
-      orderBy: { _sum: { paidAmount: 'desc' } },
+      _sum: { amount: true },
+      where: {
+        type: PaymentType.SUPPLIER_PAYMENT,
+        deletedAt: null,
+        cashImpactDone: true,
+        supplierId: { not: null },
+        createdAt: analyticsRange,
+      },
+      orderBy: { _sum: { amount: 'desc' } },
       take: 5,
     });
 
-    const supplierIds = topSuppliers.map((s) => s.supplierId);
+    const supplierIds = topSuppliers
+      .map((s) => s.supplierId)
+      .filter(Boolean) as string[];
     const suppliers = await this.prisma.supplier.findMany({
       where: { id: { in: supplierIds } },
       select: { id: true, name: true },
@@ -489,13 +477,58 @@ export class CaisseService {
       cashflow: chartData,
       topClients: topClients.map((c) => ({
         name: clientMap.get(c.customerId!) ?? 'Inconnu',
-        montant: Number(c._sum.paidAmount ?? 0),
+        montant: Number(c._sum.amount ?? 0),
       })),
       topFournisseurs: topSuppliers.map((s) => ({
-        name: supplierMap.get(s.supplierId) ?? 'Inconnu',
-        montant: Number(s._sum.paidAmount ?? 0),
+        name: supplierMap.get(s.supplierId!) ?? 'Inconnu',
+        montant: Number(s._sum.amount ?? 0),
       })),
     };
+  }
+
+  // ─── Backfill ─────────────────────────────────────────────────────────────────
+
+  async backfillPayments() {
+    // Find all active customer payments that have cashImpactDone=true
+    const payments = await this.prisma.payment.findMany({
+      where: { deletedAt: null, cashImpactDone: true },
+      select: { id: true, reference: true, amount: true, type: true, createdAt: true, note: true, saleId: true, sale: { select: { invoiceNumber: true } } },
+    });
+
+    // Index existing CaisseMovements by referenceDoc to avoid duplicates
+    const existing = await this.prisma.caisseMovement.findMany({
+      where: { referenceDoc: { in: payments.map((p) => p.reference) } },
+      select: { referenceDoc: true },
+    });
+    const existingRefs = new Set(existing.map((m) => m.referenceDoc));
+
+    const missing = payments.filter((p) => !existingRefs.has(p.reference));
+    if (missing.length === 0) return { created: 0, message: 'No missing CaisseMovements.' };
+
+    let created = 0;
+    for (const payment of missing) {
+      const movementType =
+        payment.type === 'CUSTOMER_PAYMENT'
+          ? CaisseMovementType.ENCAISSEMENT_VENTE
+          : CaisseMovementType.DECAISSEMENT_ACHAT;
+      const montant = Number(payment.amount);
+      const motif =
+        payment.type === 'CUSTOMER_PAYMENT'
+          ? `Encaissement vente ${payment.sale?.invoiceNumber ?? payment.saleId ?? ''}`
+          : `Paiement fournisseur ${payment.note ?? payment.reference}`;
+
+      await this.prisma.$transaction((tx) =>
+        this.recordMovement(tx, {
+          type: movementType,
+          montant: payment.type === 'CUSTOMER_PAYMENT' ? montant : -montant,
+          motif,
+          referenceDoc: payment.reference,
+        }),
+      );
+      created++;
+    }
+
+    return { created, message: `Created ${created} missing CaisseMovement(s).` };
   }
 
   // ─── Internal helper ──────────────────────────────────────────────────────────

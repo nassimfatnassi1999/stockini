@@ -41,8 +41,8 @@ const EMPTY_FORM: CreateCustomerForm = {
 
 function formatCurrency(value: number | string): string {
   const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (Number.isNaN(num)) return '0,00';
-  return num.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (Number.isNaN(num)) return '0,000 DT';
+  return num.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' DT';
 }
 
 function typeLabel(type: string): string {
@@ -227,7 +227,7 @@ export default function ClientsPage() {
                     Adresse
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-text-muted">
-                    Solde crédit
+                    Dettes
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-text-muted">
                     Actions
@@ -256,8 +256,18 @@ export default function ClientsPage() {
                     <td className="px-4 py-3 text-text-secondary max-w-[200px] truncate">
                       {customer.address ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-text-primary">
-                      {formatCurrency(customer.creditBalance)}
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {(() => {
+                        const debt = customer.debtAmount ?? 0;
+                        if (debt > 0) {
+                          return (
+                            <span className="inline-flex items-center rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                              {formatCurrency(debt)}
+                            </span>
+                          );
+                        }
+                        return <span className="text-text-muted">{formatCurrency(0)}</span>;
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {can('clients.delete') && (
@@ -365,7 +375,7 @@ export default function ClientsPage() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="customer-phone">Téléphone</Label>
                   <Input

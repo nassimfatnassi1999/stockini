@@ -34,14 +34,14 @@ export function StockiniDashboardPage() {
   return (
     <>
       <PageHeader title="Dashboard Stockini" subtitle="Vue opérationnelle des pièces, ventes, alertes et valeur de stock." />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={Boxes} label="Produits actifs" value={dashboard.data?.productsCount ?? '-'} />
         <StatCard icon={AlertTriangle} label="Sous seuil" value={dashboard.data?.lowStockCount ?? '-'} tone="accent" />
         <StatCard icon={Users} label="Clients" value={dashboard.data?.customersCount ?? '-'} />
         <StatCard icon={Banknote} label="Ventes" value={money(dashboard.data?.salesTotal)} tone="green" />
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
         <Card className="shadow-card">
           <CardHeader className="flex-row items-center justify-between space-y-0 p-4">
             <CardTitle>Stock critique</CardTitle>

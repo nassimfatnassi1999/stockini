@@ -69,6 +69,8 @@ export interface Customer {
   type: 'INDIVIDUAL' | 'GARAGE' | 'COMPANY';
   taxNumber?: string | null;
   creditBalance: number | string;
+  debtAmount?: number;
+  unpaidInvoicesCount?: number;
   deletedAt?: string | null;
   deletedBy?: string | null;
 }

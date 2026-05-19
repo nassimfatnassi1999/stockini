@@ -51,7 +51,7 @@ function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () =
           </div>
         </div>
         <div className="p-6 space-y-5">
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Date :</span> <span className="font-medium">{fmtDate(avoir.dateAvoir)}</span></div>
             <div><span className="text-gray-500">Statut :</span> {statusBadge(avoir.statut)}</div>
             <div><span className="text-gray-500">Client :</span> <span className="font-medium">{avoir.customer?.name ?? '—'}</span></div>
@@ -60,7 +60,8 @@ function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () =
           </div>
           <div>
             <h3 className="mb-2 font-semibold text-sm">Produits retournés</h3>
-            <table className="w-full text-xs border-collapse">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[500px] text-xs border-collapse">
               <thead>
                 <tr className="bg-gray-100">
                   <th className="text-left p-2 border">Désignation</th>
@@ -86,6 +87,7 @@ function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () =
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           <div className="flex justify-end">
             <div className="border rounded bg-red-50 p-4 text-sm space-y-1 min-w-52">
@@ -338,7 +340,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
           )}
 
           {/* Motif + méthode */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Motif du retour</label>
               <input

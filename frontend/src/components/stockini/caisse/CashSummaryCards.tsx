@@ -7,18 +7,20 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet,
+  AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface CashSummary {
-  soldeGlobal:   number;
-  entrees:       number;
-  sorties:       number;
-  profitPeriode: number;
-  profitSemaine: number;
-  profitMois:    number;
-  profitAnnee:   number;
-  period:        string;
+  soldeGlobal:      number;
+  entrees:          number;
+  sorties:          number;
+  totalClientDebt:  number;
+  profitPeriode:    number;
+  profitSemaine:    number;
+  profitMois:       number;
+  profitAnnee:      number;
+  period:           string;
 }
 
 interface KpiCardProps {
@@ -40,15 +42,15 @@ function fmt(n: number) {
 function KpiCard({ label, value, icon: Icon, color, bg, positive }: KpiCardProps) {
   const isPos = value >= 0;
   return (
-    <div className={cn('rounded-xl border border-border bg-card p-4 shadow-sm', 'flex items-start gap-3')}>
-      <div className={cn('flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg', bg)}>
-        <Icon size={18} className={color} />
+    <div className={cn('rounded-xl border border-border bg-card p-3 shadow-sm', 'flex items-start gap-3 min-h-[80px]')}>
+      <div className={cn('flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg', bg)}>
+        <Icon size={16} className={color} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[11px] font-medium text-text-secondary">{label}</p>
+        <p className="text-[11px] font-medium text-text-secondary leading-tight break-words">{label}</p>
         <p
           className={cn(
-            'mt-0.5 text-[15px] font-bold leading-tight',
+            'mt-0.5 text-[14px] font-bold leading-tight whitespace-nowrap',
             positive !== undefined
               ? isPos ? 'text-emerald-600' : 'text-red-500'
               : 'text-text-primary',
@@ -78,9 +80,9 @@ const PERIOD_LABELS: Record<string, string> = {
 export function CashSummaryCards({ summary, isLoading }: Props) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="h-[84px] animate-pulse rounded-xl bg-border/40" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-[80px] animate-pulse rounded-xl bg-border/40" />
         ))}
       </div>
     );
@@ -111,6 +113,13 @@ export function CashSummaryCards({ summary, isLoading }: Props) {
       icon:  ArrowDownCircle,
       color: 'text-red-500',
       bg:    'bg-red-50',
+    },
+    {
+      label: 'Dettes clients',
+      value: summary.totalClientDebt ?? 0,
+      icon:  AlertCircle,
+      color: (summary.totalClientDebt ?? 0) > 0 ? 'text-orange-600' : 'text-text-muted',
+      bg:    (summary.totalClientDebt ?? 0) > 0 ? 'bg-orange-50' : 'bg-slate-50',
     },
     {
       label: `Profit — ${periodLabel}`,
@@ -147,7 +156,7 @@ export function CashSummaryCards({ summary, isLoading }: Props) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {cards.map((card) => (
         <KpiCard key={card.label} {...card} />
       ))}

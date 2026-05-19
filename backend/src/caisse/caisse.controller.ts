@@ -86,4 +86,12 @@ export class CaisseController {
   updateConfig(@Body() dto: CaisseConfigUpdateDto) {
     return this.caisseService.setAllowNegative(dto.allowNegative ?? false);
   }
+
+  // ─── Backfill (idempotent) ────────────────────────────────────────────────────
+
+  @RequirePermissions('caisse.admin')
+  @Post('backfill')
+  backfillPayments() {
+    return this.caisseService.backfillPayments();
+  }
 }

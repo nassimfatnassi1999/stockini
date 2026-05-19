@@ -918,7 +918,7 @@ function PurchaseDetailsModal({
             <p className="text-sm text-text-muted">Chargement…</p>
           ) : data ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <span className="text-text-muted">Fournisseur</span>
                   <p className="font-medium">{data.supplier?.name ?? '—'}</p>
