@@ -279,6 +279,12 @@ export interface EmailPreview {
   attachments: Array<{ documentId: Id; fileName: string }>;
 }
 
+export interface ShareLinkResponse {
+  url: string;
+  expiresAt: string;
+  expiresInDays: number;
+}
+
 export type TrashEntityType = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment' | 'document';
 
 export interface TrashItem {

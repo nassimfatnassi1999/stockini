@@ -22,6 +22,8 @@ import type {
   SendDocumentEmailDto,
   UpdateDocumentDto,
   ListDocumentsQuery,
+  ShareLinkDto,
+  SendEmailLinkDto,
 } from './dto/document.dto';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 
@@ -552,6 +554,262 @@ export class DocumentsService {
       where: { documentId: id },
       orderBy: { sentAt: 'desc' },
     });
+  }
+
+  // ─── Share link (presigned URL with configurable expiry) ─────────────────────
+
+  async shareLink(
+    id: string,
+    dto: ShareLinkDto,
+  ): Promise<{ url: string; expiresAt: string; expiresInDays: number }> {
+    const doc = await this.prisma.generatedDocument.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!doc) throw new NotFoundException(`Document ${id} introuvable`);
+
+    const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey);
+    if (!exists) throw new NotFoundException('Fichier PDF introuvable dans le stockage MinIO');
+
+    const expiresInDays = dto.expiresInDays ?? 7;
+    const expirySeconds = expiresInDays * 24 * 3600;
+    const url = await this.minio.presignedGetUrl(
+      doc.minioBucket,
+      doc.minioObjectKey,
+      expirySeconds,
+    );
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000).toISOString();
+
+    this.logger.log(
+      `[SHARE-LINK] documentId=${id} expiresInDays=${expiresInDays} expiresAt=${expiresAt}`,
+    );
+
+    return { url, expiresAt, expiresInDays };
+  }
+
+  // ─── Send email with PDF link (no attachment) ─────────────────────────────────
+
+  async sendEmailLink(id: string, dto: SendEmailLinkDto, user?: AuthUser) {
+    if (!dto.to) {
+      throw new BadRequestException('Adresse email du destinataire manquante.');
+    }
+
+    const doc = await this.prisma.generatedDocument.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        sale: {
+          select: {
+            invoiceNumber: true,
+            total: true,
+            customer: { select: { name: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!doc) throw new NotFoundException(`Document ${id} introuvable`);
+
+    const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey);
+    if (!exists) throw new NotFoundException('Fichier PDF introuvable dans le stockage MinIO');
+
+    const expiresInDays = dto.expiresInDays ?? 7;
+    const expirySeconds = expiresInDays * 24 * 3600;
+    const presignedUrl = await this.minio.presignedGetUrl(
+      doc.minioBucket,
+      doc.minioObjectKey,
+      expirySeconds,
+    );
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+
+    const clientName =
+      doc.clientName ?? doc.sale?.customer?.name ?? 'Client';
+    const docTypeLabel =
+      DOC_PREFIXES[doc.documentType] ?? doc.documentType;
+    const subject =
+      dto.subject ??
+      `${docTypeLabel} ${doc.documentNumber} — lien de consultation`;
+
+    const htmlBody = this.buildLinkEmailHtml({
+      clientName,
+      documentNumber: doc.documentNumber,
+      documentType: docTypeLabel,
+      totalTtc: doc.totalTtc ? Number(doc.totalTtc) : null,
+      presignedUrl,
+      expiresAt,
+      customMessage: dto.message,
+    });
+
+    let emailStatus: EmailStatus = EmailStatus.SENT;
+    let errorMessage: string | undefined;
+
+    try {
+      await this.email.sendHtml({ to: dto.to, subject, htmlBody });
+
+      await this.prisma.generatedDocument.update({
+        where: { id },
+        data: {
+          emailStatus: EmailStatus.SENT,
+          status: DocumentStatus.SENT,
+          sentAt: new Date(),
+          sentTo: dto.to,
+        },
+      });
+    } catch (err) {
+      emailStatus = EmailStatus.FAILED;
+      errorMessage = (err as Error).message;
+      this.logger.error(
+        `[EMAIL-LINK] send failed for document ${id}: ${errorMessage}`,
+      );
+
+      await this.prisma.generatedDocument.update({
+        where: { id },
+        data: { emailStatus: EmailStatus.FAILED },
+      });
+    }
+
+    this.logger.log(
+      `[EMAIL-LINK] documentId=${id} recipient=${dto.to} expiresAt=${expiresAt.toISOString()} sentBy=${user?.id ?? 'unknown'} status=${emailStatus}`,
+    );
+
+    await this.prisma.documentEmailLog.create({
+      data: {
+        documentId: id,
+        recipientEmail: dto.to,
+        subject,
+        message: `[LIEN PDF] Lien valable ${expiresInDays} jour(s) — expire le ${expiresAt.toLocaleDateString('fr-TN')}`,
+        sentBy: user?.id,
+        status: emailStatus,
+        errorMessage,
+      },
+    });
+
+    if (emailStatus === EmailStatus.FAILED) {
+      throw new BadRequestException(`Échec de l'envoi email : ${errorMessage}`);
+    }
+
+    return {
+      success: true,
+      emailStatus,
+      expiresAt: expiresAt.toISOString(),
+      expiresInDays,
+    };
+  }
+
+  private buildLinkEmailHtml(params: {
+    clientName: string;
+    documentNumber: string;
+    documentType: string;
+    totalTtc: number | null;
+    presignedUrl: string;
+    expiresAt: Date;
+    customMessage?: string;
+  }): string {
+    const {
+      clientName,
+      documentNumber,
+      documentType,
+      totalTtc,
+      presignedUrl,
+      expiresAt,
+      customMessage,
+    } = params;
+
+    const expireStr = expiresAt.toLocaleDateString('fr-TN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+    const ttcRow =
+      totalTtc !== null
+        ? `<tr>
+            <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Montant TTC</td>
+            <td style="color:#1d4ed8;font-size:15px;font-weight:700;text-align:right;">${totalTtc.toFixed(3)} TND</td>
+          </tr>`
+        : '';
+
+    const customMsgHtml = customMessage
+      ? `<p style="margin:0 0 24px;color:#374151;font-size:14px;line-height:1.6;">${customMessage}</p>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>${documentType} ${documentNumber}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background:#f4f5f7;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+               style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;
+                      overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background:#1d4ed8;padding:28px 32px;">
+              <p style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">Stockini</p>
+              <p style="margin:6px 0 0;color:#bfdbfe;font-size:13px;">Document commercial</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 32px 24px;">
+              <p style="margin:0 0 20px;color:#374151;font-size:15px;">
+                Bonjour <strong>${clientName}</strong>,
+              </p>
+              ${customMsgHtml}
+              <p style="margin:0 0 20px;color:#374151;font-size:14px;">
+                Votre document est disponible en consultation et téléchargement&nbsp;:
+              </p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Type</td>
+                        <td style="color:#111827;font-size:13px;font-weight:600;text-align:right;">${documentType}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Référence</td>
+                        <td style="color:#111827;font-size:13px;font-weight:600;text-align:right;">${documentNumber}</td>
+                      </tr>
+                      ${ttcRow}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+                     style="margin:0 auto 28px;">
+                <tr>
+                  <td style="background:#1d4ed8;border-radius:6px;">
+                    <a href="${presignedUrl}" target="_blank"
+                       style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;
+                              font-weight:600;text-decoration:none;letter-spacing:0.2px;">
+                      Consulter / Télécharger le PDF
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 8px;color:#6b7280;font-size:12px;text-align:center;">
+                &#9888;&#65039; Ce lien expire le <strong style="color:#374151;">${expireStr}</strong>
+              </p>
+              <p style="margin:0;color:#9ca3af;font-size:11px;text-align:center;">
+                Si le bouton ne fonctionne pas, copiez le lien directement dans votre navigateur.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f8fafc;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
+              <p style="margin:0;color:#9ca3af;font-size:11px;">
+                Ce message a été envoyé automatiquement — merci de ne pas y répondre.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
   }
 
   // ─── Soft delete (move to trash) ─────────────────────────────────────────────

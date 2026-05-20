@@ -15,6 +15,14 @@ export interface SendEmailOptions {
   subject: string;
   body: string;
   attachments: EmailAttachment[];
+  /** If provided, used as the HTML body instead of wrapping body in a <pre>. */
+  html?: string;
+}
+
+export interface SendHtmlEmailOptions {
+  to: string;
+  subject: string;
+  htmlBody: string;
 }
 
 @Injectable()
@@ -46,7 +54,7 @@ export class EmailService {
       bcc: options.bcc,
       subject: options.subject,
       text: options.body,
-      html: `<pre style="font-family:sans-serif;white-space:pre-wrap">${options.body}</pre>`,
+      html: options.html ?? `<pre style="font-family:sans-serif;white-space:pre-wrap">${options.body}</pre>`,
       attachments: options.attachments.map((a) => ({
         filename: a.filename,
         content: a.content,
@@ -54,5 +62,19 @@ export class EmailService {
       })),
     });
     this.logger.log(`Email sent to ${options.to} — ${options.subject}`);
+  }
+
+  async sendHtml(options: SendHtmlEmailOptions): Promise<void> {
+    const from = this.config.get<string>(
+      'SMTP_FROM',
+      this.config.get<string>('SMTP_USER', 'noreply@stockini.com'),
+    );
+    await this.transporter.sendMail({
+      from,
+      to: options.to,
+      subject: options.subject,
+      html: options.htmlBody,
+    });
+    this.logger.log(`HTML email sent to ${options.to} — ${options.subject}`);
   }
 }

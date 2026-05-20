@@ -14,6 +14,7 @@ import type {
   EmailPreview,
   GeneratedDocument,
   SalesDocumentType,
+  ShareLinkResponse,
   DashboardReport,
   PaginatedResponse,
   PurchasesQueryParams,
@@ -220,6 +221,12 @@ export const stockiniApi = {
 
   deleteGeneratedDocument: (id: string) =>
     api.delete(`/documents/${id}`).then((r) => r.data),
+
+  shareLink: (id: string, expiresInDays?: 1 | 7 | 30) =>
+    api.post<ShareLinkResponse>(`/documents/${id}/share-link`, { expiresInDays }).then((r) => r.data),
+
+  sendEmailLink: (id: string, payload: { to: string; subject?: string; message?: string; expiresInDays?: 1 | 7 | 30 }) =>
+    api.post<{ success: boolean; emailStatus: string; expiresAt: string; expiresInDays: number }>(`/documents/${id}/send-email-link`, payload).then((r) => r.data),
   // ── Avoirs (Credit Notes) ─────────────────────────────────────────────────
   returnableItems: (saleId: string) =>
     api.get<ReturnableItemsResponse>(`/avoirs/sales/${saleId}/returnable-items`).then((r) => r.data),

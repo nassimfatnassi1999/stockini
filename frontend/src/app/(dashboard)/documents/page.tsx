@@ -6,6 +6,7 @@ import {
   Download,
   Eye,
   FileText,
+  Link,
   Loader2,
   Mail,
   Pencil,
@@ -346,6 +347,130 @@ function EmailLogsModal({ doc, onClose }: EmailLogsModalProps) {
   );
 }
 
+interface SendLinkModalProps {
+  doc: GeneratedDocument;
+  onClose: () => void;
+  onSent: () => void;
+}
+
+function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
+  const defaultEmail = doc.sale?.customer?.email ?? '';
+  const defaultName = doc.clientName ?? doc.sale?.customer?.name ?? 'Client';
+
+  const [to, setTo] = useState(defaultEmail);
+  const [subject, setSubject] = useState(
+    `${DOC_TYPE_LABELS[doc.documentType]} ${doc.documentNumber} — lien de consultation`,
+  );
+  const [message, setMessage] = useState(
+    `Bonjour ${defaultName},\n\nVeuillez trouver ci-dessous le lien pour consulter et télécharger votre ${DOC_TYPE_LABELS[doc.documentType].toLowerCase()}.\n\nCordialement.`,
+  );
+  const [expiresInDays, setExpiresInDays] = useState<1 | 7 | 30>(7);
+
+  const sendMutation = useMutation({
+    mutationFn: () =>
+      stockiniApi.sendEmailLink(doc.id, {
+        to,
+        subject,
+        message,
+        expiresInDays,
+      }),
+    onSuccess: () => {
+      toast.success('Lien PDF envoyé avec succès');
+      onSent();
+      onClose();
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Échec de l'envoi du lien");
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-xl border border-border/70 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-text-primary">Envoyer lien PDF</h2>
+            <p className="text-xs text-text-muted mt-0.5">{doc.documentNumber} — sans pièce jointe</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
+            <X size={15} className="text-text-muted" />
+          </button>
+        </div>
+        <div className="space-y-3 p-5">
+          <div className="space-y-1.5">
+            <Label htmlFor="link-to">Destinataire *</Label>
+            <input
+              id="link-to"
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="destinataire@email.com"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="link-subject">Sujet</Label>
+            <input
+              id="link-subject"
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="link-message">Message (optionnel)</Label>
+            <textarea
+              id="link-message"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={4}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="link-expiry">Durée de validité du lien</Label>
+            <select
+              id="link-expiry"
+              value={expiresInDays}
+              onChange={(e) => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
+              className="app-select w-full"
+            >
+              <option value={1}>1 jour</option>
+              <option value={7}>7 jours (recommandé)</option>
+              <option value={30}>30 jours</option>
+            </select>
+          </div>
+          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
+            <Link size={13} className="mt-0.5 shrink-0" />
+            <span>
+              Un lien sécurisé et temporaire sera généré vers le PDF stocké dans MinIO.
+              Aucune pièce jointe ne sera envoyée.
+            </span>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-4">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            size="sm"
+            disabled={sendMutation.isPending || !to}
+            onClick={() => sendMutation.mutate()}
+          >
+            {sendMutation.isPending ? (
+              <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
+            ) : (
+              <><Link size={13} className="mr-1.5" />Envoyer le lien</>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DocumentsPage() {
@@ -369,6 +494,7 @@ export default function DocumentsPage() {
   // Modals
   const [editDoc, setEditDoc] = useState<GeneratedDocument | null>(null);
   const [emailDoc, setEmailDoc] = useState<GeneratedDocument | null>(null);
+  const [sendLinkDoc, setSendLinkDoc] = useState<GeneratedDocument | null>(null);
   const [deleteDoc, setDeleteDoc] = useState<GeneratedDocument | null>(null);
   const [emailLogsDoc, setEmailLogsDoc] = useState<GeneratedDocument | null>(null);
 
@@ -701,10 +827,20 @@ export default function DocumentsPage() {
                             <Button
                               variant="actionView"
                               size="action"
-                              title="Envoyer par email"
+                              title="Envoyer par email (pièce jointe)"
                               onClick={() => setEmailDoc(doc)}
                             >
                               <Mail size={13} />
+                            </Button>
+                          )}
+                          {can('documents.email') && (
+                            <Button
+                              variant="actionView"
+                              size="action"
+                              title="Envoyer lien PDF"
+                              onClick={() => setSendLinkDoc(doc)}
+                            >
+                              <Link size={13} />
                             </Button>
                           )}
                           {can('documents.view_history') && (
@@ -778,6 +914,14 @@ export default function DocumentsPage() {
         <EmailModal
           doc={emailDoc}
           onClose={() => setEmailDoc(null)}
+          onSent={() => queryClient.invalidateQueries({ queryKey: ['documents'] })}
+        />
+      )}
+
+      {sendLinkDoc && (
+        <SendLinkModal
+          doc={sendLinkDoc}
+          onClose={() => setSendLinkDoc(null)}
           onSent={() => queryClient.invalidateQueries({ queryKey: ['documents'] })}
         />
       )}

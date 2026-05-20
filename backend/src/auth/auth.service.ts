@@ -35,7 +35,7 @@ export class AuthService {
     const payload = { sub: user.id, email: user.email, role: user.role.name };
     const accessToken = await this.jwtService.signAsync(payload);
     const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
+      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
       expiresIn: (this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d') as JwtSignOptions['expiresIn'],
     });
 
@@ -66,7 +66,7 @@ export class AuthService {
         email: string;
         role: string;
       }>(token, {
-        secret: this.config.get<string>('JWT_REFRESH_SECRET') ?? 'change_me_refresh',
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
       });
 
       const user = await this.prisma.user.findUnique({

@@ -20,7 +20,6 @@ const PAYMENT_STATUS_CLASSES: Record<string, string> = {
 const NON_PAYABLE_TYPES: ReadonlySet<string> = new Set([
   'DEVIS',
   'BON_COMMANDE',
-  'BON_LIVRAISON',
   'AVOIR',
 ]);
 

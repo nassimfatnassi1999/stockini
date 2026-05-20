@@ -24,6 +24,8 @@ import {
   SendDocumentEmailDto,
   UpdateDocumentDto,
   ListDocumentsQuery,
+  ShareLinkDto,
+  SendEmailLinkDto,
 } from './dto/document.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -134,5 +136,23 @@ export class DocumentsController {
   @RequirePermissions('documents.update')
   regenerate(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.svc.regenerate(id, user);
+  }
+
+  /** Generate a temporary presigned URL for the document PDF */
+  @Post(':id/share-link')
+  @RequirePermissions('documents.view')
+  shareLink(@Param('id') id: string, @Body() dto: ShareLinkDto) {
+    return this.svc.shareLink(id, dto);
+  }
+
+  /** Send an email with a presigned PDF link (no attachment) */
+  @Post(':id/send-email-link')
+  @RequirePermissions('documents.email')
+  sendEmailLink(
+    @Param('id') id: string,
+    @Body() dto: SendEmailLinkDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.svc.sendEmailLink(id, dto, user);
   }
 }

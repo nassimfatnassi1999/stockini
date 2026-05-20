@@ -7,6 +7,12 @@ if (!connectionString) {
   throw new Error('DATABASE_URL is required to seed the database');
 }
 
+const seedAdminEmail = process.env.SEED_ADMIN_EMAIL;
+const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
+if (!seedAdminEmail || !seedAdminPassword) {
+  throw new Error('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are required to seed the database');
+}
+
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
 });
@@ -120,15 +126,15 @@ async function main() {
   }
 
   await prisma.user.upsert({
-    where: { email: 'admin@stockini.local' },
+    where: { email: seedAdminEmail },
     update: {
       fullName: 'Stockini Admin',
       roleId: adminRoleId,
       isActive: true,
     },
     create: {
-      email: 'admin@stockini.local',
-      passwordHash: await bcrypt.hash('Admin123!', 10),
+      email: seedAdminEmail,
+      passwordHash: await bcrypt.hash(seedAdminPassword, 10),
       fullName: 'Stockini Admin',
       roleId: adminRoleId,
       isActive: true,
@@ -418,7 +424,7 @@ async function main() {
   }
 
   console.log('Stockini seed completed');
-  console.log('Admin login: admin@stockini.local / Admin123!');
+  console.log(`Admin login: ${seedAdminEmail}`);
 }
 
 main()

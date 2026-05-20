@@ -34,7 +34,10 @@ const STOCK_IMPACTING_TYPES = new Set<DocumentType>([
   DocumentType.FACTURE,
 ]);
 
-const PAYMENT_ACCEPTING_TYPES = new Set<DocumentType>([DocumentType.FACTURE]);
+const PAYMENT_ACCEPTING_TYPES = new Set<DocumentType>([
+  DocumentType.FACTURE,
+  DocumentType.BON_LIVRAISON,
+]);
 
 const LAST_SALE_PRICE_TYPES = new Set<DocumentType>([
   DocumentType.BON_LIVRAISON,
@@ -460,7 +463,11 @@ export class SalesService {
         status: { not: SaleStatus.CANCELLED },
         OR: [
           { documentType: DocumentType.FACTURE, paymentStatus: { not: PaymentStatus.PAID } },
-          { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
+          {
+            documentType: DocumentType.BON_LIVRAISON,
+            transformedToId: null,
+            paymentStatus: { not: PaymentStatus.PAID },
+          },
         ],
       });
     }

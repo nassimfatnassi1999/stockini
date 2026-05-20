@@ -11,8 +11,8 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { DocumentType, DocumentStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { DocumentType, DocumentStatus } from '@prisma/client';
 
 export class GenerateDocumentsDto {
   @IsArray()
@@ -150,4 +150,31 @@ export class ListDocumentsQuery {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
+}
+
+export class ShareLinkDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @IsIn([1, 7, 30])
+  expiresInDays?: 1 | 7 | 30;
+}
+
+export class SendEmailLinkDto {
+  @IsEmail()
+  to!: string;
+
+  @IsOptional()
+  @IsString()
+  subject?: string;
+
+  @IsOptional()
+  @IsString()
+  message?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @IsIn([1, 7, 30])
+  expiresInDays?: 1 | 7 | 30;
 }

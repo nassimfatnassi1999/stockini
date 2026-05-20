@@ -640,7 +640,7 @@ export default function VentesPage() {
       if (!SALES_API_DOCUMENT_TYPES.has(documentType)) {
         throw new Error("Les avoirs doivent être créés depuis l'onglet Avoir.");
       }
-      const paymentAllowed = documentType === 'FACTURE';
+      const paymentAllowed = documentType === 'FACTURE' || documentType === 'BON_LIVRAISON';
       const submittedPaidAmount = paymentAllowed ? round3(paidAmountNum) : 0;
       if (!paymentAllowed && paidAmountNum > 0) {
         throw new Error(`Le type ${documentType} n'accepte pas de paiement à la création.`);
@@ -953,7 +953,7 @@ export default function VentesPage() {
 	            onClick={() => {
 	              setDocumentType(dt.id);
 	              setActiveTab(dt.id);
-	              if (dt.id !== 'FACTURE') {
+	              if (dt.id !== 'FACTURE' && dt.id !== 'BON_LIVRAISON') {
 	                setPaidAmount('');
 	                setPaymentMethod('');
 	              }
@@ -1246,7 +1246,7 @@ export default function VentesPage() {
       <div className="rounded-lg border border-border/70 bg-white p-4">
         <div className="flex flex-wrap gap-4 items-end justify-between">
 	          <div className="flex flex-wrap gap-3 items-end">
-	            {documentType === 'FACTURE' && (
+	            {(documentType === 'FACTURE' || documentType === 'BON_LIVRAISON') && (
 	              <>
 	                <div className="space-y-1.5">
 	                  <Label htmlFor="paid-amount">Montant payé (DT)</Label>

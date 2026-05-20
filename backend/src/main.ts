@@ -2,7 +2,26 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
+const REQUIRED_ENV_VARS = [
+  'DATABASE_URL',
+  'JWT_SECRET',
+  'JWT_REFRESH_SECRET',
+  'MINIO_ACCESS_KEY',
+  'MINIO_SECRET_KEY',
+];
+
+function validateEnv() {
+  const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    console.error('ERROR: Missing required environment variables:');
+    missing.forEach((key) => console.error(`  - ${key}`));
+    console.error('Copy .env.example to .env and fill in the values.');
+    process.exit(1);
+  }
+}
+
 async function bootstrap() {
+  validateEnv();
   const app = await NestFactory.create(AppModule);
   app.enableCors({
     origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
