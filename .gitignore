@@ -40,6 +40,7 @@ Thumbs.db
 .codex/
 .agents/
 .windsurf/
+settings.local.json
 
 # Misc
 *.tgz
