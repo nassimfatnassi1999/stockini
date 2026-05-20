@@ -2,16 +2,18 @@ import { CustomerType, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error('DATABASE_URL is required to seed the database');
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} is required to seed the database`);
+  }
+
+  return value;
 }
 
-const seedAdminEmail = process.env.SEED_ADMIN_EMAIL;
-const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
-if (!seedAdminEmail || !seedAdminPassword) {
-  throw new Error('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are required to seed the database');
-}
+const connectionString = requireEnv('DATABASE_URL');
+const seedAdminEmail = requireEnv('SEED_ADMIN_EMAIL');
+const seedAdminPassword = requireEnv('SEED_ADMIN_PASSWORD');
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
