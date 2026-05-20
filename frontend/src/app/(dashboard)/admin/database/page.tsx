@@ -1,17 +1,21 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
+  Activity,
   AlertTriangle,
   Archive,
+  Box,
   CheckCircle2,
   ChevronDown,
   Clock,
+  Cpu,
   Database,
   Download,
   FileSpreadsheet,
   FileText,
   HardDrive,
+  MemoryStick,
   RefreshCw,
   Server,
   Shield,
@@ -66,6 +70,24 @@ interface SystemHealth {
 interface ImportPreview {
   rows: Record<string, unknown>[];
   errors: string[];
+}
+
+interface SystemdService {
+  name: string;
+  serviceName: string;
+  status: 'active' | 'inactive' | 'failed' | 'not_found';
+  healthy: boolean;
+}
+
+interface InfrastructureStats {
+  cpu: { usage: number; cores: number; temperature: number | null; model: string };
+  ram: { total: number; used: number; free: number; usagePercent: number };
+  disk: { total: number; used: number; free: number; usagePercent: number };
+  system: { uptime: string; platform: string; hostname: string; loadAverage: number[] };
+  docker?: { containersRunning: number; containersStopped: number; unavailable?: boolean };
+  services?: SystemdService[];
+  network: { rx: string; tx: string };
+  deployment: { mode: 'docker' | 'systemd'; environment: 'development' | 'production' };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -858,6 +880,338 @@ function ImportsTab() {
   );
 }
 
+// ─── Progress Bar ─────────────────────────────────────────────────────────────
+
+function ProgressBar({ value, color }: { value: number; color: string }) {
+  return (
+    <div className="h-1.5 w-full rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+      <div
+        className={cn('h-full rounded-full transition-all duration-500', color)}
+        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+      />
+    </div>
+  );
+}
+
+function usageColor(pct: number): string {
+  if (pct >= 90) return 'bg-red-500';
+  if (pct >= 75) return 'bg-orange-400';
+  return 'bg-green-500';
+}
+
+function globalStatus(stats: InfrastructureStats): 'nominal' | 'attention' | 'critique' {
+  if (stats.ram.usagePercent > 90 || stats.disk.usagePercent > 90) return 'critique';
+  if (stats.cpu.usage > 85 || stats.ram.usagePercent > 75 || stats.disk.usagePercent > 75) return 'attention';
+  return 'nominal';
+}
+
+// ─── Infrastructure VPS Section ───────────────────────────────────────────────
+
+function InfrastructureSection() {
+  const [stats, setStats] = useState<InfrastructureStats | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const loadStats = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get<InfrastructureStats>('/admin/system/infrastructure');
+      setStats(data);
+      setLastUpdated(new Date());
+    } catch {
+      // Silent fail — each widget shows "--" on error
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStats();
+    const id = setInterval(() => { void loadStats(); }, 10000);
+    return () => clearInterval(id);
+  }, [loadStats]);
+
+  const status = stats ? globalStatus(stats) : null;
+  const isSystemd = stats?.deployment?.mode === 'systemd';
+
+  const activeServices = stats?.services?.filter((s) => s.healthy).length ?? 0;
+  const failedServices = stats?.services?.filter(
+    (s) => s.status === 'inactive' || s.status === 'failed',
+  ).length ?? 0;
+  const notFoundServices = stats?.services?.filter((s) => s.status === 'not_found').length ?? 0;
+  const allServicesOk = stats?.services
+    ? activeServices === stats.services.length
+    : true;
+
+  const servicesCardColor = allServicesOk
+    ? 'border-green-200 bg-green-50/30 dark:border-green-800 dark:bg-card'
+    : failedServices > 0
+    ? 'border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-card'
+    : 'border-orange-200 bg-orange-50/30 dark:border-orange-800 dark:bg-card';
+
+  const servicesIconColor = allServicesOk
+    ? 'bg-green-50 dark:bg-green-900/20'
+    : failedServices > 0
+    ? 'bg-red-50 dark:bg-red-900/20'
+    : 'bg-orange-50 dark:bg-orange-900/20';
+
+  const servicesActivityColor = allServicesOk
+    ? 'text-green-600 dark:text-green-400'
+    : failedServices > 0
+    ? 'text-red-600 dark:text-red-400'
+    : 'text-orange-600 dark:text-orange-400';
+
+  return (
+    <div className="space-y-3">
+      {/* Section header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Server size={15} className="text-text-muted" />
+          <h3 className="text-sm font-semibold text-text-primary">
+            {stats?.deployment?.mode === 'docker' ? 'Infrastructure Docker' : 'Infrastructure VPS'}
+          </h3>
+          {stats?.deployment && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+              {stats.deployment.mode === 'docker' ? 'Docker Compose' : 'Services systemd'}
+            </span>
+          )}
+          {status === 'nominal' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+              <CheckCircle2 size={9} /> Nominal
+            </span>
+          )}
+          {status === 'attention' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+              <AlertTriangle size={9} /> Attention
+            </span>
+          )}
+          {status === 'critique' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              <XCircle size={9} /> Critique
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {lastUpdated && (
+            <span className="text-[10px] text-text-muted">
+              Mis à jour {lastUpdated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void loadStats()}
+            disabled={loading}
+            className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs text-text-secondary hover:bg-muted disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={11} className={cn(loading && 'animate-spin')} />
+            Actualiser
+          </button>
+        </div>
+      </div>
+
+      {/* Skeleton loading */}
+      {loading && !stats && (
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="h-28 animate-pulse rounded-xl bg-muted" />
+          ))}
+        </div>
+      )}
+
+      {/* Cards grid */}
+      {stats && (
+        <>
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {/* CPU */}
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                    <Cpu size={13} className="text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <span className="text-xs font-medium text-text-secondary">CPU</span>
+                </div>
+                <span className={cn(
+                  'text-xs font-bold',
+                  stats.cpu.usage >= 85 ? 'text-red-600' : stats.cpu.usage >= 70 ? 'text-orange-500' : 'text-text-primary',
+                )}>
+                  {stats.cpu.usage}%
+                </span>
+              </div>
+              <ProgressBar value={stats.cpu.usage} color={usageColor(stats.cpu.usage)} />
+              <div className="mt-2 space-y-0.5">
+                <p className="text-[10px] text-text-muted truncate" title={stats.cpu.model}>{stats.cpu.model}</p>
+                <p className="text-[10px] text-text-muted">{stats.cpu.cores} cœurs
+                  {stats.cpu.temperature != null && ` · ${stats.cpu.temperature}°C`}
+                </p>
+              </div>
+            </div>
+
+            {/* RAM */}
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-900/20">
+                    <MemoryStick size={13} className="text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <span className="text-xs font-medium text-text-secondary">RAM</span>
+                </div>
+                <span className={cn(
+                  'text-xs font-bold',
+                  stats.ram.usagePercent >= 90 ? 'text-red-600' : stats.ram.usagePercent >= 75 ? 'text-orange-500' : 'text-text-primary',
+                )}>
+                  {stats.ram.usagePercent}%
+                </span>
+              </div>
+              <ProgressBar value={stats.ram.usagePercent} color={usageColor(stats.ram.usagePercent)} />
+              <div className="mt-2 space-y-0.5">
+                <p className="text-[10px] text-text-muted">
+                  {(stats.ram.used / 1024).toFixed(1)} / {(stats.ram.total / 1024).toFixed(1)} GB
+                </p>
+                <p className="text-[10px] text-text-muted">{(stats.ram.free / 1024).toFixed(1)} GB libre</p>
+              </div>
+            </div>
+
+            {/* Disk */}
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-900/20">
+                    <HardDrive size={13} className="text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <span className="text-xs font-medium text-text-secondary">Disque</span>
+                </div>
+                <span className={cn(
+                  'text-xs font-bold',
+                  stats.disk.usagePercent >= 90 ? 'text-red-600' : stats.disk.usagePercent >= 75 ? 'text-orange-500' : 'text-text-primary',
+                )}>
+                  {stats.disk.usagePercent}%
+                </span>
+              </div>
+              <ProgressBar value={stats.disk.usagePercent} color={usageColor(stats.disk.usagePercent)} />
+              <div className="mt-2 space-y-0.5">
+                <p className="text-[10px] text-text-muted">{stats.disk.used} / {stats.disk.total} GB</p>
+                <p className="text-[10px] text-text-muted">{stats.disk.free} GB libre</p>
+              </div>
+            </div>
+
+            {/* Uptime / System */}
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-1.5 mb-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-green-50 dark:bg-green-900/20">
+                  <Clock size={13} className="text-green-600 dark:text-green-400" />
+                </div>
+                <span className="text-xs font-medium text-text-secondary">Uptime</span>
+              </div>
+              <p className="text-base font-bold text-text-primary leading-tight">{stats.system.uptime}</p>
+              <div className="mt-1.5 space-y-0.5">
+                <p className="text-[10px] text-text-muted truncate" title={stats.system.hostname}>{stats.system.hostname}</p>
+                <p className="text-[10px] text-text-muted capitalize">{stats.system.platform}</p>
+              </div>
+            </div>
+
+            {/* Docker (dev) or Services VPS (prod/systemd) */}
+            {isSystemd ? (
+              <div className={cn(
+                'rounded-xl border shadow-sm p-4 hover:shadow-md transition-shadow',
+                servicesCardColor,
+              )}>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className={cn('flex h-7 w-7 items-center justify-center rounded-lg', servicesIconColor)}>
+                    <Activity size={13} className={servicesActivityColor} />
+                  </div>
+                  <span className="text-xs font-medium text-text-secondary">Services VPS</span>
+                </div>
+                <div className="flex items-end gap-2">
+                  <span className="text-lg font-bold text-green-600">{activeServices}</span>
+                  <span className="text-xs text-text-muted mb-0.5">actifs</span>
+                </div>
+                <div className="mt-0.5 space-y-0.5">
+                  {failedServices > 0 && (
+                    <p className="text-[10px] font-medium text-red-500">{failedServices} KO</p>
+                  )}
+                  {notFoundServices > 0 && (
+                    <p className="text-[10px] font-medium text-orange-500">{notFoundServices} introuvable(s)</p>
+                  )}
+                  {allServicesOk && (
+                    <p className="text-[10px] font-medium text-green-600">Tout nominal</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-50 dark:bg-sky-900/20">
+                    <Box size={13} className="text-sky-600 dark:text-sky-400" />
+                  </div>
+                  <span className="text-xs font-medium text-text-secondary">Docker</span>
+                  {stats.docker?.unavailable && (
+                    <span className="text-[9px] text-text-muted">(indisponible)</span>
+                  )}
+                </div>
+                <div className="flex items-end gap-2">
+                  <span className="text-lg font-bold text-green-600">{stats.docker?.containersRunning ?? 0}</span>
+                  <span className="text-xs text-text-muted mb-0.5">actifs</span>
+                </div>
+                <p className="text-[10px] text-text-muted mt-0.5">{stats.docker?.containersStopped ?? 0} stoppé(s)</p>
+              </div>
+            )}
+
+            {/* Load Average */}
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-1.5 mb-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-900/20">
+                  <Activity size={13} className="text-rose-600 dark:text-rose-400" />
+                </div>
+                <span className="text-xs font-medium text-text-secondary">Load Avg</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {(['1m', '5m', '15m'] as const).map((label, i) => (
+                  <div key={label} className="text-center">
+                    <p className="text-xs font-semibold text-text-primary">
+                      {stats.system.loadAverage[i] ?? '--'}
+                    </p>
+                    <p className="text-[9px] text-text-muted">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Services mini list — systemd mode only */}
+          {isSystemd && stats.services && stats.services.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm px-4 py-3 dark:border-gray-700 dark:bg-card">
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                {stats.services.map((s) => (
+                  <div key={s.serviceName} className="flex items-center gap-1.5">
+                    {s.healthy ? (
+                      <CheckCircle2 size={11} className="text-green-500 flex-shrink-0" />
+                    ) : s.status === 'not_found' ? (
+                      <AlertTriangle size={11} className="text-orange-500 flex-shrink-0" />
+                    ) : (
+                      <XCircle size={11} className="text-red-500 flex-shrink-0" />
+                    )}
+                    <span className={cn(
+                      'text-[11px] font-medium',
+                      s.healthy
+                        ? 'text-text-secondary'
+                        : s.status === 'not_found'
+                        ? 'text-orange-600 dark:text-orange-400'
+                        : 'text-red-600 dark:text-red-400',
+                    )}>
+                      {s.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 // TAB: SANTÉ SYSTÈME
 // ═══════════════════════════════════════════════════════════
@@ -954,6 +1308,16 @@ function HealthTab() {
                   } />
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Infrastructure VPS */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Infrastructure VPS</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <InfrastructureSection />
             </CardContent>
           </Card>
 
