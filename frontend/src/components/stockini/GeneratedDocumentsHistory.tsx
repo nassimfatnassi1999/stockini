@@ -48,6 +48,7 @@ interface Props {
   onDocumentSelectionChange: (ids: string[]) => void;
   onEmailClick?: () => void;
   emailLoading?: boolean;
+  noHeader?: boolean;
 }
 
 interface SendLinkModalProps {
@@ -167,7 +168,7 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
   );
 }
 
-export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelectionChange, onEmailClick, emailLoading }: Props) {
+export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelectionChange, onEmailClick, emailLoading, noHeader }: Props) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(true);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -252,34 +253,8 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
 
   const docs = docsQuery.data ?? [];
 
-  return (
-    <div className="rounded-lg border border-border/70 bg-white overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/70">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-2 text-sm font-semibold text-text-primary hover:text-primary transition-colors"
-        >
-          <span>Historique des documents générés ({docs.length})</span>
-          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
-
-        {selectedDocumentIds.length > 0 && onEmailClick && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onEmailClick}
-            disabled={emailLoading}
-            className="flex items-center gap-1.5 text-blue-600 border-blue-300 hover:bg-blue-50"
-          >
-            <Mail size={14} />
-            Envoyer par email ({selectedDocumentIds.length})
-          </Button>
-        )}
-      </div>
-
-      {open && (
-        <div className="overflow-x-auto">
+  const tableContent = (
+    <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-surface">
               <tr className="border-b border-border/60">
@@ -403,15 +378,52 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
             </tbody>
           </table>
         </div>
-      )}
+  );
 
-      {sendLinkDoc && (
-        <SendLinkModal
-          doc={sendLinkDoc}
-          onClose={() => setSendLinkDoc(null)}
-          onSent={() => queryClient.invalidateQueries({ queryKey: ['generated-documents'] })}
-        />
-      )}
+  const modal = sendLinkDoc ? (
+    <SendLinkModal
+      doc={sendLinkDoc}
+      onClose={() => setSendLinkDoc(null)}
+      onSent={() => queryClient.invalidateQueries({ queryKey: ['generated-documents'] })}
+    />
+  ) : null;
+
+  if (noHeader) {
+    return (
+      <>
+        {tableContent}
+        {modal}
+      </>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-white overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/70">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-2 text-sm font-semibold text-text-primary hover:text-primary transition-colors"
+        >
+          <span>Historique des documents générés ({docs.length})</span>
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+
+        {selectedDocumentIds.length > 0 && onEmailClick && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onEmailClick}
+            disabled={emailLoading}
+            className="flex items-center gap-1.5 text-blue-600 border-blue-300 hover:bg-blue-50"
+          >
+            <Mail size={14} />
+            Envoyer par email ({selectedDocumentIds.length})
+          </Button>
+        )}
+      </div>
+      {open && tableContent}
+      {modal}
     </div>
   );
 }

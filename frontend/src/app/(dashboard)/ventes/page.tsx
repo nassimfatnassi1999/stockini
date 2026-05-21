@@ -12,6 +12,7 @@ import {
   Eye,
   FileText,
   Loader2,
+  Mail,
   RotateCcw,
   Trash2,
   UserCircle,
@@ -289,7 +290,7 @@ export default function VentesPage() {
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
-  const [showHistory, setShowHistory] = useState(true);
+  const [activeHistoryTab, setActiveHistoryTab] = useState<'ventes' | 'documents'>('ventes');
 
   // ── Sales history pagination + filters ────────────────────────────────────
   const [salesPage, setSalesPage] = useState(1);
@@ -486,6 +487,11 @@ export default function VentesPage() {
     placeholderData: (prev) => prev,
   });
   const salesList: Sale[] = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
+
+  const docsCountQuery = useQuery({
+    queryKey: ['generated-documents'],
+    queryFn: () => stockiniApi.generatedDocuments(),
+  });
 
   // Ventes sélectionnées (objets complets, pas juste les IDs)
   const selectedSales = salesList.filter((s) => selectedInvoiceIds.includes(s.id));
@@ -1301,44 +1307,81 @@ export default function VentesPage() {
         </div>
       </div>
 
-      {/* Sales history */}
+      {/* History tabs */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {/* Card header */}
-        <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-slate-100 px-5 py-2.5">
-          {/* Title + count + collapse */}
-          <button
-            type="button"
-            onClick={() => setShowHistory((v) => !v)}
-            className="flex items-center gap-2 text-sm font-semibold text-slate-800 transition-colors hover:text-primary"
-          >
-            <span>Historique des ventes</span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
-              {salesQuery.data?.total ?? salesList.length}
-            </span>
-            <ChevronUp
-              size={14}
+        {/* Tab bar */}
+        <div className="flex items-center justify-between border-b-2 border-slate-200">
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => setActiveHistoryTab('ventes')}
               className={cn(
-                'text-slate-400 transition-transform duration-200',
-                showHistory ? '' : 'rotate-180',
+                'flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-medium transition-all -mb-px',
+                activeHistoryTab === 'ventes'
+                  ? 'border-orange-500 bg-white font-semibold text-slate-900'
+                  : 'border-transparent bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700',
               )}
-            />
-          </button>
-
-          {/* Bulk actions bar — appears when rows are selected */}
-          {selectedInvoiceIds.length > 0 && (
-            <BulkActionsBar
-              count={selectedInvoiceIds.length}
-              onDownload={handleDownloadClick}
-              onEmail={handleEmailClick}
-              emailLoading={emailPreviewLoading}
-              canTransform={canTransform}
-              onTransform={() => setTransformDialogOpen(true)}
-              onClear={() => setSelectedInvoiceIds([])}
-            />
-          )}
+            >
+              Historique des ventes
+              <span
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                  activeHistoryTab === 'ventes' ? 'bg-orange-500 text-white' : 'bg-slate-200 text-slate-600',
+                )}
+              >
+                {salesQuery.data?.total ?? salesList.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveHistoryTab('documents')}
+              className={cn(
+                'flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-medium transition-all -mb-px',
+                activeHistoryTab === 'documents'
+                  ? 'border-orange-500 bg-white font-semibold text-slate-900'
+                  : 'border-transparent bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700',
+              )}
+            >
+              Historique des documents générés
+              <span
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                  activeHistoryTab === 'documents' ? 'bg-orange-500 text-white' : 'bg-slate-200 text-slate-600',
+                )}
+              >
+                {docsCountQuery.data?.length ?? 0}
+              </span>
+            </button>
+          </div>
+          {/* Right side actions */}
+          <div className="px-3">
+            {activeHistoryTab === 'ventes' && selectedInvoiceIds.length > 0 && (
+              <BulkActionsBar
+                count={selectedInvoiceIds.length}
+                onDownload={handleDownloadClick}
+                onEmail={handleEmailClick}
+                emailLoading={emailPreviewLoading}
+                canTransform={canTransform}
+                onTransform={() => setTransformDialogOpen(true)}
+                onClear={() => setSelectedInvoiceIds([])}
+              />
+            )}
+            {activeHistoryTab === 'documents' && selectedDocumentIds.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleDocumentEmailClick}
+                disabled={emailPreviewLoading}
+                className="flex items-center gap-1.5 text-blue-600 border-blue-300 hover:bg-blue-50"
+              >
+                <Mail size={14} />
+                Envoyer par email ({selectedDocumentIds.length})
+              </Button>
+            )}
+          </div>
         </div>
 
-        {showHistory && (
+        {activeHistoryTab === 'ventes' && (
           <>
           <HistoryToolbar
             search={salesLocalSearch}
@@ -1563,15 +1606,16 @@ export default function VentesPage() {
           </div>
           </>
         )}
+        {activeHistoryTab === 'documents' && (
+          <GeneratedDocumentsHistory
+            noHeader
+            selectedDocumentIds={selectedDocumentIds}
+            onDocumentSelectionChange={handleDocumentSelectionChange}
+            onEmailClick={handleDocumentEmailClick}
+            emailLoading={emailPreviewLoading}
+          />
+        )}
       </div>
-
-      {/* Generated Documents History */}
-      <GeneratedDocumentsHistory
-        selectedDocumentIds={selectedDocumentIds}
-        onDocumentSelectionChange={handleDocumentSelectionChange}
-        onEmailClick={handleDocumentEmailClick}
-        emailLoading={emailPreviewLoading}
-      />
 
       {/* Floating document generation panel (opened by Download button) */}
       {isDocMenuOpen && (
