@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, Eye, Package, ReceiptText, RotateCcw, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2, X } from 'lucide-react';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
@@ -354,7 +354,6 @@ export default function AchatsPage() {
         supplierId,
         discount: round3(totals.totalRemise),
         tax: round3(totals.totalTva),
-        paidAmount: docType === 'FACTURE' ? round3(paidAmountNum) : 0,
         items: filledLines.map((l) => ({
           productId: l.productId!,
           quantity: l.quantity,
@@ -384,16 +383,18 @@ export default function AchatsPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-caisse'] });
       if (selectedCommandeId) {
         queryClient.invalidateQueries({ queryKey: ['stockini-purchase', selectedCommandeId] });
       }
 
       const label = isFromCommande
-        ? 'Réception validée — stock mis à jour'
+        ? 'Réception validée — stock mis à jour, paiement à effectuer'
         : docType === 'BON_COMMANDE'
           ? 'Bon de commande créé'
           : docType === 'BON_RECEPTION'
-            ? 'Bon de réception validé — stock mis à jour'
+            ? 'Bon de réception validé — stock mis à jour, paiement à effectuer'
             : 'Facture enregistrée';
       toast.success(label);
       clearDraft();
@@ -429,6 +430,8 @@ export default function AchatsPage() {
       setDeleteTarget(null);
     },
   });
+
+  const [payTarget, setPayTarget] = useState<Purchase | null>(null);
 
   const today = new Date().toLocaleDateString('fr-TN', {
     year: 'numeric',
@@ -797,6 +800,12 @@ export default function AchatsPage() {
                               onClick: () => setSelectedPurchaseId(purchase.id),
                             },
                             {
+                              label: 'Payer',
+                              icon: <CreditCard size={14} />,
+                              onClick: () => setPayTarget(purchase),
+                              hidden: purchase.paymentStatus === 'PAID' || (purchase.status !== 'RECEIVED' && purchase.status !== 'PARTIALLY_RECEIVED'),
+                            },
+                            {
                               label: 'Supprimer',
                               icon: <Trash2 size={14} />,
                               onClick: () => setDeleteTarget(purchase),
@@ -871,6 +880,19 @@ export default function AchatsPage() {
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(deleteTarget.id)}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {payTarget && (
+        <PayPurchaseModal
+          purchase={payTarget}
+          onClose={() => setPayTarget(null)}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
+            queryClient.invalidateQueries({ queryKey: ['stockini-caisse'] });
+            queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+            setPayTarget(null);
+          }}
         />
       )}
     </div>
@@ -984,6 +1006,138 @@ function PurchaseDetailsModal({
         <div className="flex justify-end border-t border-border px-5 py-3">
           <Button type="button" variant="outline" size="sm" onClick={onClose}>
             Fermer
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PayPurchaseModal({
+  purchase,
+  onClose,
+  onSuccess,
+}: {
+  purchase: Purchase;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const remaining = Number(purchase.remainingAmount ?? purchase.total) - Number(purchase.paidAmount ?? 0);
+  const resteAPayer = Math.max(remaining, 0);
+
+  const [montant, setMontant] = useState(String(resteAPayer.toFixed(3)));
+  const [method, setMethod] = useState('CASH');
+
+  const paymentMethodsQuery = useQuery<DropdownOption[]>({
+    queryKey: ['stockini-dropdown-options', 'payment_methods'],
+    queryFn: () => stockiniApi.dropdownOptionsByCategory('payment_methods'),
+  });
+
+  const payMutation = useMutation({
+    mutationFn: () =>
+      stockiniApi.payPurchase(purchase.id, {
+        amount: Number(montant),
+        method,
+      }),
+    onSuccess: () => {
+      toast.success('Paiement enregistré — caisse débitée');
+      onSuccess();
+    },
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { message?: string | string[] } } })
+        ?.response?.data?.message;
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors du paiement');
+      toast.error(text);
+    },
+  });
+
+  const montantNum = Number(montant) || 0;
+  const canPay = montantNum > 0 && montantNum <= resteAPayer + 0.001 && !!method && !payMutation.isPending;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-base font-semibold text-text-primary">
+            Payer — {purchase.orderNumber}
+          </h2>
+          <button
+            type="button"
+            aria-label="Fermer"
+            onClick={onClose}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-sm rounded-lg border border-border/60 bg-surface p-3">
+            <div>
+              <p className="text-text-muted text-xs uppercase tracking-wide">Fournisseur</p>
+              <p className="font-medium">{purchase.supplier?.name ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-text-muted text-xs uppercase tracking-wide">Total TTC</p>
+              <p className="font-mono font-semibold">{money(purchase.total)}</p>
+            </div>
+            <div>
+              <p className="text-text-muted text-xs uppercase tracking-wide">Déjà payé</p>
+              <p className="font-mono text-emerald-600">{money(purchase.paidAmount)}</p>
+            </div>
+            <div>
+              <p className="text-text-muted text-xs uppercase tracking-wide">Reste à payer</p>
+              <p className="font-mono font-semibold text-red-600">{money(resteAPayer)}</p>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="pay-montant">Montant à payer (DT)</Label>
+            <Input
+              id="pay-montant"
+              type="number"
+              min={0.001}
+              max={resteAPayer}
+              step={0.001}
+              value={montant}
+              onChange={(e) => setMontant(e.target.value)}
+              placeholder="0.000"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="pay-method">Méthode de paiement</Label>
+            <select
+              id="pay-method"
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="app-select"
+            >
+              <option value="CASH">Espèces</option>
+              {(paymentMethodsQuery.data ?? []).map((opt) => (
+                <option key={opt.id} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => payMutation.mutate()}
+            disabled={!canPay}
+          >
+            {payMutation.isPending ? 'Enregistrement…' : 'Confirmer le paiement'}
           </Button>
         </div>
       </div>

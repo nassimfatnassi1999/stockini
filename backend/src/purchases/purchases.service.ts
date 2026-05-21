@@ -155,6 +155,8 @@ export class PurchasesService {
       const purchaseItemsById = new Map(
         purchase.items.map((item) => [item.id, item]),
       );
+
+      let batchTotal = 0;
       for (const item of dto.items) {
         const purchaseItem = purchaseItemsById.get(item.purchaseItemId);
         if (!purchaseItem) {
@@ -169,6 +171,8 @@ export class PurchasesService {
             'Received quantity exceeds ordered quantity',
           );
         }
+
+        batchTotal += item.quantity * Number(purchaseItem.unitCost);
 
         await tx.purchaseItem.update({
           where: { id: purchaseItem.id },
@@ -193,6 +197,8 @@ export class PurchasesService {
         (item) => item.receivedQuantity > 0,
       );
 
+      // Stock is updated above; caisse is NOT touched here.
+      // The purchase stays UNPAID — payment happens via POST /payments/purchases/:id/pay.
       return tx.purchase.update({
         where: { id },
         data: {

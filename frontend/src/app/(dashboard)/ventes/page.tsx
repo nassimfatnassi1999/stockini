@@ -107,12 +107,16 @@ const SALES_API_DOCUMENT_TYPES = new Set<SalesDocumentType>([
   'FACTURE',
 ]);
 
-const PDF_ACTIONS: Array<{ type: SalesDocumentType; label: string }> = [
+// Central config — add new types here without touching any other code
+const GENERATABLE_DOC_TYPES: Array<{ type: SalesDocumentType; label: string }> = [
   { type: 'DEVIS', label: 'Générer devis' },
   { type: 'BON_COMMANDE', label: 'Générer bon de commande' },
   { type: 'BON_LIVRAISON', label: 'Générer bon de livraison' },
   { type: 'FACTURE', label: 'Générer facture' },
+  { type: 'AVOIR', label: 'Générer avoir' },
 ];
+
+const PDF_ACTIONS = GENERATABLE_DOC_TYPES;
 
 // Types de documents transformables (source)
 const TRANSFORMABLE_TYPES: SalesDocumentType[] = ['DEVIS', 'BON_COMMANDE', 'BON_LIVRAISON'];
@@ -1626,7 +1630,7 @@ export default function VentesPage() {
                 Générer un document
               </p>
               <p className="text-xs text-text-muted mt-0.5">
-                {selectedInvoiceIds.length} facture{selectedInvoiceIds.length > 1 ? 's' : ''} sélectionnée{selectedInvoiceIds.length > 1 ? 's' : ''}
+                {selectedInvoiceIds.length} vente{selectedInvoiceIds.length > 1 ? 's' : ''} sélectionnée{selectedInvoiceIds.length > 1 ? 's' : ''}
               </p>
             </div>
             <button

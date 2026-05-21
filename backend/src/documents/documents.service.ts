@@ -83,17 +83,6 @@ export class DocumentsService {
         },
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
-      if (dto.documentType === DocumentType.AVOIR) {
-        throw new BadRequestException(
-          'Les avoirs doivent être générés depuis le module Avoirs',
-        );
-      }
-      if (sale.documentType !== dto.documentType) {
-        throw new BadRequestException(
-          `Type de document incohérent: la vente est ${sale.documentType}, génération demandée ${dto.documentType}`,
-        );
-      }
-
       const existing = await this.prisma.generatedDocument.findFirst({
         where: {
           invoiceId,
