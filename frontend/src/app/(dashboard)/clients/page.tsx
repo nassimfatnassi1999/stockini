@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2, X } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
@@ -270,16 +271,17 @@ export default function ClientsPage() {
                       })()}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {can('clients.delete') && (
-                        <button
-                          type="button"
-                          aria-label={`Supprimer ${customer.name}`}
-                          onClick={() => setTrashTarget({ id: customer.id, name: customer.name })}
-                          className="app-action-button app-action-delete"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
+                      <KebabMenu
+                        items={[
+                          {
+                            label: 'Supprimer',
+                            icon: <Trash2 size={14} />,
+                            onClick: () => setTrashTarget({ id: customer.id, name: customer.name }),
+                            variant: 'destructive',
+                            hidden: !can('clients.delete'),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}

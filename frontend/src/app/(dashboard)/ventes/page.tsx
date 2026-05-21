@@ -17,6 +17,7 @@ import {
   UserCircle,
   X,
 } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
@@ -292,7 +293,7 @@ export default function VentesPage() {
 
   // ── Sales history pagination + filters ────────────────────────────────────
   const [salesPage, setSalesPage] = useState(1);
-  const [salesLimit, setSalesLimit] = useState(20);
+  const [salesLimit, setSalesLimit] = useState(5);
   const [salesSearch, setSalesSearch] = useState('');
   const [salesLocalSearch, setSalesLocalSearch] = useState('');
   const [salesDocType, setSalesDocType] = useState('');
@@ -1491,28 +1492,23 @@ export default function VentesPage() {
                         </td>
                         {hasActions && (
                           <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-1">
-                              {canViewDetails && (
-                                <Button
-                                  variant="actionView"
-                                  size="action"
-                                  title="Voir les détails"
-                                  onClick={() => setSelectedSaleId(sale.id)}
-                                >
-                                  <Eye size={14} />
-                                </Button>
-                              )}
-                              {canDeleteSale && (
-                                <Button
-                                  variant="actionDelete"
-                                  size="action"
-                                  title="Mettre à la corbeille"
-                                  onClick={() => setDeleteTarget(sale)}
-                                >
-                                  <Trash2 size={14} />
-                                </Button>
-                              )}
-                            </div>
+                            <KebabMenu
+                              items={[
+                                {
+                                  label: 'Voir les détails',
+                                  icon: <Eye size={14} />,
+                                  onClick: () => setSelectedSaleId(sale.id),
+                                  hidden: !canViewDetails,
+                                },
+                                {
+                                  label: 'Mettre à la corbeille',
+                                  icon: <Trash2 size={14} />,
+                                  onClick: () => setDeleteTarget(sale),
+                                  variant: 'destructive',
+                                  hidden: !canDeleteSale,
+                                },
+                              ]}
+                            />
                           </td>
                         )}
                       </tr>
@@ -1530,7 +1526,7 @@ export default function VentesPage() {
                 onChange={(e) => { setSalesLimit(Number(e.target.value)); setSalesPage(1); }}
                 className="h-7 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400/25 hover:border-slate-300 transition-colors"
               >
-                {[10, 20, 50, 100].map((l) => <option key={l} value={l}>{l}</option>)}
+                {[5, 10, 20, 30, 100].map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
             <div className="flex items-center gap-3">

@@ -14,6 +14,7 @@ import {
   ToggleRight,
   UserCog,
 } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getCurrentUser } from '@/lib/auth';
@@ -38,7 +39,7 @@ type ModalState =
   | { type: 'delete'; user: User }
   | { type: 'detail'; user: User };
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE_OPTIONS = [5, 10, 20, 30, 100];
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -126,6 +127,7 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | ''>('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
 
   const params: UsersQueryParams = {
@@ -133,7 +135,7 @@ export default function UsersPage() {
     role: roleFilter || undefined,
     status: statusFilter || undefined,
     page,
-    limit: PAGE_SIZE,
+    limit: pageSize,
   };
 
   const { data, isLoading, isError } = useUsersQuery(params);
@@ -301,66 +303,45 @@ export default function UsersPage() {
                         {formatDate(u.createdAt)}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          {/* Voir détails */}
-                          <ActionBtn
-                            title="Voir détails"
-                            onClick={() => setModal({ type: 'detail', user: u })}
-                          >
-                            <Eye size={13} />
-                          </ActionBtn>
-
-                          {/* Modifier */}
-                          {can('users.update') && (
-                            <ActionBtn
-                              title="Modifier"
-                              onClick={() => setModal({ type: 'edit', user: u })}
-                            >
-                              <Pencil size={13} />
-                            </ActionBtn>
-                          )}
-
-                          {/* Toggle status */}
-                          {can('users.update') && (
-                            <ActionBtn
-                              title={u.isActive ? 'Désactiver' : 'Activer'}
-                              disabled={isSelf}
-                              onClick={() =>
-                                toggleStatus.mutate({
-                                  id: u.id,
-                                  payload: { isActive: !u.isActive },
-                                })
-                              }
-                            >
-                              {u.isActive ? (
-                                <ToggleRight size={13} className="text-emerald-400" />
-                              ) : (
-                                <ToggleLeft size={13} className="text-slate-400" />
-                              )}
-                            </ActionBtn>
-                          )}
-
-                          {/* Reset password */}
-                          {can('users.reset_password') && (
-                            <ActionBtn
-                              title="Réinitialiser mot de passe"
-                              onClick={() => setModal({ type: 'reset', user: u })}
-                            >
-                              <KeyRound size={13} />
-                            </ActionBtn>
-                          )}
-
-                          {/* Supprimer */}
-                          {can('users.delete') && (
-                            <ActionBtn
-                              title="Supprimer"
-                              disabled={isSelf}
-                              onClick={() => setModal({ type: 'delete', user: u })}
-                            >
-                              <Trash2 size={13} className="text-red-400" />
-                            </ActionBtn>
-                          )}
-                        </div>
+                        <KebabMenu
+                          triggerClassName="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                          items={[
+                            {
+                              label: 'Voir les détails',
+                              icon: <Eye size={14} />,
+                              onClick: () => setModal({ type: 'detail', user: u }),
+                            },
+                            {
+                              label: 'Modifier',
+                              icon: <Pencil size={14} />,
+                              onClick: () => setModal({ type: 'edit', user: u }),
+                              hidden: !can('users.update'),
+                            },
+                            {
+                              label: u.isActive ? 'Désactiver' : 'Activer',
+                              icon: u.isActive
+                                ? <ToggleRight size={14} className="text-emerald-500" />
+                                : <ToggleLeft size={14} className="text-slate-400" />,
+                              onClick: () => toggleStatus.mutate({ id: u.id, payload: { isActive: !u.isActive } }),
+                              disabled: isSelf,
+                              hidden: !can('users.update'),
+                            },
+                            {
+                              label: 'Réinitialiser mot de passe',
+                              icon: <KeyRound size={14} />,
+                              onClick: () => setModal({ type: 'reset', user: u }),
+                              hidden: !can('users.reset_password'),
+                            },
+                            {
+                              label: 'Supprimer',
+                              icon: <Trash2 size={14} />,
+                              onClick: () => setModal({ type: 'delete', user: u }),
+                              disabled: isSelf,
+                              variant: 'destructive',
+                              hidden: !can('users.delete'),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );
@@ -375,29 +356,43 @@ export default function UsersPage() {
       {!isLoading && total > 0 && (
         <div className="flex items-center justify-between text-[12px] text-white/50">
           <span>
-            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} sur {total} utilisateur
+            {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} sur {total} utilisateur
             {total > 1 ? 's' : ''}
           </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30"
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <span className="px-2 text-white">
-              {page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30"
-            >
-              <ChevronRight size={14} />
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <span>Lignes :</span>
+              <select
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                className="rounded border border-white/20 bg-transparent px-1 py-0.5 text-white text-[12px]"
+              >
+                {PAGE_SIZE_OPTIONS.map((s) => (
+                  <option key={s} value={s} className="bg-gray-900">{s}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="px-2 text-white">
+                {page} / {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         </div>
       )}

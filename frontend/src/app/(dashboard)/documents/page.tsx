@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Copy,
   Download,
   Eye,
   FileText,
@@ -16,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
@@ -486,10 +488,12 @@ export default function DocumentsPage() {
   const [minSize, setMinSize] = useState('');
   const [maxSize, setMaxSize] = useState('');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(5);
 
   // Per-document action loading
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
 
   // Modals
   const [editDoc, setEditDoc] = useState<GeneratedDocument | null>(null);
@@ -498,7 +502,7 @@ export default function DocumentsPage() {
   const [deleteDoc, setDeleteDoc] = useState<GeneratedDocument | null>(null);
   const [emailLogsDoc, setEmailLogsDoc] = useState<GeneratedDocument | null>(null);
 
-  const queryKey = ['documents', { search, docType, status, dateFrom, dateTo, minSize, maxSize, page }];
+  const queryKey = ['documents', { search, docType, status, dateFrom, dateTo, minSize, maxSize, page, limit }];
 
   const docsQuery = useQuery({
     queryKey,
@@ -512,7 +516,7 @@ export default function DocumentsPage() {
         ...(minSize && { minSize: Math.round(Number(minSize) * 1024) }),
         ...(maxSize && { maxSize: Math.round(Number(maxSize) * 1024) }),
         page,
-        limit: 20,
+        limit,
       }),
     placeholderData: (prev) => prev,
   });
@@ -576,6 +580,29 @@ export default function DocumentsPage() {
       setDownloadingId(null);
     }
   }, [downloadingId]);
+
+  const handleCopyLink = useCallback(async (doc: GeneratedDocument) => {
+    if (copyingId) return;
+    setCopyingId(doc.id);
+    try {
+      const { url } = await stockiniApi.documentPresignedUrl(doc.id);
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        const input = document.createElement('input');
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      toast.success('Lien copié dans le presse-papiers');
+    } catch {
+      toast.error('Impossible de récupérer le lien PDF');
+    } finally {
+      setCopyingId(null);
+    }
+  }, [copyingId]);
 
   const resetFilters = () => {
     setSearch('');
@@ -788,82 +815,60 @@ export default function DocumentsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="actionView"
-                            size="action"
-                            title="Voir le PDF"
-                            disabled={viewingId === doc.id}
-                            onClick={() => handleView(doc)}
-                          >
-                            {viewingId === doc.id
-                              ? <Loader2 size={13} className="animate-spin" />
-                              : <Eye size={13} />}
-                          </Button>
-                          {can('documents.download') && (
-                            <Button
-                              variant="actionView"
-                              size="action"
-                              title="Télécharger"
-                              disabled={downloadingId === doc.id}
-                              onClick={() => handleDownload(doc)}
-                            >
-                              {downloadingId === doc.id
-                                ? <Loader2 size={13} className="animate-spin" />
-                                : <Download size={13} />}
-                            </Button>
-                          )}
-                          {can('documents.update') && (
-                            <Button
-                              variant="actionView"
-                              size="action"
-                              title="Modifier"
-                              onClick={() => setEditDoc(doc)}
-                            >
-                              <Pencil size={13} />
-                            </Button>
-                          )}
-                          {can('documents.email') && (
-                            <Button
-                              variant="actionView"
-                              size="action"
-                              title="Envoyer par email (pièce jointe)"
-                              onClick={() => setEmailDoc(doc)}
-                            >
-                              <Mail size={13} />
-                            </Button>
-                          )}
-                          {can('documents.email') && (
-                            <Button
-                              variant="actionView"
-                              size="action"
-                              title="Envoyer lien PDF"
-                              onClick={() => setSendLinkDoc(doc)}
-                            >
-                              <Link size={13} />
-                            </Button>
-                          )}
-                          {can('documents.view_history') && (
-                            <Button
-                              variant="actionView"
-                              size="action"
-                              title="Historique emails"
-                              onClick={() => setEmailLogsDoc(doc)}
-                            >
-                              <FileText size={13} />
-                            </Button>
-                          )}
-                          {can('documents.delete') && (
-                            <Button
-                              variant="actionDelete"
-                              size="action"
-                              title="Supprimer"
-                              onClick={() => setDeleteDoc(doc)}
-                            >
-                              <Trash2 size={13} />
-                            </Button>
-                          )}
-                        </div>
+                        <KebabMenu
+                          items={[
+                            {
+                              label: viewingId === doc.id ? 'Chargement…' : 'Voir le PDF',
+                              icon: viewingId === doc.id ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />,
+                              onClick: () => handleView(doc),
+                              disabled: viewingId === doc.id,
+                            },
+                            {
+                              label: downloadingId === doc.id ? 'Téléchargement…' : 'Télécharger',
+                              icon: downloadingId === doc.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />,
+                              onClick: () => handleDownload(doc),
+                              disabled: downloadingId === doc.id,
+                              hidden: !can('documents.download'),
+                            },
+                            {
+                              label: 'Modifier',
+                              icon: <Pencil size={14} />,
+                              onClick: () => setEditDoc(doc),
+                              hidden: !can('documents.update'),
+                            },
+                            {
+                              label: 'Envoyer par email',
+                              icon: <Mail size={14} />,
+                              onClick: () => setEmailDoc(doc),
+                              hidden: !can('documents.email'),
+                            },
+                            {
+                              label: copyingId === doc.id ? 'Copie…' : 'Copier le lien PDF',
+                              icon: copyingId === doc.id ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />,
+                              onClick: () => handleCopyLink(doc),
+                              disabled: copyingId === doc.id,
+                            },
+                            {
+                              label: 'Envoyer le lien PDF',
+                              icon: <Link size={14} />,
+                              onClick: () => setSendLinkDoc(doc),
+                              hidden: !can('documents.email'),
+                            },
+                            {
+                              label: 'Historique emails',
+                              icon: <FileText size={14} />,
+                              onClick: () => setEmailLogsDoc(doc),
+                              hidden: !can('documents.view_history'),
+                            },
+                            {
+                              label: 'Supprimer',
+                              icon: <Trash2 size={14} />,
+                              onClick: () => setDeleteDoc(doc),
+                              variant: 'destructive',
+                              hidden: !can('documents.delete'),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );
@@ -874,11 +879,23 @@ export default function DocumentsPage() {
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {total > 0 && (
           <div className="flex items-center justify-between border-t border-border/60 px-4 py-3">
-            <p className="text-xs text-text-muted">
-              Page {page} sur {totalPages} — {total} résultat{total !== 1 ? 's' : ''}
-            </p>
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <span>Lignes :</span>
+              <select
+                value={limit}
+                onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+                className="rounded border border-border/60 bg-background px-1.5 py-0.5 text-xs text-text-primary"
+              >
+                {[5, 10, 20, 30, 100].map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <span>
+                {(page - 1) * limit + 1}–{Math.min(page * limit, total)} sur {total} résultat{total !== 1 ? 's' : ''}
+              </span>
+            </div>
             <div className="flex items-center gap-1">
               <Button
                 variant="outline"

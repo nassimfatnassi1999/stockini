@@ -1,4 +1,5 @@
-export const PAGINATION_LIMIT_OPTIONS = [5, 10, 20, 50, 100] as const;
+export const DEFAULT_PAGE_SIZE = 5;
+export const PAGINATION_LIMIT_OPTIONS = [5, 10, 20, 30, 100] as const;
 
 type PaginationParams = {
   page?: unknown;
@@ -33,7 +34,7 @@ export function cleanPaginationParams<T extends PaginationParams>(
   const limitValue = toInteger(cleaned.limit);
 
   const page = Math.max(1, pageValue ?? 1);
-  let limit = 20;
+  let limit = DEFAULT_PAGE_SIZE;
 
   if (limitValue !== undefined) {
     if (limitValue > 100) {

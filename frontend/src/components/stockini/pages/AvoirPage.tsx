@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Eye, FileDown, Plus, Search, X } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { stockiniApi } from '@/lib/stockini/api';
@@ -474,24 +475,22 @@ export function AvoirPage() {
                     <td className="px-4 py-3">{statusBadge(avoir.statut)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
+                        <KebabMenu
+                          items={[
+                            {
+                              label: 'Voir les détails',
+                              icon: <Eye size={14} />,
+                              onClick: () => setDetailAvoir(avoir),
+                            },
+                            {
+                              label: 'Télécharger PDF',
+                              icon: <FileDown size={14} />,
+                              onClick: () => window.open(stockiniApi.avoirPdfUrl(avoir.id), '_blank'),
+                            },
+                          ]}
+                        />
                         <button
-                          className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-blue-600"
-                          title="Détails"
-                          onClick={() => setDetailAvoir(avoir)}
-                        >
-                          <Eye size={15} />
-                        </button>
-                        <a
-                          href={stockiniApi.avoirPdfUrl(avoir.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-red-600"
-                          title="Télécharger PDF"
-                        >
-                          <FileDown size={15} />
-                        </a>
-                        <button
-                          className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-muted hover:text-text-primary"
                           title={expanded === avoir.id ? 'Masquer les lignes' : 'Voir les lignes'}
                           onClick={() => setExpanded(expanded === avoir.id ? null : avoir.id)}
                         >

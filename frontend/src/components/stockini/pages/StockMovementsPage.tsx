@@ -222,7 +222,7 @@ export function StockMovementsPage() {
 
   // Pagination + filters state
   const [page, setPage]           = useState(1);
-  const [limit, setLimit]         = useState(20);
+  const [limit, setLimit]         = useState(5);
   const [search, setSearch]       = useState('');
   const [sortBy, setSortBy]       = useState('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');

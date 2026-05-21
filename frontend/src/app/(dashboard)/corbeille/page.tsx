@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
 import { EmptyTrashDialog } from '@/components/stockini/EmptyTrashDialog';
 import { FileText, RotateCcw, Trash2 } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import type { TrashEntityType, TrashItem } from '@/lib/stockini/types';
 
 type TabValue = 'all' | TrashEntityType;
@@ -273,29 +274,24 @@ export default function CorbeillePage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {canRestore && (
-                          <button
-                            type="button"
-                            aria-label={`Restaurer ${item.name}`}
-                            disabled={restoreMutation.isPending}
-                            onClick={() => restoreMutation.mutate({ entity: item.entity, id: item.id })}
-                            className="app-action-button text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50"
-                          >
-                            <RotateCcw size={16} />
-                          </button>
-                        )}
-                        {canPermanentDelete && (
-                          <button
-                            type="button"
-                            aria-label={`Supprimer définitivement ${item.name}`}
-                            onClick={() => setPermanentTarget(item)}
-                            className="app-action-button app-action-delete"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </div>
+                      <KebabMenu
+                        items={[
+                          {
+                            label: 'Restaurer',
+                            icon: <RotateCcw size={14} />,
+                            onClick: () => restoreMutation.mutate({ entity: item.entity, id: item.id }),
+                            disabled: restoreMutation.isPending,
+                            hidden: !canRestore,
+                          },
+                          {
+                            label: 'Supprimer définitivement',
+                            icon: <Trash2 size={14} />,
+                            onClick: () => setPermanentTarget(item),
+                            variant: 'destructive',
+                            hidden: !canPermanentDelete,
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, Eye, Package, ReceiptText, RotateCcw, Trash2, X } from 'lucide-react';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
 import { useDraftSave } from '@/lib/hooks/useDraftSave';
@@ -116,7 +117,7 @@ export default function AchatsPage() {
 
   // ── Purchases history pagination + filters ────────────────────────────────
   const [purchasesPage, setPurchasesPage] = useState(1);
-  const [purchasesLimit, setPurchasesLimit] = useState(20);
+  const [purchasesLimit, setPurchasesLimit] = useState(5);
   const [purchasesSearch, setPurchasesSearch] = useState('');
   const [purchasesLocalSearch, setPurchasesLocalSearch] = useState('');
   const [purchasesStatus, setPurchasesStatus] = useState('');
@@ -788,26 +789,22 @@ export default function AchatsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="actionView"
-                            size="action"
-                            title="Voir les détails"
-                            onClick={() => setSelectedPurchaseId(purchase.id)}
-                          >
-                            <Eye size={14} />
-                          </Button>
-                          {can('purchases.delete') && (
-                            <Button
-                              variant="actionDelete"
-                              size="action"
-                              title="Supprimer"
-                              onClick={() => setDeleteTarget(purchase)}
-                            >
-                              <Trash2 size={14} />
-                            </Button>
-                          )}
-                        </div>
+                        <KebabMenu
+                          items={[
+                            {
+                              label: 'Voir les détails',
+                              icon: <Eye size={14} />,
+                              onClick: () => setSelectedPurchaseId(purchase.id),
+                            },
+                            {
+                              label: 'Supprimer',
+                              icon: <Trash2 size={14} />,
+                              onClick: () => setDeleteTarget(purchase),
+                              variant: 'destructive',
+                              hidden: !can('purchases.delete'),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))
@@ -823,7 +820,7 @@ export default function AchatsPage() {
                 onChange={(e) => { setPurchasesLimit(Number(e.target.value)); setPurchasesPage(1); }}
                 className="h-7 rounded-md border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
-                {[10, 20, 50, 100].map((l) => <option key={l} value={l}>{l}</option>)}
+                {[5, 10, 20, 30, 100].map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
             <div className="flex items-center gap-3 text-text-muted">

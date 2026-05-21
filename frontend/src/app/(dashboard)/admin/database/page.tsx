@@ -32,6 +32,7 @@ import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
+import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Can } from '@/components/shared/Can';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -229,6 +230,7 @@ function ConfirmDialog({
 // ═══════════════════════════════════════════════════════════
 
 function BackupsTab() {
+  const { can } = usePermissions();
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -457,50 +459,30 @@ function BackupsTab() {
                     <td className="px-4 py-3">
                       <BackupStatusBadge status={b.status} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1.5">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2"
-                          onClick={() => void downloadBackup(b.filename)}
-                        >
-                          <Download size={12} className="mr-1" /> Télécharger
-                        </Button>
-                        <Can permission="database.restore">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className={cn(
-                              'h-7 px-2',
-                              b.status === 'valid'
-                                ? 'border-orange-200 text-orange-600 hover:bg-orange-50'
-                                : 'cursor-not-allowed opacity-50',
-                            )}
-                            disabled={b.status !== 'valid' || restoring}
-                            title={b.status !== 'valid' ? 'Ce backup ne peut pas être restauré' : undefined}
-                            onClick={() => b.status === 'valid' && setConfirm({ type: 'restore-server', filename: b.filename })}
-                          >
-                            <Upload size={12} className="mr-1" /> Restaurer
-                          </Button>
-                        </Can>
-                        <Can permission="database.backup">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className={cn(
-                              'h-7 px-2',
-                              b.status !== 'valid'
-                                ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100'
-                                : 'border-red-200 text-red-600 hover:bg-red-50',
-                            )}
-                            onClick={() => setConfirm({ type: 'delete', filename: b.filename })}
-                            title={b.status !== 'valid' ? 'Supprimer ce backup invalide' : undefined}
-                          >
-                            <Trash2 size={12} />
-                          </Button>
-                        </Can>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <KebabMenu
+                        items={[
+                          {
+                            label: 'Télécharger',
+                            icon: <Download size={14} />,
+                            onClick: () => void downloadBackup(b.filename),
+                          },
+                          {
+                            label: 'Restaurer',
+                            icon: <Upload size={14} />,
+                            onClick: () => b.status === 'valid' && setConfirm({ type: 'restore-server', filename: b.filename }),
+                            disabled: b.status !== 'valid' || restoring,
+                            hidden: !can('database.restore'),
+                          },
+                          {
+                            label: 'Supprimer le backup',
+                            icon: <Trash2 size={14} />,
+                            onClick: () => setConfirm({ type: 'delete', filename: b.filename }),
+                            variant: 'destructive',
+                            hidden: !can('database.backup'),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
