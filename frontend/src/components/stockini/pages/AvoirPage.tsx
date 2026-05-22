@@ -11,7 +11,7 @@ import { money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { CreditNote, ReturnableItem, Sale } from '@/lib/stockini/types';
 import { PageHeader } from '../shared/PageHeader';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,27 +33,25 @@ function statusBadge(statut: string) {
 
 function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () => void }) {
   const pdfUrl = stockiniApi.avoirPdfUrl(avoir.id);
-  const detailFooter = (
-    <div className="flex justify-end gap-2">
-      <a href={pdfUrl} target="_blank" rel="noreferrer">
-        <Button size="sm" variant="outline">
-          <FileDown size={14} className="mr-1" /> PDF
-        </Button>
-      </a>
-      <Button size="sm" variant="outline" onClick={onClose}>Fermer</Button>
-    </div>
-  );
   return (
-    <ModalWindow
+    <SlideOver
       title={`Avoir ${avoir.numero}`}
-      reference={avoir.sale?.invoiceNumber ?? undefined}
-      isOpen={true}
+      subtitle={avoir.sale?.invoiceNumber ?? undefined}
+      open={true}
       onClose={onClose}
-      defaultWidth={720}
-      defaultHeight={600}
-      footer={detailFooter}
+      width={720}
+      footer={
+        <>
+          <a href={pdfUrl} target="_blank" rel="noreferrer">
+            <Button size="sm" variant="outline">
+              <FileDown size={14} className="mr-1" /> PDF
+            </Button>
+          </a>
+          <Button size="sm" variant="outline" onClick={onClose}>Fermer</Button>
+        </>
+      }
     >
-      <div className="p-6 space-y-5 overflow-auto">
+      <div className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Date :</span> <span className="font-medium">{fmtDate(avoir.dateAvoir)}</span></div>
             <div><span className="text-gray-500">Statut :</span> {statusBadge(avoir.statut)}</div>
@@ -101,7 +99,7 @@ function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () =
             </div>
           </div>
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 
@@ -221,28 +219,26 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
     },
   });
 
-  const avoirFooter = (
-    <div className="flex justify-end gap-2">
-      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-      <Button
-        size="sm"
-        disabled={createMutation.isPending || selectedLines.length === 0 || !selectedSaleId}
-        onClick={() => createMutation.mutate()}
-      >
-        {createMutation.isPending ? 'Création…' : "Créer l'avoir"}
-      </Button>
-    </div>
-  );
   return (
-    <ModalWindow
+    <SlideOver
       title="Nouvel avoir"
-      isOpen={true}
+      open={true}
       onClose={onClose}
-      defaultWidth={800}
-      defaultHeight={680}
-      footer={avoirFooter}
+      width={800}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button
+            size="sm"
+            disabled={createMutation.isPending || selectedLines.length === 0 || !selectedSaleId}
+            onClick={() => createMutation.mutate()}
+          >
+            {createMutation.isPending ? 'Création…' : "Créer l'avoir"}
+          </Button>
+        </>
+      }
     >
-      <div className="p-6 space-y-5 overflow-auto">
+      <div className="space-y-5">
           {/* Facture selection */}
           <div>
             <label className="block text-sm font-medium mb-1">Facture concernée *</label>
@@ -393,7 +389,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 

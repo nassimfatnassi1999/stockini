@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
@@ -913,75 +913,66 @@ function PurchaseDetailsModal({
     queryFn: () => stockiniApi.purchase(purchaseId),
   });
 
-  const footer = (
-    <div className="flex justify-end">
-      <Button type="button" variant="outline" size="sm" onClick={onClose}>Fermer</Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Détails achat"
-      reference={data?.orderNumber}
-      isOpen={true}
+      subtitle={data?.orderNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={640}
-      defaultHeight={480}
-      footer={footer}
+      width={640}
+      footer={<Button type="button" variant="outline" size="sm" onClick={onClose}>Fermer</Button>}
     >
-      <div className="px-5 py-4">
-        {isLoading ? (
-          <p className="text-sm text-text-muted">Chargement…</p>
-        ) : data ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-text-muted">Fournisseur</span>
-                <p className="font-medium">{data.supplier?.name ?? '—'}</p>
-              </div>
-              <div>
-                <span className="text-text-muted">Statut</span>
-                <p className="font-medium">{PURCHASE_STATUS_LABELS[data.status] ?? data.status}</p>
-              </div>
-              <div>
-                <span className="text-text-muted">Total TTC</span>
-                <p className="font-mono font-semibold">{money(data.total)}</p>
-              </div>
-              <div>
-                <span className="text-text-muted">Montant payé</span>
-                <p className="font-mono font-semibold text-emerald-600">{money(data.paidAmount)}</p>
-              </div>
+      {isLoading ? (
+        <p className="text-sm text-text-muted">Chargement…</p>
+      ) : data ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div>
+              <span className="text-text-muted">Fournisseur</span>
+              <p className="font-medium">{data.supplier?.name ?? '—'}</p>
             </div>
-            <table className="w-full text-xs border border-border/60 rounded">
-              <thead className="bg-surface">
-                <tr>
-                  {['Produit', 'Qté commandée', 'Qté reçue', 'PU Achat HT', 'Total'].map((h) => (
-                    <th key={h} className="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-text-muted">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {data.items.map((item) => (
-                  <tr key={item.id}>
-                    <td className="px-3 py-2">{item.product?.name ?? item.productId}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{item.quantity}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      <span className={item.receivedQuantity >= item.quantity ? 'text-emerald-600 font-semibold' : item.receivedQuantity > 0 ? 'text-yellow-600' : 'text-text-muted'}>
-                        {item.receivedQuantity}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{money(item.unitCost)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium">{money(item.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div>
+              <span className="text-text-muted">Statut</span>
+              <p className="font-medium">{PURCHASE_STATUS_LABELS[data.status] ?? data.status}</p>
+            </div>
+            <div>
+              <span className="text-text-muted">Total TTC</span>
+              <p className="font-mono font-semibold">{money(data.total)}</p>
+            </div>
+            <div>
+              <span className="text-text-muted">Montant payé</span>
+              <p className="font-mono font-semibold text-emerald-600">{money(data.paidAmount)}</p>
+            </div>
           </div>
-        ) : (
-          <p className="text-sm text-red-600">Impossible de charger les détails.</p>
-        )}
-      </div>
-    </ModalWindow>
+          <table className="w-full text-xs border border-border/60 rounded">
+            <thead className="bg-surface">
+              <tr>
+                {['Produit', 'Qté commandée', 'Qté reçue', 'PU Achat HT', 'Total'].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-text-muted">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {data.items.map((item) => (
+                <tr key={item.id}>
+                  <td className="px-3 py-2">{item.product?.name ?? item.productId}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{item.quantity}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <span className={item.receivedQuantity >= item.quantity ? 'text-emerald-600 font-semibold' : item.receivedQuantity > 0 ? 'text-yellow-600' : 'text-text-muted'}>
+                      {item.receivedQuantity}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{money(item.unitCost)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">{money(item.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-sm text-red-600">Impossible de charger les détails.</p>
+      )}
+    </SlideOver>
   );
 }
 
@@ -1021,26 +1012,23 @@ function PayPurchaseModal({
   const montantNum = Number(montant) || 0;
   const canPay = montantNum > 0 && montantNum <= resteAPayer + 0.001 && !!method && !payMutation.isPending;
 
-  const footer = (
-    <div className="flex justify-end gap-2">
-      <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-      <Button type="button" size="sm" onClick={() => payMutation.mutate()} disabled={!canPay}>
-        {payMutation.isPending ? 'Enregistrement…' : 'Confirmer le paiement'}
-      </Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Payer"
-      reference={purchase.orderNumber}
-      isOpen={true}
+      subtitle={purchase.orderNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={460}
-      defaultHeight={400}
-      footer={footer}
+      width={460}
+      footer={
+        <>
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button type="button" size="sm" onClick={() => payMutation.mutate()} disabled={!canPay}>
+            {payMutation.isPending ? 'Enregistrement…' : 'Confirmer le paiement'}
+          </Button>
+        </>
+      }
     >
-      <div className="px-5 py-4 space-y-4">
+      <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 text-sm rounded-lg border border-border/60 bg-surface p-3">
           <div>
             <p className="text-text-muted text-xs uppercase tracking-wide">Fournisseur</p>
@@ -1084,6 +1072,6 @@ function PayPurchaseModal({
           </select>
         </div>
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }

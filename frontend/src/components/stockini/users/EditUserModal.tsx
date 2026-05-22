@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { useUpdateUserMutation } from '@/lib/users/hooks';
 import { USER_ROLES, type User, type UserRole } from '@/lib/users/types';
 
@@ -70,16 +70,23 @@ export function EditUserModal({ user, onClose }: Props) {
   }
 
   return (
-    <ModalWindow
+    <SlideOver
       title="Modifier l'utilisateur"
-      reference={user.email}
-      isOpen={true}
+      subtitle={user.email}
+      open={true}
       onClose={onClose}
-      defaultWidth={440}
-      defaultHeight={400}
       darkHeader={true}
+      width={460}
+      footer={
+        <>
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button type="button" size="sm" disabled={mutation.isPending} onClick={() => handleSubmit({ preventDefault: () => {} } as React.FormEvent)}>
+            {mutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
+        </>
+      }
     >
-      <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1">
           <Label htmlFor="eu-fullName" className="text-[12px] text-text-secondary">
             Nom complet <span className="text-red-500">*</span>
@@ -118,14 +125,7 @@ export function EditUserModal({ user, onClose }: Props) {
           />
           <Label htmlFor="eu-active" className="text-[12px] text-text-secondary">Compte actif</Label>
         </div>
-
-        <div className="flex justify-end gap-3 pt-2">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-          <Button type="submit" size="sm" disabled={mutation.isPending}>
-            {mutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
-          </Button>
-        </div>
       </form>
-    </ModalWindow>
+    </SlideOver>
   );
 }

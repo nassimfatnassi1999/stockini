@@ -25,13 +25,13 @@ export function SuppliersPage() {
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
   const fields: FieldConfig[] = [
     { name: 'referencePreview', label: 'Référence', readOnly: true },
-    { name: 'name', label: 'Fournisseur', required: true },
-    { name: 'contactPerson', label: 'Contact' },
+    { name: 'name', label: 'Fournisseur', required: true, span: 'full' },
     { name: 'phone', label: 'Téléphone' },
     { name: 'email', label: 'Email', type: 'email' },
-    { name: 'address', label: 'Adresse' },
-    { name: 'taxNumber', label: 'Matricule fiscal' },
+    { name: 'contactPerson', label: 'Contact' },
     { name: 'paymentTerms', label: 'Conditions' },
+    { name: 'address', label: 'Adresse', span: 'full' },
+    { name: 'taxNumber', label: 'Matricule fiscal', span: 'full' },
   ];
   const [form, setForm] = useState<Record<string, string | boolean>>(emptyForm(fields));
   const query = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });

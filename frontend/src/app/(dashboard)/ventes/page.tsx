@@ -18,7 +18,7 @@ import {
   UserCircle,
   X,
 } from 'lucide-react';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -184,16 +184,15 @@ function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: Transfo
   );
 
   return (
-    <ModalWindow
+    <SlideOver
       title="Transformer le document"
-      reference={sourceSale.invoiceNumber}
-      isOpen={true}
+      subtitle={sourceSale.invoiceNumber}
+      open={true}
       onClose={onCancel}
-      defaultWidth={460}
-      defaultHeight={380}
+      width={460}
       footer={footer}
     >
-      <div className="space-y-4 px-6 py-5">
+      <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-violet-100">
             <ArrowRightLeft size={18} className="text-violet-600" />
@@ -254,7 +253,7 @@ function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: Transfo
           </div>
         )}
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 
@@ -304,16 +303,14 @@ function ValidateDocumentModal({ isPending, paymentMethods, totals, onConfirm, o
   );
 
   return (
-    <ModalWindow
+    <SlideOver
       title="Valider la vente"
-      isOpen={true}
+      open={true}
       onClose={onCancel}
-      defaultWidth={480}
-      defaultHeight={520}
+      width={480}
       footer={footer}
-      storageKey="validate-document"
     >
-      <div className="space-y-4 px-6 py-5">
+      <div className="space-y-4">
         {/* Total recap */}
         <div className="flex items-center justify-between rounded-lg border border-border bg-slate-50 px-4 py-3">
           <span className="text-xs font-medium text-text-muted">Total TTC</span>
@@ -388,7 +385,7 @@ function ValidateDocumentModal({ isPending, paymentMethods, totals, onConfirm, o
           </div>
         )}
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 

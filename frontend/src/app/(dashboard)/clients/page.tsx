@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Search, Plus, Trash2 } from 'lucide-react';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
+import { ModalFormGrid, fullSpan } from '@/components/shared/ModalForm';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
@@ -54,6 +55,7 @@ function typeLabel(type: string): string {
 export default function ClientsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
+  const formId = useId();
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<CreateCustomerForm>(EMPTY_FORM);
@@ -302,123 +304,119 @@ export default function ClientsPage() {
       )}
 
       {/* Create Customer Modal */}
-      <ModalWindow
+      <SlideOver
         title="Nouveau client"
-        isOpen={showModal}
+        open={showModal}
         onClose={closeModal}
-        defaultWidth={560}
-        defaultHeight={640}
+        width={480}
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={closeModal}>
+              Annuler
+            </Button>
+            <Button type="submit" form={formId} size="sm" disabled={createMutation.isPending} className="gap-1.5">
+              {createMutation.isPending ? 'Création…' : 'Créer le client'}
+            </Button>
+          </>
+        }
       >
-        <form onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
-              {formError && (
-                <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-                  {formError}
-                </p>
-              )}
+        <form id={formId} onSubmit={handleSubmit}>
+          {formError && (
+            <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {formError}
+            </p>
+          )}
+          <ModalFormGrid>
+            {/* Référence — pleine largeur */}
+            <div className="space-y-1.5" style={fullSpan}>
+              <Label htmlFor="customer-reference">Référence</Label>
+              <input
+                id="customer-reference"
+                type="text"
+                readOnly
+                value={refPreview ?? ''}
+                placeholder={refPreview === null ? 'Calcul en cours…' : ''}
+                className="flex h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm font-mono text-text-secondary shadow-sm cursor-not-allowed"
+              />
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="customer-reference">Référence</Label>
-                <input
-                  id="customer-reference"
-                  type="text"
-                  readOnly
-                  value={refPreview ?? ''}
-                  placeholder={refPreview === null ? 'Calcul en cours…' : ''}
-                  className="flex h-9 w-full rounded-md border border-input bg-muted/40 px-3 py-1 text-sm font-mono text-text-secondary shadow-sm cursor-not-allowed"
-                />
-              </div>
+            {/* Nom — pleine largeur */}
+            <div className="space-y-1.5" style={fullSpan}>
+              <Label htmlFor="customer-name">
+                Nom <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="customer-name"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Nom du client"
+                required
+                autoFocus
+              />
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="customer-name">
-                  Nom <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="customer-name"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="Nom du client"
-                  required
-                  autoFocus
-                />
-              </div>
+            {/* Type */}
+            <div className="space-y-1.5">
+              <Label htmlFor="customer-type">Type</Label>
+              <select
+                id="customer-type"
+                value={form.type}
+                onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as CreateCustomerForm['type'] }))}
+                className="app-select"
+              >
+                {customerTypeOptions.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="customer-type">Type</Label>
-                <select
-                  id="customer-type"
-                  value={form.type}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      type: e.target.value as CreateCustomerForm['type'],
-                    }))
-                  }
-                  className="app-select"
-                >
-                  {customerTypeOptions.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* Téléphone */}
+            <div className="space-y-1.5">
+              <Label htmlFor="customer-phone">Téléphone</Label>
+              <Input
+                id="customer-phone"
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                placeholder="+216 …"
+              />
+            </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="customer-phone">Téléphone</Label>
-                  <Input
-                    id="customer-phone"
-                    value={form.phone}
-                    onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                    placeholder="+213 …"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="customer-email">Email</Label>
-                  <Input
-                    id="customer-email"
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                    placeholder="email@exemple.com"
-                  />
-                </div>
-              </div>
+            {/* Email */}
+            <div className="space-y-1.5">
+              <Label htmlFor="customer-email">Email</Label>
+              <Input
+                id="customer-email"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                placeholder="email@exemple.com"
+              />
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="customer-address">Adresse</Label>
-                <Input
-                  id="customer-address"
-                  value={form.address}
-                  onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                  placeholder="Adresse complète"
-                />
-              </div>
+            {/* Adresse — pleine largeur */}
+            <div className="space-y-1.5" style={fullSpan}>
+              <Label htmlFor="customer-address">Adresse</Label>
+              <Input
+                id="customer-address"
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                placeholder="Adresse complète"
+              />
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="customer-tax">Matricule fiscal</Label>
-                <Input
-                  id="customer-tax"
-                  value={form.taxNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, taxNumber: e.target.value }))}
-                  placeholder="Matricule fiscal optionnel"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <Button type="button" variant="outline" onClick={closeModal}>
-                  Annuler
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={createMutation.isPending}
-                  className="gap-1.5"
-                >
-                  {createMutation.isPending ? 'Création…' : 'Créer le client'}
-                </Button>
-              </div>
+            {/* Matricule fiscal — pleine largeur */}
+            <div className="space-y-1.5" style={fullSpan}>
+              <Label htmlFor="customer-tax">Matricule fiscal</Label>
+              <Input
+                id="customer-tax"
+                value={form.taxNumber}
+                onChange={(e) => setForm((f) => ({ ...f, taxNumber: e.target.value }))}
+                placeholder="Matricule fiscal optionnel"
+              />
+            </div>
+          </ModalFormGrid>
         </form>
-      </ModalWindow>
+      </SlideOver>
     </div>
     </PermissionGuard>
   );

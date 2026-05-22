@@ -13,7 +13,7 @@ import { toast } from '@/lib/toast';
 import type { StockMovement, StockMovementsQueryParams } from '@/lib/stockini/types';
 import { CrudModal } from '../shared/CrudModal';
 import { PageHeader } from '../shared/PageHeader';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { cleanPayload, emptyForm, useDropdownOptions } from '../shared/form-utils';
 import type { FieldConfig } from '../shared/form-utils';
 
@@ -37,15 +37,28 @@ function ResetInventoryModal({ onClose, onConfirm, isPending }: ResetModalProps)
     onConfirm(password);
   }
 
+  const formId = 'reset-inventory-form';
+
   return (
-    <ModalWindow
+    <SlideOver
       title="Remise à zéro du stock"
-      isOpen={true}
+      open={true}
       onClose={onClose}
-      defaultWidth={460}
-      defaultHeight={480}
+      width={460}
+      footer={
+        <>
+          <button type="button" onClick={onClose} disabled={isPending}
+            className="h-9 rounded-md border border-border bg-white px-4 text-[12px] font-medium text-text-secondary hover:bg-muted disabled:opacity-50">
+            Annuler
+          </button>
+          <button type="submit" form={formId} disabled={!isValid || isPending}
+            className="h-9 rounded-md bg-red-600 px-4 text-[12px] font-semibold text-white hover:bg-red-700 disabled:opacity-40">
+            {isPending ? 'En cours…' : 'Confirmer la remise à zéro'}
+          </button>
+        </>
+      }
     >
-      <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
+      <form id={formId} onSubmit={handleSubmit} className="space-y-4">
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
           <AlertTriangle size={16} className="text-red-600 mt-0.5 shrink-0" />
           <div>
@@ -53,48 +66,38 @@ function ResetInventoryModal({ onClose, onConfirm, isPending }: ResetModalProps)
             <p className="text-[11px] text-red-600 mt-0.5">Cette action va remettre <strong>tous les stocks à 0</strong>.</p>
           </div>
         </div>
-          <div className="space-y-1.5">
-            <label className="text-[12px] font-semibold text-text-primary">Mot de passe administrateur</label>
-            <input
-              ref={inputRef}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              placeholder="••••••••"
-              className="h-9 w-full rounded-md border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40"
-              required
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[12px] font-semibold text-text-primary">
-              Tapez <code className="rounded bg-red-100 px-1 text-red-700">RESET STOCK</code> pour confirmer
-            </label>
-            <input
-              type="text"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="RESET STOCK"
-              className="h-9 w-full rounded-md border border-border bg-white px-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {confirmText.length > 0 && confirmText !== 'RESET STOCK' && (
-              <p className="text-[11px] text-red-500">Le texte ne correspond pas.</p>
-            )}
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose} disabled={isPending}
-              className="h-9 rounded-md border border-border bg-white px-4 text-[12px] font-medium text-text-secondary hover:bg-muted disabled:opacity-50">
-              Annuler
-            </button>
-            <button type="submit" disabled={!isValid || isPending}
-              className="h-9 rounded-md bg-red-600 px-4 text-[12px] font-semibold text-white hover:bg-red-700 disabled:opacity-40">
-              {isPending ? 'En cours…' : 'Confirmer la remise à zéro'}
-            </button>
-          </div>
-        </form>
-    </ModalWindow>
+        <div className="space-y-1.5">
+          <label className="text-[12px] font-semibold text-text-primary">Mot de passe administrateur</label>
+          <input
+            ref={inputRef}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            placeholder="••••••••"
+            className="h-9 w-full rounded-md border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40"
+            required
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[12px] font-semibold text-text-primary">
+            Tapez <code className="rounded bg-red-100 px-1 text-red-700">RESET STOCK</code> pour confirmer
+          </label>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="RESET STOCK"
+            className="h-9 w-full rounded-md border border-border bg-white px-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {confirmText.length > 0 && confirmText !== 'RESET STOCK' && (
+            <p className="text-[11px] text-red-500">Le texte ne correspond pas.</p>
+          )}
+        </div>
+      </form>
+    </SlideOver>
   );
 }
 

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { useResetPasswordMutation } from '@/lib/users/hooks';
 import type { User } from '@/lib/users/types';
 
@@ -27,23 +27,29 @@ export function ResetPasswordModal({ user, onClose }: Props) {
     return Object.keys(e).length === 0;
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function handleSubmit() {
     if (!validate()) return;
     mutation.mutate({ id: user.id, payload: { password } }, { onSuccess: onClose });
   }
 
   return (
-    <ModalWindow
+    <SlideOver
       title="Réinitialiser le mot de passe"
-      reference={user.fullName}
-      isOpen={true}
+      subtitle={user.fullName}
+      open={true}
       onClose={onClose}
-      defaultWidth={400}
-      defaultHeight={300}
       darkHeader={true}
+      width={440}
+      footer={
+        <>
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button type="button" size="sm" disabled={mutation.isPending} onClick={handleSubmit}>
+            {mutation.isPending ? 'Réinitialisation…' : 'Réinitialiser'}
+          </Button>
+        </>
+      }
     >
-      <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
+      <div className="space-y-4">
         <div className="space-y-1">
           <Label htmlFor="rp-password" className="text-[12px] text-text-secondary">
             Nouveau mot de passe <span className="text-red-500">*</span>
@@ -73,14 +79,7 @@ export function ResetPasswordModal({ user, onClose }: Props) {
           />
           {errors.confirm && <p className="text-[11px] text-red-500">{errors.confirm}</p>}
         </div>
-
-        <div className="flex justify-end gap-3 pt-2">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-          <Button type="submit" size="sm" disabled={mutation.isPending}>
-            {mutation.isPending ? 'Réinitialisation…' : 'Réinitialiser'}
-          </Button>
-        </div>
-      </form>
-    </ModalWindow>
+      </div>
+    </SlideOver>
   );
 }

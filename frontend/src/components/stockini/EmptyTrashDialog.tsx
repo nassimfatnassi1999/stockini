@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 
 interface Props {
   isPending: boolean;
@@ -17,30 +17,32 @@ export function EmptyTrashDialog({ isPending, onConfirm, onCancel }: Props) {
   const [input, setInput] = useState('');
   const isConfirmed = input === CONFIRMATION_WORD;
 
-  const footer = (
-    <div className="flex gap-2">
-      <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={isPending}>
-        Annuler
-      </Button>
-      <Button variant="destructive" size="sm" className="flex-1" onClick={onConfirm} disabled={!isConfirmed || isPending}>
-        {isPending ? 'Suppression…' : 'Supprimer définitivement'}
-      </Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Vider la corbeille"
-      isOpen={true}
+      open={true}
       onClose={onCancel}
-      defaultWidth={380}
-      defaultHeight={330}
-      minHeight={280}
-      footer={footer}
+      width={420}
+      footer={
+        <div className="flex w-full gap-2">
+          <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={isPending}>
+            Annuler
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="flex-1"
+            onClick={onConfirm}
+            disabled={!isConfirmed || isPending}
+          >
+            {isPending ? 'Suppression…' : 'Supprimer définitivement'}
+          </Button>
+        </div>
+      }
     >
-      <div className="space-y-4 px-6 py-5 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-          <AlertTriangle size={22} className="text-red-600" />
+      <div className="flex flex-col items-center gap-4 py-4 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+          <AlertTriangle size={24} className="text-red-600" />
         </div>
         <div className="space-y-1">
           <p className="text-sm font-semibold text-text-primary">Vider définitivement la corbeille ?</p>
@@ -48,7 +50,7 @@ export function EmptyTrashDialog({ isPending, onConfirm, onCancel }: Props) {
             Cette action supprimera définitivement tous les éléments. Elle est irréversible.
           </p>
         </div>
-        <div className="text-left space-y-1.5">
+        <div className="w-full space-y-1.5 text-left">
           <p className="text-xs text-text-muted">
             Pour confirmer, tapez{' '}
             <span className="font-mono font-semibold text-red-600">{CONFIRMATION_WORD}</span>{' '}
@@ -64,6 +66,6 @@ export function EmptyTrashDialog({ isPending, onConfirm, onCancel }: Props) {
           />
         </div>
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }

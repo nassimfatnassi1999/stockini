@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownCircle, ArrowUpCircle, Check } from 'lucide-react';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -357,16 +357,23 @@ export function DepensesPage() {
       )}
 
       {/* Modal paiement fournisseur */}
-      <ModalWindow
+      <SlideOver
         title="Payer"
-        reference={payTarget?.orderNumber}
-        isOpen={!!payTarget}
+        subtitle={payTarget?.orderNumber}
+        open={!!payTarget}
         onClose={() => setPayTarget(null)}
-        defaultWidth={480}
-        defaultHeight={560}
+        width={480}
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPayTarget(null)}>Annuler</Button>
+            <Button type="submit" form="depenses-pay-form" size="sm" disabled={payMutation.isPending || !amountValid}>
+              <Check size={14} />{payMutation.isPending ? 'Enregistrement...' : 'Confirmer le paiement'}
+            </Button>
+          </>
+        }
       >
         {payTarget && (
-          <div className="px-5 py-4 space-y-4">
+          <div className="space-y-4">
             <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-text-muted">Fournisseur</span><span className="font-medium">{payTarget.supplier?.name ?? '-'}</span></div>
               <div className="flex justify-between"><span className="text-text-muted">Document achat</span><span className="font-mono font-medium">{payTarget.orderNumber}</span></div>
@@ -374,7 +381,7 @@ export function DepensesPage() {
               <div className="flex justify-between"><span className="text-text-muted">Déjà payé</span><span className="font-mono font-medium text-emerald-600">{money(payTarget.paidAmount)}</span></div>
               <div className="flex justify-between border-t border-border pt-2"><span className="font-semibold">Reste à payer</span><span className="font-mono font-bold text-red-600">{money(payTarget.remainingAmount)}</span></div>
             </div>
-            <form onSubmit={(e) => { e.preventDefault(); if (!amountValid) return; payMutation.mutate(); }} className="space-y-4">
+            <form id="depenses-pay-form" onSubmit={(e) => { e.preventDefault(); if (!amountValid) return; payMutation.mutate(); }} className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="pay-amount">Montant à payer *</Label>
                 <Input id="pay-amount" type="number" min="0.001" max={remaining} step="0.001" value={payForm.amount} onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))} required className={payForm.amount && !amountValid ? 'border-red-400' : ''} />
@@ -390,30 +397,41 @@ export function DepensesPage() {
                 <Label htmlFor="pay-note">Note (optionnel)</Label>
                 <Input id="pay-note" type="text" value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="Référence chèque, virement..." />
               </div>
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <Button type="button" variant="outline" onClick={() => setPayTarget(null)}>Annuler</Button>
-                <Button type="submit" disabled={payMutation.isPending || !amountValid}><Check size={14} />{payMutation.isPending ? 'Enregistrement...' : 'Confirmer le paiement'}</Button>
-              </div>
             </form>
           </div>
         )}
-      </ModalWindow>
+      </SlideOver>
 
       {/* Modal opération caisse */}
-      <ModalWindow
+      <SlideOver
         title={caisseOp === 'retrait' ? 'Retirer de la caisse' : 'Ajouter à la caisse'}
-        isOpen={!!caisseOp}
+        open={!!caisseOp}
         onClose={() => setCaisseOp(null)}
-        defaultWidth={440}
-        defaultHeight={400}
+        width={440}
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCaisseOp(null)}>Annuler</Button>
+            <Button
+              type="submit"
+              form="depenses-caisse-form"
+              size="sm"
+              disabled={caisseRetraitMutation.isPending || caisseDepotMutation.isPending || !caisseForm.montant}
+              className={caisseOp === 'retrait' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
+            >
+              <Check size={14} />
+              {caisseOp === 'retrait' ? 'Confirmer le retrait' : 'Confirmer le dépôt'}
+            </Button>
+          </>
+        }
       >
         {caisseOp && (
-          <div className="px-5 py-4 space-y-4">
+          <div className="space-y-4">
             <div className="rounded-lg bg-muted/50 p-3 text-sm flex justify-between">
               <span className="text-text-muted">Solde actuel</span>
               <span className={`font-mono font-bold ${solde >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{money(solde)}</span>
             </div>
             <form
+              id="depenses-caisse-form"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (caisseOp === 'retrait') caisseRetraitMutation.mutate();
@@ -447,21 +465,10 @@ export function DepensesPage() {
                   placeholder={caisseOp === 'retrait' ? 'Ex: Achats divers, frais de transport...' : 'Ex: Apport de fonds, recette...'}
                 />
               </div>
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <Button type="button" variant="outline" onClick={() => setCaisseOp(null)}>Annuler</Button>
-                <Button
-                  type="submit"
-                  disabled={caisseRetraitMutation.isPending || caisseDepotMutation.isPending || !caisseForm.montant}
-                  className={caisseOp === 'retrait' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
-                >
-                  <Check size={14} />
-                  {caisseOp === 'retrait' ? 'Confirmer le retrait' : 'Confirmer le dépôt'}
-                </Button>
-              </div>
             </form>
           </div>
         )}
-      </ModalWindow>
+      </SlideOver>
     </>
   );
 }

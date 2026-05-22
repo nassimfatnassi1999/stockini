@@ -11,6 +11,8 @@ export type FieldConfig = {
   required?: boolean;
   type?: 'text' | 'number' | 'email' | 'select' | 'checkbox';
   options?: Array<{ value: string; label: string }>;
+  /** Grid column span: 'full' = 1/-1 (all cols), 2 = span 2 cols */
+  span?: 'full' | 2;
 };
 
 export function useDropdownOptions(category: string) {

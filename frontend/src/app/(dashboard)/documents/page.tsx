@@ -17,7 +17,7 @@ import {
   ChevronRight,
   X,
 } from 'lucide-react';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
@@ -102,67 +102,53 @@ function EditModal({ doc, onClose, onSaved }: EditModalProps) {
     onError: () => toast.error('Erreur lors de la mise à jour'),
   });
 
-  const editFooter = (
-    <div className="flex justify-end gap-2">
-      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-      <Button size="sm" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate()}>
-        {updateMutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
-      </Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Modifier le document"
-      isOpen={true}
+      subtitle={doc.documentNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={460}
-      defaultHeight={380}
-      footer={editFooter}
-    >
-      <div className="space-y-4 px-5 py-5">
-        <div className="space-y-1.5">
-            <Label htmlFor="edit-doc-number">Numéro document</Label>
-            <Input
-              id="edit-doc-number"
-              value={documentNumber}
-              onChange={(e) => setDocumentNumber(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-client-name">Nom client</Label>
-            <Input
-              id="edit-client-name"
-              value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-status">Statut</Label>
-            <select
-              id="edit-status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as DocumentStatus)}
-              className="app-select"
-            >
-              <option value="GENERATED">Généré</option>
-              <option value="SENT">Envoyé</option>
-            </select>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            size="sm"
-            disabled={updateMutation.isPending}
-            onClick={() => updateMutation.mutate()}
-          >
+      width={460}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button size="sm" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate()}>
             {updateMutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
           </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="edit-doc-number">Numéro document</Label>
+          <Input
+            id="edit-doc-number"
+            value={documentNumber}
+            onChange={(e) => setDocumentNumber(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="edit-client-name">Nom client</Label>
+          <Input
+            id="edit-client-name"
+            value={clientName}
+            onChange={(e) => setClientName(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="edit-status">Statut</Label>
+          <select
+            id="edit-status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value as DocumentStatus)}
+            className="app-select"
+          >
+            <option value="GENERATED">Généré</option>
+            <option value="SENT">Envoyé</option>
+          </select>
+        </div>
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 
@@ -198,85 +184,82 @@ function EmailModal({ doc, onClose, onSent }: EmailModalProps) {
     },
   });
 
-  const emailFooter = (
-    <div className="flex justify-end gap-2">
-      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-      <Button size="sm" disabled={sendMutation.isPending || !to} onClick={() => sendMutation.mutate()}>
-        {sendMutation.isPending ? (
-          <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
-        ) : (
-          'Envoyer'
-        )}
-      </Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Envoyer par email"
-      reference={doc.documentNumber}
-      isOpen={true}
+      subtitle={doc.documentNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={560}
-      defaultHeight={600}
-      footer={emailFooter}
+      width={560}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button size="sm" disabled={sendMutation.isPending || !to} onClick={() => sendMutation.mutate()}>
+            {sendMutation.isPending ? (
+              <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
+            ) : (
+              'Envoyer'
+            )}
+          </Button>
+        </>
+      }
     >
-      <div className="space-y-3 px-5 py-5">
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="email-to">À *</Label>
+          <Input
+            id="email-to"
+            type="email"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="destinataire@email.com"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label htmlFor="email-to">À *</Label>
+            <Label htmlFor="email-cc">CC</Label>
             <Input
-              id="email-to"
+              id="email-cc"
               type="email"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="destinataire@email.com"
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              placeholder="cc@email.com"
             />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="email-cc">CC</Label>
-              <Input
-                id="email-cc"
-                type="email"
-                value={cc}
-                onChange={(e) => setCc(e.target.value)}
-                placeholder="cc@email.com"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="email-bcc">BCC</Label>
-              <Input
-                id="email-bcc"
-                type="email"
-                value={bcc}
-                onChange={(e) => setBcc(e.target.value)}
-                placeholder="bcc@email.com"
-              />
-            </div>
-          </div>
           <div className="space-y-1.5">
-            <Label htmlFor="email-subject">Sujet</Label>
+            <Label htmlFor="email-bcc">BCC</Label>
             <Input
-              id="email-subject"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
+              id="email-bcc"
+              type="email"
+              value={bcc}
+              onChange={(e) => setBcc(e.target.value)}
+              placeholder="bcc@email.com"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="email-message">Message</Label>
-            <textarea
-              id="email-message"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={5}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-            />
-          </div>
-          <div className="rounded-md border border-border/60 bg-surface px-3 py-2 text-xs text-text-muted">
-            <span className="font-medium">Pièce jointe :</span> {doc.fileName}
-          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="email-subject">Sujet</Label>
+          <Input
+            id="email-subject"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="email-message">Message</Label>
+          <textarea
+            id="email-message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={5}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+          />
+        </div>
+        <div className="rounded-md border border-border/60 bg-surface px-3 py-2 text-xs text-text-muted">
+          <span className="font-medium">Pièce jointe :</span> {doc.fileName}
+        </div>
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 
@@ -292,63 +275,56 @@ function EmailLogsModal({ doc, onClose }: EmailLogsModalProps) {
     queryFn: () => stockiniApi.documentEmailLogs(doc.id),
   });
 
-  const logsFooter = (
-    <div className="flex justify-end">
-      <Button variant="outline" size="sm" onClick={onClose}>Fermer</Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Historique des emails"
-      reference={doc.documentNumber}
-      isOpen={true}
+      subtitle={doc.documentNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={700}
-      defaultHeight={480}
-      footer={logsFooter}
+      width={700}
+      footer={<Button variant="outline" size="sm" onClick={onClose}>Fermer</Button>}
     >
-      <div className="overflow-auto">
-          {logsQuery.isLoading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 size={20} className="animate-spin text-text-muted" />
-            </div>
-          ) : !logsQuery.data?.length ? (
-            <p className="py-10 text-center text-sm text-text-muted">Aucun email envoyé pour ce document</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-surface">
-                <tr className="border-b border-border/60">
-                  {['Destinataire', 'Sujet', 'Date envoi', 'Statut', 'Erreur'].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {logsQuery.data.map((log) => (
-                  <tr key={log.id} className="hover:bg-muted/30">
-                    <td className="px-4 py-3 text-text-secondary">{log.recipientEmail}</td>
-                    <td className="px-4 py-3 text-text-secondary">{log.subject}</td>
-                    <td className="px-4 py-3 text-xs text-text-muted whitespace-nowrap">
-                      {new Date(log.sentAt).toLocaleString('fr-TN')}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-medium ${EMAIL_STATUS_COLORS[log.status] ?? 'text-text-muted'}`}>
-                        {log.status === 'SENT' ? 'Envoyé' : log.status === 'FAILED' ? 'Échec' : log.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-red-600 max-w-[200px] truncate">
-                      {log.errorMessage ?? '—'}
-                    </td>
-                  </tr>
+      {logsQuery.isLoading ? (
+        <div className="flex justify-center py-10">
+          <Loader2 size={20} className="animate-spin text-text-muted" />
+        </div>
+      ) : !logsQuery.data?.length ? (
+        <p className="py-10 text-center text-sm text-text-muted">Aucun email envoyé pour ce document</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-surface">
+              <tr className="border-b border-border/60">
+                {['Destinataire', 'Sujet', 'Date envoi', 'Statut', 'Erreur'].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    {h}
+                  </th>
                 ))}
-              </tbody>
-            </table>
-          )}
-      </div>
-    </ModalWindow>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {logsQuery.data.map((log) => (
+                <tr key={log.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 text-text-secondary">{log.recipientEmail}</td>
+                  <td className="px-4 py-3 text-text-secondary">{log.subject}</td>
+                  <td className="px-4 py-3 text-xs text-text-muted whitespace-nowrap">
+                    {new Date(log.sentAt).toLocaleString('fr-TN')}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs font-medium ${EMAIL_STATUS_COLORS[log.status] ?? 'text-text-muted'}`}>
+                      {log.status === 'SENT' ? 'Envoyé' : log.status === 'FAILED' ? 'Échec' : log.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-red-600 max-w-[200px] truncate">
+                    {log.errorMessage ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SlideOver>
   );
 }
 
@@ -390,83 +366,80 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
     },
   });
 
-  const linkFooter = (
-    <div className="flex justify-end gap-2">
-      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
-      <Button size="sm" disabled={sendMutation.isPending || !to} onClick={() => sendMutation.mutate()}>
-        {sendMutation.isPending ? (
-          <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
-        ) : (
-          <><Link size={13} className="mr-1.5" />Envoyer le lien</>
-        )}
-      </Button>
-    </div>
-  );
-
   return (
-    <ModalWindow
+    <SlideOver
       title="Envoyer lien PDF"
-      reference={doc.documentNumber}
-      isOpen={true}
+      subtitle={doc.documentNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={560}
-      defaultHeight={560}
-      footer={linkFooter}
+      width={520}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+          <Button size="sm" disabled={sendMutation.isPending || !to} onClick={() => sendMutation.mutate()}>
+            {sendMutation.isPending ? (
+              <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
+            ) : (
+              <><Link size={13} className="mr-1.5" />Envoyer le lien</>
+            )}
+          </Button>
+        </>
+      }
     >
-      <div className="space-y-3 px-5 py-5">
-          <div className="space-y-1.5">
-            <Label htmlFor="link-to">Destinataire *</Label>
-            <input
-              id="link-to"
-              type="email"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="destinataire@email.com"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="link-subject">Sujet</Label>
-            <input
-              id="link-subject"
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="link-message">Message (optionnel)</Label>
-            <textarea
-              id="link-message"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={4}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="link-expiry">Durée de validité du lien</Label>
-            <select
-              id="link-expiry"
-              value={expiresInDays}
-              onChange={(e) => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
-              className="app-select w-full"
-            >
-              <option value={1}>1 jour</option>
-              <option value={7}>7 jours (recommandé)</option>
-              <option value={30}>30 jours</option>
-            </select>
-          </div>
-          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
-            <Link size={13} className="mt-0.5 shrink-0" />
-            <span>
-              Un lien sécurisé et temporaire sera généré vers le PDF stocké dans MinIO.
-              Aucune pièce jointe ne sera envoyée.
-            </span>
-          </div>
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="link-to">Destinataire *</Label>
+          <input
+            id="link-to"
+            type="email"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="destinataire@email.com"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="link-subject">Sujet</Label>
+          <input
+            id="link-subject"
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="link-message">Message (optionnel)</Label>
+          <textarea
+            id="link-message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={4}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="link-expiry">Durée de validité du lien</Label>
+          <select
+            id="link-expiry"
+            value={expiresInDays}
+            onChange={(e) => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
+            className="app-select w-full"
+          >
+            <option value={1}>1 jour</option>
+            <option value={7}>7 jours (recommandé)</option>
+            <option value={30}>30 jours</option>
+          </select>
+        </div>
+        <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
+          <Link size={13} className="mt-0.5 shrink-0" />
+          <span>
+            Un lien sécurisé et temporaire sera généré vers le PDF stocké dans MinIO.
+            Aucune pièce jointe ne sera envoyée.
+          </span>
+        </div>
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 

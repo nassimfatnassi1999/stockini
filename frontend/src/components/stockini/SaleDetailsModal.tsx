@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { getPaymentDisplay, money } from '@/lib/stockini/format';
 import type { SaleDetail } from '@/lib/stockini/types';
 
@@ -40,15 +40,14 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
   });
 
   return (
-    <ModalWindow
+    <SlideOver
       title="Détails de la vente"
-      reference={sale?.invoiceNumber}
-      isOpen={true}
+      subtitle={sale?.invoiceNumber}
+      open={true}
       onClose={onClose}
-      defaultWidth={760}
-      defaultHeight={560}
+      width={720}
     >
-      <div className="space-y-5 p-6">
+      <div className="space-y-5">
         {isLoading && (
           <div className="py-16 text-center text-sm text-text-muted">Chargement…</div>
         )}
@@ -59,7 +58,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
         )}
         {sale && (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <InfoField label="Numéro facture" value={sale.invoiceNumber} mono />
               <InfoField
                 label="Client"
@@ -169,7 +168,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
           </>
         )}
       </div>
-    </ModalWindow>
+    </SlideOver>
   );
 }
 

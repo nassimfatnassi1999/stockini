@@ -17,6 +17,7 @@ import {
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { getCurrentUser } from '@/lib/auth';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
@@ -68,53 +69,46 @@ function UserHeader() {
 
 function UserDetailModal({ user, onClose }: { user: User; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[#0d2236] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-          <h2 className="text-[15px] font-semibold text-white">Détails utilisateur</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white"
-          >
-            ×
-          </button>
-        </div>
-        <dl className="space-y-3 px-6 py-5 text-[13px]">
-          {(
-            [
-              ['Nom complet', user.fullName],
-              ['Email', user.email],
-              ['Téléphone', user.phone ?? '—'],
-              ['Créé le', formatDate(user.createdAt)],
-              ['Dernière connexion', formatDate(user.lastLoginAt)],
-            ] as [string, string][]
-          ).map(([label, value]) => (
-            <div key={label} className="flex justify-between gap-4">
-              <dt className="text-white/50">{label}</dt>
-              <dd className="text-right text-white">{value}</dd>
-            </div>
-          ))}
-          <div className="flex justify-between gap-4">
-            <dt className="text-white/50">Rôle</dt>
-            <dd>
-              <UserRoleBadge role={user.role.name as Parameters<typeof UserRoleBadge>[0]['role']} />
-            </dd>
+    <SlideOver
+      title="Détails utilisateur"
+      subtitle={user.email}
+      open={true}
+      onClose={onClose}
+      darkHeader={true}
+      width={400}
+      footer={
+        <Button variant="outline" size="sm" onClick={onClose}>Fermer</Button>
+      }
+    >
+      <dl className="space-y-3 text-[13px]">
+        {(
+          [
+            ['Nom complet', user.fullName],
+            ['Email', user.email],
+            ['Téléphone', user.phone ?? '—'],
+            ['Créé le', formatDate(user.createdAt)],
+            ['Dernière connexion', formatDate(user.lastLoginAt)],
+          ] as [string, string][]
+        ).map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-4 border-b border-border/40 pb-2.5">
+            <dt className="text-text-muted">{label}</dt>
+            <dd className="text-right font-medium text-text-primary">{value}</dd>
           </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-white/50">Statut</dt>
-            <dd>
-              <UserStatusBadge isActive={user.isActive} />
-            </dd>
-          </div>
-        </dl>
-        <div className="flex justify-end px-6 pb-5">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Fermer
-          </Button>
+        ))}
+        <div className="flex justify-between gap-4 border-b border-border/40 pb-2.5">
+          <dt className="text-text-muted">Rôle</dt>
+          <dd>
+            <UserRoleBadge role={user.role.name as Parameters<typeof UserRoleBadge>[0]['role']} />
+          </dd>
         </div>
-      </div>
-    </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-text-muted">Statut</dt>
+          <dd>
+            <UserStatusBadge isActive={user.isActive} />
+          </dd>
+        </div>
+      </dl>
+    </SlideOver>
   );
 }
 

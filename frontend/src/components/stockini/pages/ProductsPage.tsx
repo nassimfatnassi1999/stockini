@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Plus } from 'lucide-react';
-import { ModalWindow } from '@/components/shared/ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
+import { ModalFormGrid } from '@/components/shared/ModalForm';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { usePermissions } from '@/lib/hooks/usePermissions';
@@ -108,6 +109,7 @@ function ProductModal({
   onSubmit: (form: ProductFormState) => void;
   saving: boolean;
 }) {
+  const formId = useId();
   const [form, setForm] = useState<ProductFormState>(initialValues ?? EMPTY_PRODUCT_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof ProductFormState, string>>>({});
 
@@ -144,15 +146,26 @@ function ProductModal({
     onSubmit(form);
   };
 
+  const footer = (
+    <>
+      <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
+      <Button type="submit" form={formId} disabled={saving}>
+        <Check size={14} />
+        {saving ? 'Enregistrement...' : 'Enregistrer'}
+      </Button>
+    </>
+  );
+
   return (
-    <ModalWindow
+    <SlideOver
       title={mode === 'edit' ? 'Modifier le produit' : 'Nouveau produit'}
-      isOpen={true}
+      open={true}
       onClose={onClose}
-      defaultWidth={700}
-      defaultHeight={720}
+      width={580}
+      footer={footer}
     >
-      <form onSubmit={handleSubmit} className="grid gap-4 px-5 py-4 sm:grid-cols-2">
+      <form id={formId} onSubmit={handleSubmit}>
+        <ModalFormGrid>
           {/* Référence */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-reference">Référence *</Label>
@@ -206,17 +219,7 @@ function ProductModal({
           <div className="space-y-1.5">
             <Label htmlFor="pf-tva">TVA *</Label>
             <div className="relative">
-              <Input
-                id="pf-tva"
-                type="number"
-                min="0"
-                max="100"
-                step="1"
-                placeholder="19"
-                value={form.tva}
-                onChange={set('tva')}
-                required
-              />
+              <Input id="pf-tva" type="number" min="0" max="100" step="1" placeholder="19" value={form.tva} onChange={set('tva')} required />
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">%</span>
             </div>
             {errors.tva && <p className="text-xs text-red-600">{errors.tva}</p>}
@@ -226,53 +229,32 @@ function ProductModal({
           <div className="space-y-1.5">
             <Label htmlFor="pf-purchase-ht">Prix d'achat HT *</Label>
             <div className="relative">
-              <Input
-                id="pf-purchase-ht"
-                type="number"
-                min="0"
-                step="0.001"
-                placeholder="0,000"
-                value={form.purchasePrice}
-                onChange={set('purchasePrice')}
-                required
-              />
+              <Input id="pf-purchase-ht" type="number" min="0" step="0.001" placeholder="0,000" value={form.purchasePrice} onChange={set('purchasePrice')} required />
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
             </div>
             {errors.purchasePrice && <p className="text-xs text-red-600">{errors.purchasePrice}</p>}
           </div>
 
-          {/* Prix d'achat TTC — calculé automatiquement */}
+          {/* Prix d'achat TTC — calculé */}
           <div className="space-y-1.5">
             <Label>
               Prix d'achat TTC{' '}
               <span className="text-xs font-normal text-text-muted">(HT × (1 + TVA%))</span>
             </Label>
             <div className="relative">
-              <Input
-                type="text"
-                readOnly
-                tabIndex={-1}
-                value={priceHt > 0 ? money(priceTtc) : '—'}
-                className="bg-muted/40 cursor-not-allowed font-mono text-text-secondary"
-              />
+              <Input type="text" readOnly tabIndex={-1} value={priceHt > 0 ? money(priceTtc) : '—'} className="bg-muted/40 cursor-not-allowed font-mono text-text-secondary" />
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
             </div>
           </div>
 
-          {/* Prix de vente HT — calculé automatiquement */}
+          {/* Prix de vente HT — calculé */}
           <div className="space-y-1.5">
             <Label>
               Prix vente HT{' '}
               <span className="text-xs font-normal text-text-muted">(Achat HT × 1,4)</span>
             </Label>
             <div className="relative">
-              <Input
-                type="text"
-                readOnly
-                tabIndex={-1}
-                value={priceHt > 0 ? money(priceSale) : '—'}
-                className="bg-primary/5 cursor-not-allowed font-mono font-semibold text-primary"
-              />
+              <Input type="text" readOnly tabIndex={-1} value={priceHt > 0 ? money(priceSale) : '—'} className="bg-primary/5 cursor-not-allowed font-mono font-semibold text-primary" />
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
             </div>
           </div>
@@ -302,16 +284,9 @@ function ProductModal({
             <Input id="pf-min" type="number" min="0" step="1" value={form.minStock} onChange={set('minStock')} required />
             {errors.minStock && <p className="text-xs text-red-600">{errors.minStock}</p>}
           </div>
-
-          <div className="flex justify-end gap-2 border-t border-border pt-4 sm:col-span-2">
-            <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-            <Button type="submit" disabled={saving}>
-              <Check size={14} />
-              {saving ? 'Enregistrement...' : 'Enregistrer'}
-            </Button>
-          </div>
-        </form>
-    </ModalWindow>
+        </ModalFormGrid>
+      </form>
+    </SlideOver>
   );
 }
 

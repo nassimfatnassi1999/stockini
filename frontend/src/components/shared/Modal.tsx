@@ -1,6 +1,8 @@
 'use client';
 
-import { ModalWindow } from './ModalWindow';
+import { SlideOver } from '@/components/ui/SlideOver';
+
+const SIZE_W = { sm: 420, md: 520, lg: 620 };
 
 interface ModalProps {
   open: boolean;
@@ -14,48 +16,43 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-const SIZE_W = { sm: 420, md: 600, lg: 780 };
-const SIZE_H = { sm: 400, md: 520, lg: 620 };
-
 export function Modal({
   open, onClose, title, reference, children,
   onSave, saveLabel = 'Enregistrer', saving = false, size = 'md',
 }: ModalProps) {
+  const subtitle = reference;
   const footer = onSave ? (
-    <div className="flex justify-end gap-2">
+    <>
       <button
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }}
+        onClick={onClose}
         disabled={saving}
-        className="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-semibold text-text-secondary hover:bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-white px-4 text-sm font-semibold text-text-secondary hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
       >
         Annuler
       </button>
       <button
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSave(); }}
+        onClick={onSave}
         disabled={saving}
-        className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-primary-light disabled:opacity-80"
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-80"
       >
         {saving ? 'Enregistrement…' : saveLabel}
       </button>
-    </div>
+    </>
   ) : undefined;
 
   return (
-    <ModalWindow
+    <SlideOver
       title={title}
-      reference={reference}
-      isOpen={open}
+      subtitle={subtitle}
+      open={open}
       onClose={onClose}
-      defaultWidth={SIZE_W[size]}
-      defaultHeight={SIZE_H[size]}
+      width={SIZE_W[size]}
       footer={footer}
     >
-      <div className="px-6 py-5">
-        {children}
-      </div>
-    </ModalWindow>
+      {children}
+    </SlideOver>
   );
 }
 

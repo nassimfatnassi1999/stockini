@@ -12,12 +12,12 @@ import {
   Mail,
   RefreshCw,
   Trash2,
-  X,
 } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SlideOver } from '@/components/ui/SlideOver';
 import { toast } from '@/lib/toast';
 import { stockiniApi } from '@/lib/stockini/api';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
@@ -85,69 +85,14 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">Envoyer lien PDF</h2>
-            <p className="text-xs text-text-muted mt-0.5">{doc.documentNumber} — sans pièce jointe</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
-            <X size={15} className="text-text-muted" />
-          </button>
-        </div>
-        <div className="space-y-3 p-5">
-          <div className="space-y-1.5">
-            <Label htmlFor="hist-link-to">Destinataire *</Label>
-            <Input
-              id="hist-link-to"
-              type="email"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="destinataire@email.com"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="hist-link-subject">Sujet</Label>
-            <Input
-              id="hist-link-subject"
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="hist-link-message">Message (optionnel)</Label>
-            <textarea
-              id="hist-link-message"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={4}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="hist-link-expiry">Durée de validité du lien</Label>
-            <select
-              id="hist-link-expiry"
-              value={expiresInDays}
-              onChange={(e) => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
-              className="app-select w-full"
-            >
-              <option value={1}>1 jour</option>
-              <option value={7}>7 jours (recommandé)</option>
-              <option value={30}>30 jours</option>
-            </select>
-          </div>
-          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
-            <Link size={13} className="mt-0.5 shrink-0" />
-            <span>
-              Un lien sécurisé et temporaire sera généré vers le PDF stocké dans MinIO.
-              Aucune pièce jointe ne sera envoyée.
-            </span>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-4">
+    <SlideOver
+      title="Envoyer lien PDF"
+      subtitle={`${doc.documentNumber} — sans pièce jointe`}
+      open={true}
+      onClose={onClose}
+      width={520}
+      footer={
+        <>
           <Button variant="outline" size="sm" onClick={onClose}>
             Annuler
           </Button>
@@ -162,9 +107,61 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
               <><Link size={13} className="mr-1.5" />Envoyer le lien</>
             )}
           </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="hist-link-to">Destinataire *</Label>
+          <Input
+            id="hist-link-to"
+            type="email"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="destinataire@email.com"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="hist-link-subject">Sujet</Label>
+          <Input
+            id="hist-link-subject"
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="hist-link-message">Message (optionnel)</Label>
+          <textarea
+            id="hist-link-message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={4}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="hist-link-expiry">Durée de validité du lien</Label>
+          <select
+            id="hist-link-expiry"
+            value={expiresInDays}
+            onChange={(e) => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
+            className="app-select w-full"
+          >
+            <option value={1}>1 jour</option>
+            <option value={7}>7 jours (recommandé)</option>
+            <option value={30}>30 jours</option>
+          </select>
+        </div>
+        <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
+          <Link size={13} className="mt-0.5 shrink-0" />
+          <span>
+            Un lien sécurisé et temporaire sera généré vers le PDF stocké dans MinIO.
+            Aucune pièce jointe ne sera envoyée.
+          </span>
         </div>
       </div>
-    </div>
+    </SlideOver>
   );
 }
 
