@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, X } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -415,23 +416,16 @@ export function PaymentsPage() {
       )}
 
       {/* ── Modal paiement ── */}
-      {payTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="text-base font-semibold text-text-primary">
-                Payer — {payTarget.invoiceNumber}
-              </h2>
-              <button
-                type="button"
-                aria-label="Fermer"
-                onClick={() => setPayTarget(null)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
+      <ModalWindow
+        title="Payer"
+        reference={payTarget?.invoiceNumber}
+        isOpen={!!payTarget}
+        onClose={() => setPayTarget(null)}
+        defaultWidth={480}
+        defaultHeight={560}
+      >
+        {payTarget && (
+        <div className="px-5 py-4 space-y-4">
               <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-text-muted">Client</span>
@@ -507,10 +501,9 @@ export function PaymentsPage() {
                   </Button>
                 </div>
               </form>
-            </div>
-          </div>
         </div>
-      )}
+        )}
+      </ModalWindow>
     </>
   );
 }

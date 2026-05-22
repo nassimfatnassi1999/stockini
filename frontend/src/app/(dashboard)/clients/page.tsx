@@ -8,7 +8,8 @@ import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Search, Plus, Trash2, X } from 'lucide-react';
+import { Search, Plus, Trash2 } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
@@ -301,29 +302,14 @@ export default function ClientsPage() {
       )}
 
       {/* Create Customer Modal */}
-      {showModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="modal-title"
-        >
-          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 id="modal-title" className="text-base font-semibold text-text-primary">
-                Nouveau client
-              </h2>
-              <button
-                type="button"
-                aria-label="Fermer"
-                onClick={closeModal}
-                className="app-action-button h-8 w-8"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+      <ModalWindow
+        title="Nouveau client"
+        isOpen={showModal}
+        onClose={closeModal}
+        defaultWidth={560}
+        defaultHeight={640}
+      >
+        <form onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
               {formError && (
                 <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
                   {formError}
@@ -431,10 +417,8 @@ export default function ClientsPage() {
                   {createMutation.isPending ? 'Création…' : 'Créer le client'}
                 </Button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </ModalWindow>
     </div>
     </PermissionGuard>
   );

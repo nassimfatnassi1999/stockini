@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
@@ -912,104 +913,75 @@ function PurchaseDetailsModal({
     queryFn: () => stockiniApi.purchase(purchaseId),
   });
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold text-text-primary">
-            Détails achat {data?.orderNumber ?? '…'}
-          </h2>
-          <button
-            type="button"
-            aria-label="Fermer"
-            onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="px-5 py-4">
-          {isLoading ? (
-            <p className="text-sm text-text-muted">Chargement…</p>
-          ) : data ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-text-muted">Fournisseur</span>
-                  <p className="font-medium">{data.supplier?.name ?? '—'}</p>
-                </div>
-                <div>
-                  <span className="text-text-muted">Statut</span>
-                  <p className="font-medium">
-                    {PURCHASE_STATUS_LABELS[data.status] ?? data.status}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-text-muted">Total TTC</span>
-                  <p className="font-mono font-semibold">{money(data.total)}</p>
-                </div>
-                <div>
-                  <span className="text-text-muted">Montant payé</span>
-                  <p className="font-mono font-semibold text-emerald-600">
-                    {money(data.paidAmount)}
-                  </p>
-                </div>
-              </div>
-              <table className="w-full text-xs border border-border/60 rounded">
-                <thead className="bg-surface">
-                  <tr>
-                    {['Produit', 'Qté commandée', 'Qté reçue', 'PU Achat HT', 'Total'].map((h) => (
-                      <th
-                        key={h}
-                        className="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-text-muted"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {data.items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-3 py-2">{item.product?.name ?? item.productId}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{item.quantity}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        <span
-                          className={
-                            item.receivedQuantity >= item.quantity
-                              ? 'text-emerald-600 font-semibold'
-                              : item.receivedQuantity > 0
-                                ? 'text-yellow-600'
-                                : 'text-text-muted'
-                          }
-                        >
-                          {item.receivedQuantity}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{money(item.unitCost)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium">
-                        {money(item.total)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="text-sm text-red-600">Impossible de charger les détails.</p>
-          )}
-        </div>
-        <div className="flex justify-end border-t border-border px-5 py-3">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>
-            Fermer
-          </Button>
-        </div>
-      </div>
+  const footer = (
+    <div className="flex justify-end">
+      <Button type="button" variant="outline" size="sm" onClick={onClose}>Fermer</Button>
     </div>
+  );
+
+  return (
+    <ModalWindow
+      title="Détails achat"
+      reference={data?.orderNumber}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={640}
+      defaultHeight={480}
+      footer={footer}
+    >
+      <div className="px-5 py-4">
+        {isLoading ? (
+          <p className="text-sm text-text-muted">Chargement…</p>
+        ) : data ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-text-muted">Fournisseur</span>
+                <p className="font-medium">{data.supplier?.name ?? '—'}</p>
+              </div>
+              <div>
+                <span className="text-text-muted">Statut</span>
+                <p className="font-medium">{PURCHASE_STATUS_LABELS[data.status] ?? data.status}</p>
+              </div>
+              <div>
+                <span className="text-text-muted">Total TTC</span>
+                <p className="font-mono font-semibold">{money(data.total)}</p>
+              </div>
+              <div>
+                <span className="text-text-muted">Montant payé</span>
+                <p className="font-mono font-semibold text-emerald-600">{money(data.paidAmount)}</p>
+              </div>
+            </div>
+            <table className="w-full text-xs border border-border/60 rounded">
+              <thead className="bg-surface">
+                <tr>
+                  {['Produit', 'Qté commandée', 'Qté reçue', 'PU Achat HT', 'Total'].map((h) => (
+                    <th key={h} className="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-text-muted">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {data.items.map((item) => (
+                  <tr key={item.id}>
+                    <td className="px-3 py-2">{item.product?.name ?? item.productId}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{item.quantity}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <span className={item.receivedQuantity >= item.quantity ? 'text-emerald-600 font-semibold' : item.receivedQuantity > 0 ? 'text-yellow-600' : 'text-text-muted'}>
+                        {item.receivedQuantity}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(item.unitCost)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">{money(item.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-red-600">Impossible de charger les détails.</p>
+        )}
+      </div>
+    </ModalWindow>
   );
 }
 
@@ -1034,18 +1006,13 @@ function PayPurchaseModal({
   });
 
   const payMutation = useMutation({
-    mutationFn: () =>
-      stockiniApi.payPurchase(purchase.id, {
-        amount: Number(montant),
-        method,
-      }),
+    mutationFn: () => stockiniApi.payPurchase(purchase.id, { amount: Number(montant), method }),
     onSuccess: () => {
       toast.success('Paiement enregistré — caisse débitée');
       onSuccess();
     },
     onError: (error: unknown) => {
-      const msg = (error as { response?: { data?: { message?: string | string[] } } })
-        ?.response?.data?.message;
+      const msg = (error as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
       const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors du paiement');
       toast.error(text);
     },
@@ -1054,93 +1021,69 @@ function PayPurchaseModal({
   const montantNum = Number(montant) || 0;
   const canPay = montantNum > 0 && montantNum <= resteAPayer + 0.001 && !!method && !payMutation.isPending;
 
+  const footer = (
+    <div className="flex justify-end gap-2">
+      <Button type="button" variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+      <Button type="button" size="sm" onClick={() => payMutation.mutate()} disabled={!canPay}>
+        {payMutation.isPending ? 'Enregistrement…' : 'Confirmer le paiement'}
+      </Button>
+    </div>
+  );
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
+    <ModalWindow
+      title="Payer"
+      reference={purchase.orderNumber}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={460}
+      defaultHeight={400}
+      footer={footer}
     >
-      <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold text-text-primary">
-            Payer — {purchase.orderNumber}
-          </h2>
-          <button
-            type="button"
-            aria-label="Fermer"
-            onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="px-5 py-4 space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-sm rounded-lg border border-border/60 bg-surface p-3">
-            <div>
-              <p className="text-text-muted text-xs uppercase tracking-wide">Fournisseur</p>
-              <p className="font-medium">{purchase.supplier?.name ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-text-muted text-xs uppercase tracking-wide">Total TTC</p>
-              <p className="font-mono font-semibold">{money(purchase.total)}</p>
-            </div>
-            <div>
-              <p className="text-text-muted text-xs uppercase tracking-wide">Déjà payé</p>
-              <p className="font-mono text-emerald-600">{money(purchase.paidAmount)}</p>
-            </div>
-            <div>
-              <p className="text-text-muted text-xs uppercase tracking-wide">Reste à payer</p>
-              <p className="font-mono font-semibold text-red-600">{money(resteAPayer)}</p>
-            </div>
+      <div className="px-5 py-4 space-y-4">
+        <div className="grid grid-cols-2 gap-3 text-sm rounded-lg border border-border/60 bg-surface p-3">
+          <div>
+            <p className="text-text-muted text-xs uppercase tracking-wide">Fournisseur</p>
+            <p className="font-medium">{purchase.supplier?.name ?? '—'}</p>
           </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="pay-montant">Montant à payer (DT)</Label>
-            <Input
-              id="pay-montant"
-              type="number"
-              min={0.001}
-              max={resteAPayer}
-              step={0.001}
-              value={montant}
-              onChange={(e) => setMontant(e.target.value)}
-              placeholder="0.000"
-            />
+          <div>
+            <p className="text-text-muted text-xs uppercase tracking-wide">Total TTC</p>
+            <p className="font-mono font-semibold">{money(purchase.total)}</p>
           </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="pay-method">Méthode de paiement</Label>
-            <select
-              id="pay-method"
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              className="app-select"
-            >
-              <option value="CASH">Espèces</option>
-              {(paymentMethodsQuery.data ?? []).map((opt) => (
-                <option key={opt.id} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+          <div>
+            <p className="text-text-muted text-xs uppercase tracking-wide">Déjà payé</p>
+            <p className="font-mono text-emerald-600">{money(purchase.paidAmount)}</p>
+          </div>
+          <div>
+            <p className="text-text-muted text-xs uppercase tracking-wide">Reste à payer</p>
+            <p className="font-mono font-semibold text-red-600">{money(resteAPayer)}</p>
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => payMutation.mutate()}
-            disabled={!canPay}
-          >
-            {payMutation.isPending ? 'Enregistrement…' : 'Confirmer le paiement'}
-          </Button>
+        <div className="space-y-1.5">
+          <Label htmlFor="pay-montant">Montant à payer (DT)</Label>
+          <Input
+            id="pay-montant"
+            type="number"
+            min={0.001}
+            max={resteAPayer}
+            step={0.001}
+            value={montant}
+            onChange={(e) => setMontant(e.target.value)}
+            placeholder="0.000"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="pay-method">Méthode de paiement</Label>
+          <select id="pay-method" value={method} onChange={(e) => setMethod(e.target.value)} className="app-select">
+            <option value="CASH">Espèces</option>
+            {(paymentMethodsQuery.data ?? []).map((opt) => (
+              <option key={opt.id} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
       </div>
-    </div>
+    </ModalWindow>
   );
 }

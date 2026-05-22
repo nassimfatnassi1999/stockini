@@ -13,10 +13,11 @@ import {
   Pencil,
   Search,
   Trash2,
-  X,
   ChevronLeft,
   ChevronRight,
+  X,
 } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
@@ -101,17 +102,26 @@ function EditModal({ doc, onClose, onSaved }: EditModalProps) {
     onError: () => toast.error('Erreur lors de la mise à jour'),
   });
 
+  const editFooter = (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+      <Button size="sm" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate()}>
+        {updateMutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-          <h2 className="text-sm font-semibold text-text-primary">Modifier le document</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
-            <X size={15} className="text-text-muted" />
-          </button>
-        </div>
-        <div className="space-y-4 p-5">
-          <div className="space-y-1.5">
+    <ModalWindow
+      title="Modifier le document"
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={460}
+      defaultHeight={380}
+      footer={editFooter}
+    >
+      <div className="space-y-4 px-5 py-5">
+        <div className="space-y-1.5">
             <Label htmlFor="edit-doc-number">Numéro document</Label>
             <Input
               id="edit-doc-number"
@@ -151,9 +161,8 @@ function EditModal({ doc, onClose, onSaved }: EditModalProps) {
           >
             {updateMutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
           </Button>
-        </div>
       </div>
-    </div>
+    </ModalWindow>
   );
 }
 
@@ -189,19 +198,30 @@ function EmailModal({ doc, onClose, onSent }: EmailModalProps) {
     },
   });
 
+  const emailFooter = (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+      <Button size="sm" disabled={sendMutation.isPending || !to} onClick={() => sendMutation.mutate()}>
+        {sendMutation.isPending ? (
+          <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
+        ) : (
+          'Envoyer'
+        )}
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">Envoyer par email</h2>
-            <p className="text-xs text-text-muted mt-0.5">{doc.documentNumber}</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
-            <X size={15} className="text-text-muted" />
-          </button>
-        </div>
-        <div className="space-y-3 p-5">
+    <ModalWindow
+      title="Envoyer par email"
+      reference={doc.documentNumber}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={560}
+      defaultHeight={600}
+      footer={emailFooter}
+    >
+      <div className="space-y-3 px-5 py-5">
           <div className="space-y-1.5">
             <Label htmlFor="email-to">À *</Label>
             <Input
@@ -255,25 +275,8 @@ function EmailModal({ doc, onClose, onSent }: EmailModalProps) {
           <div className="rounded-md border border-border/60 bg-surface px-3 py-2 text-xs text-text-muted">
             <span className="font-medium">Pièce jointe :</span> {doc.fileName}
           </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            size="sm"
-            disabled={sendMutation.isPending || !to}
-            onClick={() => sendMutation.mutate()}
-          >
-            {sendMutation.isPending ? (
-              <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
-            ) : (
-              'Envoyer'
-            )}
-          </Button>
-        </div>
       </div>
-    </div>
+    </ModalWindow>
   );
 }
 
@@ -289,19 +292,23 @@ function EmailLogsModal({ doc, onClose }: EmailLogsModalProps) {
     queryFn: () => stockiniApi.documentEmailLogs(doc.id),
   });
 
+  const logsFooter = (
+    <div className="flex justify-end">
+      <Button variant="outline" size="sm" onClick={onClose}>Fermer</Button>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">Historique des emails</h2>
-            <p className="text-xs text-text-muted mt-0.5">{doc.documentNumber}</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
-            <X size={15} className="text-text-muted" />
-          </button>
-        </div>
-        <div className="overflow-auto max-h-[60vh]">
+    <ModalWindow
+      title="Historique des emails"
+      reference={doc.documentNumber}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={700}
+      defaultHeight={480}
+      footer={logsFooter}
+    >
+      <div className="overflow-auto">
           {logsQuery.isLoading ? (
             <div className="flex justify-center py-10">
               <Loader2 size={20} className="animate-spin text-text-muted" />
@@ -340,12 +347,8 @@ function EmailLogsModal({ doc, onClose }: EmailLogsModalProps) {
               </tbody>
             </table>
           )}
-        </div>
-        <div className="flex justify-end border-t border-border/60 px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Fermer</Button>
-        </div>
       </div>
-    </div>
+    </ModalWindow>
   );
 }
 
@@ -387,19 +390,30 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
     },
   });
 
+  const linkFooter = (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+      <Button size="sm" disabled={sendMutation.isPending || !to} onClick={() => sendMutation.mutate()}>
+        {sendMutation.isPending ? (
+          <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
+        ) : (
+          <><Link size={13} className="mr-1.5" />Envoyer le lien</>
+        )}
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">Envoyer lien PDF</h2>
-            <p className="text-xs text-text-muted mt-0.5">{doc.documentNumber} — sans pièce jointe</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
-            <X size={15} className="text-text-muted" />
-          </button>
-        </div>
-        <div className="space-y-3 p-5">
+    <ModalWindow
+      title="Envoyer lien PDF"
+      reference={doc.documentNumber}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={560}
+      defaultHeight={560}
+      footer={linkFooter}
+    >
+      <div className="space-y-3 px-5 py-5">
           <div className="space-y-1.5">
             <Label htmlFor="link-to">Destinataire *</Label>
             <input
@@ -451,25 +465,8 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
               Aucune pièce jointe ne sera envoyée.
             </span>
           </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button
-            size="sm"
-            disabled={sendMutation.isPending || !to}
-            onClick={() => sendMutation.mutate()}
-          >
-            {sendMutation.isPending ? (
-              <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
-            ) : (
-              <><Link size={13} className="mr-1.5" />Envoyer le lien</>
-            )}
-          </Button>
-        </div>
       </div>
-    </div>
+    </ModalWindow>
   );
 }
 

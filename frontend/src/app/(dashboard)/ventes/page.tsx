@@ -18,6 +18,7 @@ import {
   UserCircle,
   X,
 } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -83,7 +84,7 @@ const STATUS_COLORS: Record<string, string> = {
   RETURNED: 'border-orange-200 bg-orange-50 text-orange-700',
 };
 
-type TabType = SalesDocumentType | 'AVOIR_TAB';
+type TabType = 'MAIN' | 'AVOIR_TAB';
 
 const DOC_TYPES: Array<{ id: SalesDocumentType; label: string; saveLabel: string }> = [
   { id: 'DEVIS', label: 'Devis', saveLabel: 'Enregistrer le devis' },
@@ -166,97 +167,228 @@ function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: Transfo
   const sourceAppliedStock = sourceSale.stockImpactDone;
   const targetAppliesStock = selected === 'BON_LIVRAISON' || selected === 'FACTURE';
 
+  const footer = (
+    <div className="flex gap-2">
+      <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={isPending}>
+        Annuler
+      </Button>
+      <Button
+        size="sm"
+        className="flex-1 bg-violet-600 text-white hover:bg-violet-700"
+        onClick={() => selected && onConfirm(selected as SalesDocumentType)}
+        disabled={isPending || !selected || options.length === 0}
+      >
+        {isPending ? 'En cours…' : 'Confirmer la transformation'}
+      </Button>
+    </div>
+  );
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget && !isPending) onCancel(); }}
+    <ModalWindow
+      title="Transformer le document"
+      reference={sourceSale.invoiceNumber}
+      isOpen={true}
+      onClose={onCancel}
+      defaultWidth={460}
+      defaultHeight={380}
+      footer={footer}
     >
-      <div className="w-full max-w-md rounded-xl border border-border/70 bg-white shadow-2xl">
-        <div className="space-y-4 p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-100">
-              <ArrowRightLeft size={18} className="text-violet-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-text-primary">Transformer le document</h3>
-              <p className="text-xs text-text-muted">
-                <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium mr-1 ${DOC_TYPE_BADGE[sourceSale.documentType] ?? ''}`}>
-                  {DOC_TYPE_SHORT[sourceSale.documentType] ?? sourceSale.documentType}
-                </span>
-                <span className="font-mono">{sourceSale.invoiceNumber}</span>
-              </p>
+      <div className="space-y-4 px-6 py-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-violet-100">
+            <ArrowRightLeft size={18} className="text-violet-600" />
+          </div>
+          <p className="text-xs text-text-muted">
+            <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium mr-1 ${DOC_TYPE_BADGE[sourceSale.documentType] ?? ''}`}>
+              {DOC_TYPE_SHORT[sourceSale.documentType] ?? sourceSale.documentType}
+            </span>
+            <span className="font-mono">{sourceSale.invoiceNumber}</span>
+          </p>
+        </div>
+
+        {options.length === 0 ? (
+          <p className="text-sm text-red-600">Aucune transformation disponible pour ce type de document.</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-text-primary">Transformer en</p>
+            <div className="flex flex-col gap-2">
+              {options.map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
+                    selected === opt.value
+                      ? 'border-violet-400 bg-violet-50'
+                      : 'border-border hover:border-violet-200 hover:bg-surface'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="targetType"
+                    value={opt.value}
+                    checked={selected === opt.value}
+                    onChange={() => setSelected(opt.value)}
+                    className="accent-violet-600"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-text-primary">{opt.label}</span>
+                    {(opt.value === 'BON_LIVRAISON' || opt.value === 'FACTURE') && (
+                      <p className="text-xs text-text-muted">
+                        {sourceAppliedStock ? 'Stock déjà appliqué — pas de double décrément' : 'Diminue le stock immédiatement'}
+                      </p>
+                    )}
+                  </div>
+                </label>
+              ))}
             </div>
           </div>
+        )}
 
-          {options.length === 0 ? (
-            <p className="text-sm text-red-600">Aucune transformation disponible pour ce type de document.</p>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-text-primary">Transformer en</p>
-              <div className="flex flex-col gap-2">
-                {options.map((opt) => (
-                  <label
-                    key={opt.value}
-                    className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
-                      selected === opt.value
-                        ? 'border-violet-400 bg-violet-50'
-                        : 'border-border hover:border-violet-200 hover:bg-surface'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="targetType"
-                      value={opt.value}
-                      checked={selected === opt.value}
-                      onChange={() => setSelected(opt.value)}
-                      className="accent-violet-600"
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-text-primary">{opt.label}</span>
-                      {opt.value === 'BON_LIVRAISON' && (
-                        <p className="text-xs text-text-muted">
-                          {sourceAppliedStock ? 'Stock déjà appliqué — pas de double décrément' : 'Diminue le stock immédiatement'}
-                        </p>
-                      )}
-                      {opt.value === 'FACTURE' && (
-                        <p className="text-xs text-text-muted">
-                          {sourceAppliedStock ? 'Stock déjà appliqué — pas de double décrément' : 'Diminue le stock immédiatement'}
-                        </p>
-                      )}
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {targetAppliesStock && !sourceAppliedStock && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              Le stock sera décrémenté pour chaque article au moment de la transformation.
-            </div>
-          )}
-          {targetAppliesStock && sourceAppliedStock && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-              Stock déjà appliqué sur la source — aucun double décrément.
-            </div>
-          )}
-        </div>
-
-        <div className="flex gap-2 border-t border-border/60 px-6 py-4">
-          <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={isPending}>
-            Annuler
-          </Button>
-          <Button
-            size="sm"
-            className="flex-1 bg-violet-600 text-white hover:bg-violet-700"
-            onClick={() => selected && onConfirm(selected as SalesDocumentType)}
-            disabled={isPending || !selected || options.length === 0}
-          >
-            {isPending ? 'En cours…' : 'Confirmer la transformation'}
-          </Button>
-        </div>
+        {targetAppliesStock && !sourceAppliedStock && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            Le stock sera décrémenté pour chaque article au moment de la transformation.
+          </div>
+        )}
+        {targetAppliesStock && sourceAppliedStock && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            Stock déjà appliqué sur la source — aucun double décrément.
+          </div>
+        )}
       </div>
+    </ModalWindow>
+  );
+}
+
+// ─── Validate document modal ─────────────────────────────────────────────────
+
+interface ValidateDocModalProps {
+  isPending: boolean;
+  paymentMethods: DropdownOption[];
+  totals: DocumentTotals;
+  onConfirm: (type: SalesDocumentType, paidAmount: number, paymentMethod: string) => void;
+  onCancel: () => void;
+}
+
+function ValidateDocumentModal({ isPending, paymentMethods, totals, onConfirm, onCancel }: ValidateDocModalProps) {
+  const [selectedType, setSelectedType] = useState<SalesDocumentType>('FACTURE');
+  const [paidAmount, setPaidAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [pmtError, setPmtError] = useState('');
+
+  const paymentAllowed = selectedType === 'FACTURE' || selectedType === 'BON_LIVRAISON';
+  const paidAmountNum = Number(paidAmount) || 0;
+
+  const handleConfirm = () => {
+    if (paymentAllowed && paidAmountNum > 0 && !paymentMethod) {
+      setPmtError('Veuillez sélectionner une méthode de paiement');
+      return;
+    }
+    onConfirm(selectedType, paymentAllowed ? paidAmountNum : 0, paymentAllowed && paidAmountNum > 0 ? paymentMethod : '');
+  };
+
+  const docTypeOptions = [
+    { value: 'DEVIS' as SalesDocumentType, label: 'Devis', desc: 'Document provisoire, aucun impact stock' },
+    { value: 'BON_COMMANDE' as SalesDocumentType, label: 'Bon de commande', desc: 'Commande client confirmée' },
+    { value: 'BON_LIVRAISON' as SalesDocumentType, label: 'Bon de livraison', desc: 'Livraison — impacte le stock' },
+    { value: 'FACTURE' as SalesDocumentType, label: 'Facture', desc: 'Document final — impacte le stock' },
+  ];
+
+  const footer = (
+    <div className="flex gap-2">
+      <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={isPending}>
+        Annuler
+      </Button>
+      <Button size="sm" className="flex-1" onClick={handleConfirm} disabled={isPending}>
+        {isPending ? 'Enregistrement…' : 'Valider'}
+      </Button>
     </div>
+  );
+
+  return (
+    <ModalWindow
+      title="Valider la vente"
+      isOpen={true}
+      onClose={onCancel}
+      defaultWidth={480}
+      defaultHeight={520}
+      footer={footer}
+      storageKey="validate-document"
+    >
+      <div className="space-y-4 px-6 py-5">
+        {/* Total recap */}
+        <div className="flex items-center justify-between rounded-lg border border-border bg-slate-50 px-4 py-3">
+          <span className="text-xs font-medium text-text-muted">Total TTC</span>
+          <span className="text-lg font-bold tabular-nums text-text-primary">{money(totals.totalTtc)} DT</span>
+        </div>
+
+        {/* Type selection */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Type de document</p>
+          <div className="grid grid-cols-2 gap-2">
+            {docTypeOptions.map((dt) => (
+              <label
+                key={dt.value}
+                className={`flex cursor-pointer flex-col gap-1 rounded-lg border p-3 transition-colors ${
+                  selectedType === dt.value
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/30 hover:bg-surface'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="validateDocType"
+                  value={dt.value}
+                  checked={selectedType === dt.value}
+                  onChange={() => { setSelectedType(dt.value); setPmtError(''); setPaidAmount(''); setPaymentMethod(''); }}
+                  className="sr-only"
+                />
+                <span className={`inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${DOC_TYPE_BADGE[dt.value] ?? ''}`}>
+                  {DOC_TYPE_SHORT[dt.value]}
+                </span>
+                <span className="text-xs font-medium text-text-primary">{dt.label}</span>
+                <span className="text-[10px] leading-snug text-text-muted">{dt.desc}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Payment section — only for BL / Facture */}
+        {paymentAllowed && (
+          <div className="space-y-3 rounded-lg border border-border bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Paiement (optionnel)</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="vm-paid" className="text-xs">Montant payé (DT)</Label>
+              <Input
+                id="vm-paid"
+                type="number"
+                min={0}
+                step={0.001}
+                value={paidAmount}
+                onChange={(e) => { setPaidAmount(e.target.value); setPmtError(''); }}
+                placeholder="0.000"
+                className="h-9 text-sm"
+              />
+            </div>
+            {paidAmountNum > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="vm-method" className="text-xs">Méthode de paiement *</Label>
+                <select
+                  id="vm-method"
+                  value={paymentMethod}
+                  onChange={(e) => { setPaymentMethod(e.target.value); setPmtError(''); }}
+                  className="app-select h-9 text-sm"
+                >
+                  <option value="">— Sélectionner —</option>
+                  {paymentMethods.map((opt) => (
+                    <option key={opt.id} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                {pmtError && <p className="text-[11px] text-red-500">{pmtError}</p>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </ModalWindow>
   );
 }
 
@@ -271,9 +403,6 @@ interface VenteDraft {
   counterClientTaxId: string;
   counterClientNote: string;
   saleDate: string;
-  paidAmount: string;
-  paymentMethod: string;
-  totals: DocumentTotals;
 }
 
 export default function VentesPage() {
@@ -292,9 +421,9 @@ export default function VentesPage() {
   const [showCounterPanel, setShowCounterPanel] = useState(false);
   const [counterClientErrors, setCounterClientErrors] = useState<Record<string, string>>({});
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
-  const [paidAmount, setPaidAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('');
   const [activeHistoryTab, setActiveHistoryTab] = useState<'ventes' | 'documents'>('ventes');
+  const [showValidateModal, setShowValidateModal] = useState(false);
+  const [transformTarget, setTransformTarget] = useState<Sale | null>(null);
 
   // ── Sales history pagination + filters ────────────────────────────────────
   const [salesPage, setSalesPage] = useState(1);
@@ -319,8 +448,7 @@ export default function VentesPage() {
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
   const [draftChecked, setDraftChecked] = useState(false);
 
-  const [documentType, setDocumentType] = useState<SalesDocumentType>('DEVIS');
-  const [activeTab, setActiveTab] = useState<TabType>('DEVIS');
+  const [activeTab, setActiveTab] = useState<TabType>('MAIN');
 
   // Multi-selection for invoice history
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
@@ -338,9 +466,6 @@ export default function VentesPage() {
   // Document history selection (for email from history)
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
 
-  // Transform dialog
-  const [transformDialogOpen, setTransformDialogOpen] = useState(false);
-
   const allowLowMargin = can(PERMISSION_LOW_MARGIN);
   const canEditUnitPriceHt = can(PERMISSION_EDIT_UNIT_PRICE_HT);
   const canViewDetails = can(PERMISSION_VIEW_DETAILS);
@@ -353,7 +478,6 @@ export default function VentesPage() {
 
   const filledLines = lines.filter(isFilledLine);
   const totals = calculateDocumentTotals(lines);
-  const paidAmountNum = Number(paidAmount) || 0;
   const selectedClient = (customersQuery.data ?? []).find((c) => c.id === customerId);
   const selectedClientType = String(
     (selectedClient as { type?: string | null } | undefined)?.type ?? '',
@@ -401,9 +525,6 @@ export default function VentesPage() {
       counterClientTaxId,
       counterClientNote,
       saleDate,
-      paidAmount,
-      paymentMethod,
-      totals,
     }),
     [
       lines,
@@ -416,9 +537,6 @@ export default function VentesPage() {
       counterClientTaxId,
       counterClientNote,
       saleDate,
-      paidAmount,
-      paymentMethod,
-      totals,
     ],
   );
   const draftEnabled = draftChecked && !showRestorePrompt;
@@ -467,8 +585,6 @@ export default function VentesPage() {
     setCounterClientTaxId(draft.counterClientTaxId ?? '');
     setCounterClientNote(draft.counterClientNote ?? '');
     setSaleDate(draft.saleDate ?? new Date().toISOString());
-    setPaidAmount(draft.paidAmount ?? '');
-    setPaymentMethod(draft.paymentMethod ?? '');
     setShowRestorePrompt(false);
   };
 
@@ -497,32 +613,6 @@ export default function VentesPage() {
     queryFn: () => stockiniApi.generatedDocuments(),
   });
 
-  // Ventes sélectionnées (objets complets, pas juste les IDs)
-  const selectedSales = salesList.filter((s) => selectedInvoiceIds.includes(s.id));
-
-  // Parmi les sélectionnées, celles qui peuvent être transformées :
-  // - type dans TRANSFORMABLE_TYPES (DEVIS, BON_COMMANDE, BON_LIVRAISON)
-  // - non encore transformées (transformedToId absent ou null)
-  // - non annulées
-  const selectedTransformableSales = selectedSales.filter(
-    (sale) =>
-      (TRANSFORMABLE_TYPES as string[]).includes(sale.documentType) &&
-      !sale.transformedToId &&
-      sale.status !== 'CANCELLED',
-  );
-
-  // DEBUG temporaire — vérifier que documentType et transformedToId arrivent bien de l'API
-  if (selectedSales.length > 0) {
-    console.log('SELECTED SALES FOR TRANSFORM', selectedSales.map((s) => ({
-      id: s.id,
-      invoiceNumber: s.invoiceNumber,
-      documentType: s.documentType,        // doit être "DEVIS" | "BON_COMMANDE" | ...
-      transformedToId: s.transformedToId,  // doit être null ou string
-      status: s.status,
-    })));
-  }
-
-  const canTransform = selectedTransformableSales.length > 0;
 
   const paymentMethodsQuery = useQuery<DropdownOption[]>({
     queryKey: ['stockini-dropdown-options', 'payment_methods'],
@@ -565,8 +655,6 @@ export default function VentesPage() {
     setCounterClientErrors({});
     setShowCounterPanel(false);
     setSaleDate(new Date().toISOString());
-    setPaidAmount('');
-    setPaymentMethod('');
     clearDraft();
   };
 
@@ -604,7 +692,7 @@ export default function VentesPage() {
     }
   };
 
-  const handleSave = () => {
+  const handleValidate = () => {
     if (isComptoir) {
       const errors: Record<string, string> = {};
       if (!counterClientFirstName.trim()) errors.counterClientFirstName = 'Prénom obligatoire';
@@ -618,11 +706,11 @@ export default function VentesPage() {
       }
       setCounterClientErrors({});
     }
-    createMutation.mutate();
+    setShowValidateModal(true);
   };
 
   const createMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: ({ docType, paid, method }: { docType: SalesDocumentType; paid: number; method: string }) => {
       if (filledLines.length === 0) {
         throw new Error("Ajoutez au moins une ligne produit avant d'enregistrer");
       }
@@ -645,21 +733,18 @@ export default function VentesPage() {
           "Vous n'avez pas le droit de valider cette vente. La marge minimale autorisée est de 20%.",
         );
       }
-      if (!SALES_DOCUMENT_TYPES.has(documentType)) {
-        throw new Error(`Type de document invalide: ${documentType}`);
+      if (!SALES_DOCUMENT_TYPES.has(docType)) {
+        throw new Error(`Type de document invalide: ${docType}`);
       }
-      if (!SALES_API_DOCUMENT_TYPES.has(documentType)) {
+      if (!SALES_API_DOCUMENT_TYPES.has(docType)) {
         throw new Error("Les avoirs doivent être créés depuis l'onglet Avoir.");
       }
-      const paymentAllowed = documentType === 'FACTURE' || documentType === 'BON_LIVRAISON';
-      const submittedPaidAmount = paymentAllowed ? round3(paidAmountNum) : 0;
-      if (!paymentAllowed && paidAmountNum > 0) {
-        throw new Error(`Le type ${documentType} n'accepte pas de paiement à la création.`);
-      }
+      const paymentAllowed = docType === 'FACTURE' || docType === 'BON_LIVRAISON';
+      const submittedPaidAmount = paymentAllowed ? round3(paid) : 0;
       if (submittedPaidAmount > round3(totals.totalTtc) + 0.001) {
         throw new Error('Le montant payé ne peut pas dépasser le total TTC.');
       }
-      if (submittedPaidAmount > 0 && !paymentMethod) {
+      if (submittedPaidAmount > 0 && !method) {
         throw new Error('Veuillez sélectionner une méthode de paiement.');
       }
       const trimmedFirstName = counterClientFirstName.trim();
@@ -669,7 +754,7 @@ export default function VentesPage() {
 
       return api
         .post<Sale>('/sales', {
-          documentType,
+          documentType: docType,
           customerId: customerId || undefined,
           clientType: isComptoir ? 'COMPTOIR' : 'PERSISTENT',
           counterClientFirstName: isComptoir ? trimmedFirstName : null,
@@ -682,8 +767,7 @@ export default function VentesPage() {
           counterClientTaxId: counterClientTaxId.trim() || null,
           counterClientNote: counterClientNote.trim() || null,
           paidAmount: submittedPaidAmount,
-          paymentMethod:
-            submittedPaidAmount > 0 && paymentMethod ? paymentMethod : undefined,
+          paymentMethod: submittedPaidAmount > 0 && method ? method : undefined,
           items: filledLines.map((l) => ({
             productId: l.productId!,
             quantity: l.quantity,
@@ -697,13 +781,13 @@ export default function VentesPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
-      // Invalidate caisse when a payment was included at sale creation
       if (Number((newSale as { paidAmount?: unknown }).paidAmount) > 0) {
         queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
         queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
         queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
       }
       toast.success('Vente enregistrée avec succès');
+      setShowValidateModal(false);
       clearDraft();
       resetForm();
     },
@@ -750,7 +834,7 @@ export default function VentesPage() {
       queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
       const label = DOC_TYPE_SHORT[newSale.documentType] ?? newSale.documentType;
       toast.success(`Document transformé → ${label} ${newSale.invoiceNumber}`);
-      setTransformDialogOpen(false);
+      setTransformTarget(null);
       setSelectedInvoiceIds([]);
     },
     onError: (err: unknown) => {
@@ -923,8 +1007,7 @@ export default function VentesPage() {
   });
 
   const hasActions = canViewDetails || canDeleteSale;
-  const currentDocConfig = DOC_TYPES.find((d) => d.id === documentType) ?? DOC_TYPES[0];
-  const colSpan = 1 + 7 + (hasActions ? 1 : 0) + 1; // extra col for Download
+  const colSpan = 1 + 7 + (hasActions ? 1 : 0);
 
   return (
     <PermissionGuard permission="sales.view">
@@ -955,39 +1038,23 @@ export default function VentesPage() {
         </p>
       </div>
 
-      {/* Document type selector tabs */}
+      {/* Tab selector */}
       <div className="rounded-lg border border-border/70 bg-white p-1 flex flex-wrap gap-1">
-        {DOC_TYPES.map((dt) => (
-          <button
-            key={dt.id}
-            type="button"
-	            onClick={() => {
-	              setDocumentType(dt.id);
-	              setActiveTab(dt.id);
-	              if (dt.id !== 'FACTURE' && dt.id !== 'BON_LIVRAISON') {
-	                setPaidAmount('');
-	                setPaymentMethod('');
-	              }
-	            }}
-            className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === dt.id
-                ? 'bg-primary text-white shadow-sm'
-                : 'text-text-secondary hover:bg-muted hover:text-text-primary'
-            }`}
-          >
-            <FileText size={13} />
-            {dt.label}
-          </button>
-        ))}
-        {/* Avoir tab */}
         <button
           type="button"
-	          onClick={() => {
-	            setDocumentType('AVOIR');
-	            setActiveTab('AVOIR_TAB');
-	            setPaidAmount('');
-	            setPaymentMethod('');
-	          }}
+          onClick={() => setActiveTab('MAIN')}
+          className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === 'MAIN'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-text-secondary hover:bg-muted hover:text-text-primary'
+          }`}
+        >
+          <FileText size={13} />
+          Nouvelle vente
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('AVOIR_TAB')}
           className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === 'AVOIR_TAB'
               ? 'bg-red-600 text-white shadow-sm'
@@ -1004,8 +1071,8 @@ export default function VentesPage() {
         <AvoirPage />
       )}
 
-      {/* All content below only shown when a document tab is active */}
-      {activeTab !== 'AVOIR_TAB' && (
+      {/* All content below only shown on the main "Nouvelle vente" tab */}
+      {activeTab === 'MAIN' && (
       <>
 
       {/* Document header: client + date */}
@@ -1253,61 +1320,22 @@ export default function VentesPage() {
         </div>
       )}
 
-      {/* Payment section + save action */}
+      {/* Save action */}
       <div className="rounded-lg border border-border/70 bg-white p-4">
-        <div className="flex flex-wrap gap-4 items-end justify-between">
-	          <div className="flex flex-wrap gap-3 items-end">
-	            {(documentType === 'FACTURE' || documentType === 'BON_LIVRAISON') && (
-	              <>
-	                <div className="space-y-1.5">
-	                  <Label htmlFor="paid-amount">Montant payé (DT)</Label>
-	                  <Input
-	                    id="paid-amount"
-	                    type="number"
-	                    min={0}
-	                    step={0.001}
-	                    value={paidAmount}
-	                    onChange={(e) => setPaidAmount(e.target.value)}
-	                    placeholder="0.000"
-	                    className="w-36"
-	                  />
-	                </div>
-	                {paidAmountNum > 0 && (
-	                  <div className="space-y-1.5">
-	                    <Label htmlFor="payment-method">Méthode de paiement</Label>
-	                    <select
-	                      id="payment-method"
-	                      value={paymentMethod}
-	                      onChange={(e) => setPaymentMethod(e.target.value)}
-	                      className="app-select"
-	                    >
-	                      <option value="">— Sélectionner —</option>
-	                      {(paymentMethodsQuery.data ?? []).map((opt) => (
-	                        <option key={opt.id} value={opt.value}>
-	                          {opt.label}
-	                        </option>
-	                      ))}
-	                    </select>
-	                  </div>
-	                )}
-	              </>
-	            )}
-	          </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={resetForm}>
-              Réinitialiser
+        <div className="flex gap-2 justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={resetForm}>
+            Réinitialiser
+          </Button>
+          {can('sales.create') && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleValidate}
+              disabled={!canSave || createMutation.isPending}
+            >
+              Valider
             </Button>
-            {can('sales.create') && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSave}
-                disabled={!canSave || createMutation.isPending}
-              >
-                {createMutation.isPending ? 'Enregistrement…' : currentDocConfig.saveLabel}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
@@ -1365,8 +1393,6 @@ export default function VentesPage() {
                 onDownload={handleDownloadClick}
                 onEmail={handleEmailClick}
                 emailLoading={emailPreviewLoading}
-                canTransform={canTransform}
-                onTransform={() => setTransformDialogOpen(true)}
                 onClear={() => setSelectedInvoiceIds([])}
               />
             )}
@@ -1548,6 +1574,12 @@ export default function VentesPage() {
                                   hidden: !canViewDetails,
                                 },
                                 {
+                                  label: 'Transformer',
+                                  icon: <ArrowRightLeft size={14} />,
+                                  onClick: () => setTransformTarget(sale),
+                                  hidden: !(TRANSFORMABLE_TYPES as string[]).includes(sale.documentType) || !!sale.transformedToId || sale.status === 'CANCELLED',
+                                },
+                                {
                                   label: 'Mettre à la corbeille',
                                   icon: <Trash2 size={14} />,
                                   onClick: () => setDeleteTarget(sale),
@@ -1696,24 +1728,25 @@ export default function VentesPage() {
         />
       )}
 
-      {/* Transform dialog — s'ouvre uniquement si des documents transformables sont sélectionnés */}
-      {transformDialogOpen && selectedTransformableSales.length > 0 && (
-        <>
-          {selectedTransformableSales.length > 1 && (
-            <div className="fixed bottom-24 right-6 z-50 max-w-xs rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 shadow-lg">
-              <strong>{selectedTransformableSales.length} documents transformables</strong> sélectionnés.<br />
-              Seul le premier sera transformé : <span className="font-mono">{selectedTransformableSales[0].invoiceNumber}</span>.
-            </div>
-          )}
-          <TransformDialog
-            sourceSale={selectedTransformableSales[0]}
-            isPending={transformMutation.isPending}
-            onConfirm={(targetType) =>
-              transformMutation.mutate({ id: selectedTransformableSales[0].id, targetType })
-            }
-            onCancel={() => setTransformDialogOpen(false)}
-          />
-        </>
+      {/* Transform dialog — per-row, opened from KebabMenu */}
+      {transformTarget && (
+        <TransformDialog
+          sourceSale={transformTarget}
+          isPending={transformMutation.isPending}
+          onConfirm={(targetType) => transformMutation.mutate({ id: transformTarget.id, targetType })}
+          onCancel={() => setTransformTarget(null)}
+        />
+      )}
+
+      {/* Validate document modal — type selection + payment */}
+      {showValidateModal && (
+        <ValidateDocumentModal
+          isPending={createMutation.isPending}
+          paymentMethods={paymentMethodsQuery.data ?? []}
+          totals={totals}
+          onConfirm={(docType, paid, method) => createMutation.mutate({ docType, paid, method })}
+          onCancel={() => setShowValidateModal(false)}
+        />
       )}
 
       {deleteTarget && (

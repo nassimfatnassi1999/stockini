@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { usePermissions } from '@/lib/hooks/usePermissions';
@@ -144,18 +145,14 @@ function ProductModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-xl rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold text-text-primary">
-            {mode === 'edit' ? 'Modifier le produit' : 'Nouveau produit'}
-          </h2>
-          <button type="button" aria-label="Fermer" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted">
-            <X size={16} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="grid gap-4 px-5 py-4 sm:grid-cols-2">
+    <ModalWindow
+      title={mode === 'edit' ? 'Modifier le produit' : 'Nouveau produit'}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={700}
+      defaultHeight={720}
+    >
+      <form onSubmit={handleSubmit} className="grid gap-4 px-5 py-4 sm:grid-cols-2">
           {/* Référence */}
           <div className="space-y-1.5">
             <Label htmlFor="pf-reference">Référence *</Label>
@@ -314,8 +311,7 @@ function ProductModal({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+    </ModalWindow>
   );
 }
 

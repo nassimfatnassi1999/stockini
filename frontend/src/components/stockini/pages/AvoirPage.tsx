@@ -11,6 +11,7 @@ import { money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { CreditNote, ReturnableItem, Sale } from '@/lib/stockini/types';
 import { PageHeader } from '../shared/PageHeader';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,26 +33,27 @@ function statusBadge(statut: string) {
 
 function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () => void }) {
   const pdfUrl = stockiniApi.avoirPdfUrl(avoir.id);
+  const detailFooter = (
+    <div className="flex justify-end gap-2">
+      <a href={pdfUrl} target="_blank" rel="noreferrer">
+        <Button size="sm" variant="outline">
+          <FileDown size={14} className="mr-1" /> PDF
+        </Button>
+      </a>
+      <Button size="sm" variant="outline" onClick={onClose}>Fermer</Button>
+    </div>
+  );
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-2xl rounded-lg bg-white shadow-xl overflow-y-auto max-h-[90vh]">
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <div>
-            <h2 className="text-lg font-bold">Avoir {avoir.numero}</h2>
-            <p className="text-xs text-gray-500">Facture: {avoir.sale?.invoiceNumber ?? '—'}</p>
-          </div>
-          <div className="flex gap-2">
-            <a href={pdfUrl} target="_blank" rel="noreferrer">
-              <Button size="sm" variant="outline">
-                <FileDown size={14} className="mr-1" /> PDF
-              </Button>
-            </a>
-            <button onClick={onClose} className="rounded p-1 hover:bg-gray-100">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-        <div className="p-6 space-y-5">
+    <ModalWindow
+      title={`Avoir ${avoir.numero}`}
+      reference={avoir.sale?.invoiceNumber ?? undefined}
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={720}
+      defaultHeight={600}
+      footer={detailFooter}
+    >
+      <div className="p-6 space-y-5 overflow-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Date :</span> <span className="font-medium">{fmtDate(avoir.dateAvoir)}</span></div>
             <div><span className="text-gray-500">Statut :</span> {statusBadge(avoir.statut)}</div>
@@ -98,9 +100,8 @@ function AvoirDetailModal({ avoir, onClose }: { avoir: CreditNote; onClose: () =
               <div className="flex justify-between gap-8 font-bold text-red-700 border-t pt-1"><span>Remboursé</span><span>{money(avoir.montantRembourse)}</span></div>
             </div>
           </div>
-        </div>
       </div>
-    </div>
+    </ModalWindow>
   );
 }
 
@@ -220,15 +221,28 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
     },
   });
 
+  const avoirFooter = (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={onClose}>Annuler</Button>
+      <Button
+        size="sm"
+        disabled={createMutation.isPending || selectedLines.length === 0 || !selectedSaleId}
+        onClick={() => createMutation.mutate()}
+      >
+        {createMutation.isPending ? 'Création…' : "Créer l'avoir"}
+      </Button>
+    </div>
+  );
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-3xl rounded-lg bg-white shadow-xl overflow-y-auto max-h-[95vh]">
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <h2 className="text-lg font-bold">Nouvel avoir</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X size={18} /></button>
-        </div>
-
-        <div className="p-6 space-y-5">
+    <ModalWindow
+      title="Nouvel avoir"
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={800}
+      defaultHeight={680}
+      footer={avoirFooter}
+    >
+      <div className="p-6 space-y-5 overflow-auto">
           {/* Facture selection */}
           <div>
             <label className="block text-sm font-medium mb-1">Facture concernée *</label>
@@ -379,18 +393,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
-
-        <div className="flex justify-end gap-3 border-t px-6 py-4">
-          <Button variant="outline" onClick={onClose}>Annuler</Button>
-          <Button
-            disabled={!selectedSaleId || selectedLines.length === 0 || createMutation.isPending}
-            onClick={() => createMutation.mutate()}
-          >
-            {createMutation.isPending ? 'Enregistrement…' : "Créer l'avoir"}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </ModalWindow>
   );
 }
 

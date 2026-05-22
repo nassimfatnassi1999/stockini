@@ -13,6 +13,7 @@ import { toast } from '@/lib/toast';
 import type { StockMovement, StockMovementsQueryParams } from '@/lib/stockini/types';
 import { CrudModal } from '../shared/CrudModal';
 import { PageHeader } from '../shared/PageHeader';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { cleanPayload, emptyForm, useDropdownOptions } from '../shared/form-utils';
 import type { FieldConfig } from '../shared/form-utils';
 
@@ -37,26 +38,21 @@ function ResetInventoryModal({ onClose, onConfirm, isPending }: ResetModalProps)
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <ModalWindow
+      title="Remise à zéro du stock"
+      isOpen={true}
+      onClose={onClose}
+      defaultWidth={460}
+      defaultHeight={480}
     >
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl">
-        <div className="flex items-start gap-3 border-b border-border p-5">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100">
-            <AlertTriangle size={18} className="text-red-600" />
-          </div>
+      <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
+          <AlertTriangle size={16} className="text-red-600 mt-0.5 shrink-0" />
           <div>
-            <h2 className="text-[15px] font-bold text-text-primary">Remise à zéro du stock</h2>
-            <p className="mt-0.5 text-[12px] text-text-secondary">Action irréversible — administrateur requis</p>
+            <p className="text-[12px] font-semibold text-red-700">Action irréversible — administrateur requis</p>
+            <p className="text-[11px] text-red-600 mt-0.5">Cette action va remettre <strong>tous les stocks à 0</strong>.</p>
           </div>
         </div>
-        <div className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
-          <p className="text-[12px] font-medium text-red-700">
-            Cette action va remettre <strong>tous les stocks à 0</strong>. Action irréversible.
-          </p>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
           <div className="space-y-1.5">
             <label className="text-[12px] font-semibold text-text-primary">Mot de passe administrateur</label>
             <input
@@ -98,8 +94,7 @@ function ResetInventoryModal({ onClose, onConfirm, isPending }: ResetModalProps)
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </ModalWindow>
   );
 }
 

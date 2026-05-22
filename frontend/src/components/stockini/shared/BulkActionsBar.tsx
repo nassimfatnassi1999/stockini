@@ -9,7 +9,7 @@ interface BulkActionsBarProps {
   onEmail: () => void;
   emailLoading?: boolean;
   canTransform?: boolean;
-  onTransform: () => void;
+  onTransform?: () => void;
   onClear: () => void;
 }
 
@@ -76,7 +76,7 @@ export function BulkActionsBar({
       </button>
 
       {/* Transformer — violet */}
-      {canTransform && (
+      {canTransform && onTransform && (
         <button
           type="button"
           onClick={onTransform}

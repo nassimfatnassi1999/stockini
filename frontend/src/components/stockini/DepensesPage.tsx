@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownCircle, ArrowUpCircle, Check, X } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Check } from 'lucide-react';
+import { ModalWindow } from '@/components/shared/ModalWindow';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -356,112 +357,111 @@ export function DepensesPage() {
       )}
 
       {/* Modal paiement fournisseur */}
-      {payTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="text-base font-semibold text-text-primary">Payer — {payTarget.orderNumber}</h2>
-              <button type="button" aria-label="Fermer" onClick={() => setPayTarget(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"><X size={16} /></button>
+      <ModalWindow
+        title="Payer"
+        reference={payTarget?.orderNumber}
+        isOpen={!!payTarget}
+        onClose={() => setPayTarget(null)}
+        defaultWidth={480}
+        defaultHeight={560}
+      >
+        {payTarget && (
+          <div className="px-5 py-4 space-y-4">
+            <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-text-muted">Fournisseur</span><span className="font-medium">{payTarget.supplier?.name ?? '-'}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Document achat</span><span className="font-mono font-medium">{payTarget.orderNumber}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Total TTC</span><span className="font-mono font-medium">{money(payTarget.total)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Déjà payé</span><span className="font-mono font-medium text-emerald-600">{money(payTarget.paidAmount)}</span></div>
+              <div className="flex justify-between border-t border-border pt-2"><span className="font-semibold">Reste à payer</span><span className="font-mono font-bold text-red-600">{money(payTarget.remainingAmount)}</span></div>
             </div>
-            <div className="px-5 py-4 space-y-4">
-              <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-text-muted">Fournisseur</span><span className="font-medium">{payTarget.supplier?.name ?? '-'}</span></div>
-                <div className="flex justify-between"><span className="text-text-muted">Document achat</span><span className="font-mono font-medium">{payTarget.orderNumber}</span></div>
-                <div className="flex justify-between"><span className="text-text-muted">Total TTC</span><span className="font-mono font-medium">{money(payTarget.total)}</span></div>
-                <div className="flex justify-between"><span className="text-text-muted">Déjà payé</span><span className="font-mono font-medium text-emerald-600">{money(payTarget.paidAmount)}</span></div>
-                <div className="flex justify-between border-t border-border pt-2"><span className="font-semibold">Reste à payer</span><span className="font-mono font-bold text-red-600">{money(payTarget.remainingAmount)}</span></div>
+            <form onSubmit={(e) => { e.preventDefault(); if (!amountValid) return; payMutation.mutate(); }} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-amount">Montant à payer *</Label>
+                <Input id="pay-amount" type="number" min="0.001" max={remaining} step="0.001" value={payForm.amount} onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))} required className={payForm.amount && !amountValid ? 'border-red-400' : ''} />
+                {payForm.amount && !amountValid && <p className="text-xs text-red-600">{amountNum <= 0 ? 'Le montant doit être supérieur à 0' : `Le montant ne peut pas dépasser ${money(remaining)}`}</p>}
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); if (!amountValid) return; payMutation.mutate(); }} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="pay-amount">Montant à payer *</Label>
-                  <Input id="pay-amount" type="number" min="0.001" max={remaining} step="0.001" value={payForm.amount} onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))} required className={payForm.amount && !amountValid ? 'border-red-400' : ''} />
-                  {payForm.amount && !amountValid && <p className="text-xs text-red-600">{amountNum <= 0 ? 'Le montant doit être supérieur à 0' : `Le montant ne peut pas dépasser ${money(remaining)}`}</p>}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="pay-method">Mode de paiement *</Label>
-                  <select id="pay-method" value={payForm.method} onChange={(e) => setPayForm((f) => ({ ...f, method: e.target.value }))} className="app-select" required>
-                    {paymentMethodOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="pay-note">Note (optionnel)</Label>
-                  <Input id="pay-note" type="text" value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="Référence chèque, virement..." />
-                </div>
-                <div className="flex justify-end gap-2 border-t border-border pt-4">
-                  <Button type="button" variant="outline" onClick={() => setPayTarget(null)}>Annuler</Button>
-                  <Button type="submit" disabled={payMutation.isPending || !amountValid}><Check size={14} />{payMutation.isPending ? 'Enregistrement...' : 'Confirmer le paiement'}</Button>
-                </div>
-              </form>
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-method">Mode de paiement *</Label>
+                <select id="pay-method" value={payForm.method} onChange={(e) => setPayForm((f) => ({ ...f, method: e.target.value }))} className="app-select" required>
+                  {paymentMethodOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-note">Note (optionnel)</Label>
+                <Input id="pay-note" type="text" value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="Référence chèque, virement..." />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setPayTarget(null)}>Annuler</Button>
+                <Button type="submit" disabled={payMutation.isPending || !amountValid}><Check size={14} />{payMutation.isPending ? 'Enregistrement...' : 'Confirmer le paiement'}</Button>
+              </div>
+            </form>
           </div>
-        </div>
-      )}
+        )}
+      </ModalWindow>
 
       {/* Modal opération caisse */}
-      {caisseOp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <h2 className="text-base font-semibold text-text-primary">
-                {caisseOp === 'retrait' ? '🔴 Retirer de la caisse' : '🟢 Ajouter à la caisse'}
-              </h2>
-              <button type="button" aria-label="Fermer" onClick={() => setCaisseOp(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-muted"><X size={16} /></button>
+      <ModalWindow
+        title={caisseOp === 'retrait' ? 'Retirer de la caisse' : 'Ajouter à la caisse'}
+        isOpen={!!caisseOp}
+        onClose={() => setCaisseOp(null)}
+        defaultWidth={440}
+        defaultHeight={400}
+      >
+        {caisseOp && (
+          <div className="px-5 py-4 space-y-4">
+            <div className="rounded-lg bg-muted/50 p-3 text-sm flex justify-between">
+              <span className="text-text-muted">Solde actuel</span>
+              <span className={`font-mono font-bold ${solde >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{money(solde)}</span>
             </div>
-            <div className="px-5 py-4 space-y-4">
-              <div className="rounded-lg bg-muted/50 p-3 text-sm flex justify-between">
-                <span className="text-text-muted">Solde actuel</span>
-                <span className={`font-mono font-bold ${solde >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{money(solde)}</span>
-              </div>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (caisseOp === 'retrait') caisseRetraitMutation.mutate();
-                  else caisseDepotMutation.mutate();
-                }}
-                className="space-y-4"
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="caisse-montant">Montant *</Label>
-                  <div className="relative">
-                    <Input
-                      id="caisse-montant"
-                      type="number"
-                      min="0.001"
-                      step="0.001"
-                      placeholder="0,000"
-                      value={caisseForm.montant}
-                      onChange={(e) => setCaisseForm((f) => ({ ...f, montant: e.target.value }))}
-                      required
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="caisse-motif">Motif</Label>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (caisseOp === 'retrait') caisseRetraitMutation.mutate();
+                else caisseDepotMutation.mutate();
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="caisse-montant">Montant *</Label>
+                <div className="relative">
                   <Input
-                    id="caisse-motif"
-                    type="text"
-                    value={caisseForm.motif}
-                    onChange={(e) => setCaisseForm((f) => ({ ...f, motif: e.target.value }))}
-                    placeholder={caisseOp === 'retrait' ? 'Ex: Achats divers, frais de transport...' : 'Ex: Apport de fonds, recette...'}
+                    id="caisse-montant"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    placeholder="0,000"
+                    value={caisseForm.montant}
+                    onChange={(e) => setCaisseForm((f) => ({ ...f, montant: e.target.value }))}
+                    required
                   />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
                 </div>
-                <div className="flex justify-end gap-2 border-t border-border pt-4">
-                  <Button type="button" variant="outline" onClick={() => setCaisseOp(null)}>Annuler</Button>
-                  <Button
-                    type="submit"
-                    disabled={caisseRetraitMutation.isPending || caisseDepotMutation.isPending || !caisseForm.montant}
-                    className={caisseOp === 'retrait' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
-                  >
-                    <Check size={14} />
-                    {caisseOp === 'retrait' ? 'Confirmer le retrait' : 'Confirmer le dépôt'}
-                  </Button>
-                </div>
-              </form>
-            </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="caisse-motif">Motif</Label>
+                <Input
+                  id="caisse-motif"
+                  type="text"
+                  value={caisseForm.motif}
+                  onChange={(e) => setCaisseForm((f) => ({ ...f, motif: e.target.value }))}
+                  placeholder={caisseOp === 'retrait' ? 'Ex: Achats divers, frais de transport...' : 'Ex: Apport de fonds, recette...'}
+                />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setCaisseOp(null)}>Annuler</Button>
+                <Button
+                  type="submit"
+                  disabled={caisseRetraitMutation.isPending || caisseDepotMutation.isPending || !caisseForm.montant}
+                  className={caisseOp === 'retrait' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
+                >
+                  <Check size={14} />
+                  {caisseOp === 'retrait' ? 'Confirmer le retrait' : 'Confirmer le dépôt'}
+                </Button>
+              </div>
+            </form>
           </div>
-        </div>
-      )}
+        )}
+      </ModalWindow>
     </>
   );
 }
