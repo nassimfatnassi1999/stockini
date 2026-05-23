@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEmail,
   IsEnum,
   IsIn,
   IsInt,
@@ -86,6 +87,10 @@ export class CreateSaleDto {
   @IsOptional()
   @IsString()
   counterClientFullName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  counterClientEmail?: string;
 
   @IsOptional()
   @IsString()

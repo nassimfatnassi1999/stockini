@@ -51,7 +51,7 @@ const LAST_SALE_PRICE_TYPE_LIST = [
 
 // Transformations autorisées : source -> cibles possibles
 const ALLOWED_TRANSFORMS: Partial<Record<DocumentType, DocumentType[]>> = {
-  [DocumentType.DEVIS]: [DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
+  [DocumentType.DEVIS]: [DocumentType.BON_COMMANDE, DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
   [DocumentType.BON_COMMANDE]: [DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
   [DocumentType.BON_LIVRAISON]: [DocumentType.FACTURE],
 };
@@ -91,15 +91,39 @@ export class SalesService {
       );
     }
 
-    // ── Client comptoir validation ──────────────────────────────────────────────
-    const isComptoir = dto.clientType === 'COMPTOIR';
-    if (isComptoir) {
-      if (!dto.counterClientFirstName?.trim() || !dto.counterClientLastName?.trim()) {
-        throw new BadRequestException(
-          'Veuillez saisir le nom et le prénom du client comptoir.',
-        );
+    // ── Client comptoir: auto-création si email fourni ─────────────────────────
+    let resolvedCustomerId = dto.customerId;
+    let resolvedClientType = dto.clientType;
+
+    if (!resolvedCustomerId && dto.counterClientEmail?.trim()) {
+      const email = dto.counterClientEmail.trim().toLowerCase();
+      const existing = await this.prisma.customer.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' }, deletedAt: null },
+        select: { id: true },
+      });
+      if (existing) {
+        resolvedCustomerId = existing.id;
+      } else {
+        const fullName = dto.counterClientLastName?.trim() || dto.counterClientFullName?.trim() || 'Client comptoir';
+        const created = await this.prisma.$transaction(async (tx) => {
+          const ref = await this.references.generateForCustomer('INDIVIDUAL', tx);
+          return tx.customer.create({
+            data: {
+              reference: ref,
+              name: fullName,
+              email,
+              phone: dto.counterClientPhone?.trim() || undefined,
+              address: dto.counterClientAddress?.trim() || undefined,
+              type: 'INDIVIDUAL',
+            },
+          });
+        });
+        resolvedCustomerId = created.id;
       }
+      resolvedClientType = 'PERSISTENT';
     }
+
+    const isComptoir = resolvedClientType === 'COMPTOIR' || !resolvedCustomerId;
 
     const reserveStock = dto.reserveStock ?? false;
     const isDevis = documentType === DocumentType.DEVIS;
@@ -258,19 +282,20 @@ export class SalesService {
 
       const sellerId = user?.id;
       const counterClientFullName = isComptoir
-        ? dto.counterClientFirstName && dto.counterClientLastName
+        ? (dto.counterClientFirstName && dto.counterClientLastName)
           ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
-          : undefined
+          : (dto.counterClientLastName?.trim() || dto.counterClientFirstName?.trim() || undefined)
         : dto.counterClientFullName?.trim() || undefined;
 
       const sale = await tx.sale.create({
         data: {
           invoiceNumber,
-          customerId: dto.customerId,
-          clientType: dto.clientType ?? null,
+          customerId: resolvedCustomerId,
+          clientType: resolvedClientType ?? null,
           counterClientFirstName: isComptoir ? dto.counterClientFirstName?.trim() ?? null : null,
           counterClientLastName: isComptoir ? dto.counterClientLastName?.trim() ?? null : null,
           counterClientFullName: counterClientFullName ?? null,
+          counterClientEmail: dto.counterClientEmail?.trim().toLowerCase() ?? null,
           counterClientPhone: dto.counterClientPhone?.trim() ?? null,
           counterClientAddress: dto.counterClientAddress?.trim() ?? null,
           counterClientTaxId: dto.counterClientTaxId?.trim() ?? null,
@@ -325,7 +350,7 @@ export class SalesService {
             amount: paidAmount,
             cashImpactDone: true,
             saleId: sale.id,
-            customerId: dto.customerId,
+            customerId: resolvedCustomerId,
           },
         });
 

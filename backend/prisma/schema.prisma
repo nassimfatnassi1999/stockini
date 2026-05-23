@@ -324,6 +324,7 @@ model Sale {
   counterClientFullName   String?               @map("counter_client_full_name")
   counterClientPhone      String?               @map("counter_client_phone")
   counterClientAddress    String?               @map("counter_client_address")
+  counterClientEmail      String?               @map("counter_client_email")
   counterClientTaxId      String?               @map("counter_client_tax_id")
   counterClientNote       String?               @map("counter_client_note")
   createdAt               DateTime              @default(now())

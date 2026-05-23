@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
@@ -8,13 +8,16 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  ClipboardList,
   Download,
   Eye,
   FileText,
   Loader2,
   Mail,
+  Receipt,
   RotateCcw,
   Trash2,
+  Truck,
   UserCircle,
   X,
 } from 'lucide-react';
@@ -84,14 +87,6 @@ const STATUS_COLORS: Record<string, string> = {
   RETURNED: 'border-orange-200 bg-orange-50 text-orange-700',
 };
 
-type TabType = 'MAIN' | 'AVOIR_TAB';
-
-const DOC_TYPES: Array<{ id: SalesDocumentType; label: string; saveLabel: string }> = [
-  { id: 'DEVIS', label: 'Devis', saveLabel: 'Enregistrer le devis' },
-  { id: 'BON_COMMANDE', label: 'Bon de commande', saveLabel: 'Enregistrer le bon de commande' },
-  { id: 'BON_LIVRAISON', label: 'Bon de livraison', saveLabel: 'Enregistrer le bon de livraison' },
-  { id: 'FACTURE', label: 'Facture', saveLabel: 'Enregistrer la facture' },
-];
 
 const SALES_DOCUMENT_TYPES = new Set<SalesDocumentType>([
   'DEVIS',
@@ -125,6 +120,7 @@ const TRANSFORMABLE_TYPES: SalesDocumentType[] = ['DEVIS', 'BON_COMMANDE', 'BON_
 // Transformations autorisées par type source
 const ALLOWED_TRANSFORMS: Record<string, Array<{ value: SalesDocumentType; label: string }>> = {
   DEVIS: [
+    { value: 'BON_COMMANDE', label: 'Bon de commande' },
     { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
     { value: 'FACTURE', label: 'Facture' },
   ],
@@ -150,6 +146,74 @@ const DOC_TYPE_SHORT: Record<string, string> = {
   FACTURE: 'Fac',
   AVOIR: 'Avoir',
 };
+
+const DOC_TAB_CONFIG: Array<{
+  id: SalesDocumentType;
+  label: string;
+  saveLabel: string;
+  affectsStock: boolean;
+  acceptsPayment: boolean;
+  activeClass: string;
+  hoverClass: string;
+  badgeClass: string;
+  Icon: React.ElementType;
+}> = [
+  {
+    id: 'DEVIS',
+    label: 'Devis',
+    saveLabel: 'Enregistrer le devis',
+    affectsStock: false,
+    acceptsPayment: false,
+    activeClass: 'bg-[#FF6B35] text-white shadow-sm',
+    hoverClass: 'text-text-secondary hover:bg-orange-50 hover:text-orange-700',
+    badgeClass: 'bg-[#FF6B35]',
+    Icon: FileText,
+  },
+  {
+    id: 'BON_COMMANDE',
+    label: 'Bon de commande',
+    saveLabel: 'Enregistrer le bon de commande',
+    affectsStock: false,
+    acceptsPayment: false,
+    activeClass: 'bg-[#4A90D9] text-white shadow-sm',
+    hoverClass: 'text-text-secondary hover:bg-blue-50 hover:text-blue-700',
+    badgeClass: 'bg-[#4A90D9]',
+    Icon: ClipboardList,
+  },
+  {
+    id: 'BON_LIVRAISON',
+    label: 'Bon de livraison',
+    saveLabel: 'Enregistrer le bon de livraison',
+    affectsStock: true,
+    acceptsPayment: true,
+    activeClass: 'bg-[#27AE60] text-white shadow-sm',
+    hoverClass: 'text-text-secondary hover:bg-green-50 hover:text-green-700',
+    badgeClass: 'bg-[#27AE60]',
+    Icon: Truck,
+  },
+  {
+    id: 'FACTURE',
+    label: 'Facture',
+    saveLabel: 'Enregistrer la facture',
+    affectsStock: true,
+    acceptsPayment: true,
+    activeClass: 'bg-[#E74C3C] text-white shadow-sm',
+    hoverClass: 'text-text-secondary hover:bg-red-50 hover:text-red-700',
+    badgeClass: 'bg-[#E74C3C]',
+    Icon: Receipt,
+  },
+  {
+    id: 'AVOIR',
+    label: 'Avoir',
+    saveLabel: '',
+    affectsStock: false,
+    acceptsPayment: false,
+    activeClass: 'bg-[#95A5A6] text-white shadow-sm',
+    hoverClass: 'text-text-secondary hover:bg-gray-100 hover:text-gray-700',
+    badgeClass: 'bg-[#95A5A6]',
+    Icon: RotateCcw,
+  },
+];
 
 // ─── Transform dialog ────────────────────────────────────────────────────────
 
@@ -260,36 +324,31 @@ function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: Transfo
 // ─── Validate document modal ─────────────────────────────────────────────────
 
 interface ValidateDocModalProps {
+  docType: SalesDocumentType;
   isPending: boolean;
   paymentMethods: DropdownOption[];
   totals: DocumentTotals;
-  onConfirm: (type: SalesDocumentType, paidAmount: number, paymentMethod: string) => void;
+  onConfirm: (paidAmount: number, paymentMethod: string) => void;
   onCancel: () => void;
 }
 
-function ValidateDocumentModal({ isPending, paymentMethods, totals, onConfirm, onCancel }: ValidateDocModalProps) {
-  const [selectedType, setSelectedType] = useState<SalesDocumentType>('FACTURE');
+function ValidateDocumentModal({ docType, isPending, paymentMethods, totals, onConfirm, onCancel }: ValidateDocModalProps) {
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [pmtError, setPmtError] = useState('');
 
-  const paymentAllowed = selectedType === 'FACTURE' || selectedType === 'BON_LIVRAISON';
+  const paymentAllowed = docType === 'FACTURE' || docType === 'BON_LIVRAISON';
   const paidAmountNum = Number(paidAmount) || 0;
+
+  const tabCfg = DOC_TAB_CONFIG.find((t) => t.id === docType);
 
   const handleConfirm = () => {
     if (paymentAllowed && paidAmountNum > 0 && !paymentMethod) {
       setPmtError('Veuillez sélectionner une méthode de paiement');
       return;
     }
-    onConfirm(selectedType, paymentAllowed ? paidAmountNum : 0, paymentAllowed && paidAmountNum > 0 ? paymentMethod : '');
+    onConfirm(paymentAllowed ? paidAmountNum : 0, paymentAllowed && paidAmountNum > 0 ? paymentMethod : '');
   };
-
-  const docTypeOptions = [
-    { value: 'DEVIS' as SalesDocumentType, label: 'Devis', desc: 'Document provisoire, aucun impact stock' },
-    { value: 'BON_COMMANDE' as SalesDocumentType, label: 'Bon de commande', desc: 'Commande client confirmée' },
-    { value: 'BON_LIVRAISON' as SalesDocumentType, label: 'Bon de livraison', desc: 'Livraison — impacte le stock' },
-    { value: 'FACTURE' as SalesDocumentType, label: 'Facture', desc: 'Document final — impacte le stock' },
-  ];
 
   const footer = (
     <div className="flex gap-2">
@@ -297,59 +356,36 @@ function ValidateDocumentModal({ isPending, paymentMethods, totals, onConfirm, o
         Annuler
       </Button>
       <Button size="sm" className="flex-1" onClick={handleConfirm} disabled={isPending}>
-        {isPending ? 'Enregistrement…' : 'Valider'}
+        {isPending ? 'Enregistrement…' : 'Confirmer'}
       </Button>
     </div>
   );
 
   return (
     <SlideOver
-      title="Valider la vente"
+      title={tabCfg?.saveLabel ?? 'Valider le document'}
       open={true}
       onClose={onCancel}
-      width={480}
+      width={460}
       footer={footer}
     >
       <div className="space-y-4">
-        {/* Total recap */}
-        <div className="flex items-center justify-between rounded-lg border border-border bg-slate-50 px-4 py-3">
-          <span className="text-xs font-medium text-text-muted">Total TTC</span>
+        {/* Document type badge */}
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-slate-50 px-4 py-3">
+          <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-medium ${DOC_TYPE_BADGE[docType] ?? ''}`}>
+            {DOC_TYPE_SHORT[docType] ?? docType}
+          </span>
+          <div className="flex-1">
+            <p className="text-xs font-medium text-text-primary">{tabCfg?.label}</p>
+            <p className="text-[11px] text-text-muted">
+              {tabCfg?.affectsStock ? 'Décrémente le stock immédiatement' : 'Aucun impact sur le stock'}
+            </p>
+          </div>
           <span className="text-lg font-bold tabular-nums text-text-primary">{money(totals.totalTtc)} DT</span>
         </div>
 
-        {/* Type selection */}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Type de document</p>
-          <div className="grid grid-cols-2 gap-2">
-            {docTypeOptions.map((dt) => (
-              <label
-                key={dt.value}
-                className={`flex cursor-pointer flex-col gap-1 rounded-lg border p-3 transition-colors ${
-                  selectedType === dt.value
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/30 hover:bg-surface'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="validateDocType"
-                  value={dt.value}
-                  checked={selectedType === dt.value}
-                  onChange={() => { setSelectedType(dt.value); setPmtError(''); setPaidAmount(''); setPaymentMethod(''); }}
-                  className="sr-only"
-                />
-                <span className={`inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${DOC_TYPE_BADGE[dt.value] ?? ''}`}>
-                  {DOC_TYPE_SHORT[dt.value]}
-                </span>
-                <span className="text-xs font-medium text-text-primary">{dt.label}</span>
-                <span className="text-[10px] leading-snug text-text-muted">{dt.desc}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
         {/* Payment section — only for BL / Facture */}
-        {paymentAllowed && (
+        {paymentAllowed ? (
           <div className="space-y-3 rounded-lg border border-border bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Paiement (optionnel)</p>
             <div className="space-y-1.5">
@@ -383,6 +419,10 @@ function ValidateDocumentModal({ isPending, paymentMethods, totals, onConfirm, o
               </div>
             )}
           </div>
+        ) : (
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+            Paiement disponible uniquement pour <strong>Bon de livraison</strong> et <strong>Facture</strong>.
+          </div>
         )}
       </div>
     </SlideOver>
@@ -393,8 +433,8 @@ interface VenteDraft {
   lines: RegisterLine[];
   customerId: string;
   clientInfoName: string;
-  counterClientFirstName: string;
-  counterClientLastName: string;
+  counterClientName: string;
+  counterClientEmail: string;
   counterClientPhone: string;
   counterClientAddress: string;
   counterClientTaxId: string;
@@ -409,8 +449,8 @@ export default function VentesPage() {
   const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
   const [customerId, setCustomerId] = useState('');
   const [clientInfoName, setClientInfoName] = useState('');
-  const [counterClientFirstName, setCounterClientFirstName] = useState('');
-  const [counterClientLastName, setCounterClientLastName] = useState('');
+  const [counterClientName, setCounterClientName] = useState('');
+  const [counterClientEmail, setCounterClientEmail] = useState('');
   const [counterClientPhone, setCounterClientPhone] = useState('');
   const [counterClientAddress, setCounterClientAddress] = useState('');
   const [counterClientTaxId, setCounterClientTaxId] = useState('');
@@ -445,7 +485,7 @@ export default function VentesPage() {
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
   const [draftChecked, setDraftChecked] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<TabType>('MAIN');
+  const [activeTab, setActiveTab] = useState<SalesDocumentType>('DEVIS');
 
   // Multi-selection for invoice history
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
@@ -483,8 +523,6 @@ export default function VentesPage() {
     clientId: customerId,
     customerId,
     clientType: customerId ? selectedClientType : 'COMPTOIR',
-    counterClientFirstName,
-    counterClientLastName,
   };
   const isComptoir =
     form.clientType === 'COMPTOIR' ||
@@ -495,11 +533,8 @@ export default function VentesPage() {
       .includes('comptoir') ||
     !customerId;
 
-  const isCounterInfoComplete = isComptoir &&
-    Boolean(counterClientFirstName.trim()) &&
-    Boolean(counterClientLastName.trim()) &&
-    Boolean(counterClientPhone.trim()) &&
-    Boolean(counterClientAddress.trim());
+  // "Complétées" = au moins le nom rempli
+  const isCounterInfoComplete = isComptoir && Boolean(counterClientName.trim());
 
   useEffect(() => {
     if (isComptoir && customerId) {
@@ -515,8 +550,8 @@ export default function VentesPage() {
       lines,
       customerId,
       clientInfoName,
-      counterClientFirstName,
-      counterClientLastName,
+      counterClientName,
+      counterClientEmail,
       counterClientPhone,
       counterClientAddress,
       counterClientTaxId,
@@ -527,8 +562,8 @@ export default function VentesPage() {
       lines,
       customerId,
       clientInfoName,
-      counterClientFirstName,
-      counterClientLastName,
+      counterClientName,
+      counterClientEmail,
       counterClientPhone,
       counterClientAddress,
       counterClientTaxId,
@@ -575,8 +610,8 @@ export default function VentesPage() {
     );
     setCustomerId(draft.customerId ?? '');
     setClientInfoName(draft.clientInfoName ?? '');
-    setCounterClientFirstName(draft.counterClientFirstName ?? '');
-    setCounterClientLastName(draft.counterClientLastName ?? '');
+    setCounterClientName(draft.counterClientName ?? '');
+    setCounterClientEmail(draft.counterClientEmail ?? '');
     setCounterClientPhone(draft.counterClientPhone ?? '');
     setCounterClientAddress(draft.counterClientAddress ?? '');
     setCounterClientTaxId(draft.counterClientTaxId ?? '');
@@ -643,8 +678,8 @@ export default function VentesPage() {
     setLines([createEmptyLine()]);
     setCustomerId('');
     setClientInfoName('');
-    setCounterClientFirstName('');
-    setCounterClientLastName('');
+    setCounterClientName('');
+    setCounterClientEmail('');
     setCounterClientPhone('');
     setCounterClientAddress('');
     setCounterClientTaxId('');
@@ -667,20 +702,19 @@ export default function VentesPage() {
       nextCustomerId.toLowerCase().includes('comptoir');
 
     if (!nextIsComptoir && nextCustomerId) {
-      // Pre-fill snapshot from persistent customer data
       const clientWithTax = nextClient as (typeof nextClient & { taxNumber?: string | null }) | undefined;
       setClientInfoName(nextClient?.name ?? '');
       setCounterClientPhone(nextClient?.phone ?? '');
       setCounterClientAddress(nextClient?.address ?? '');
       setCounterClientTaxId(clientWithTax?.taxNumber ?? '');
       setCounterClientNote('');
-      setCounterClientFirstName('');
-      setCounterClientLastName('');
+      setCounterClientName('');
+      setCounterClientEmail('');
       setCounterClientErrors({});
     } else {
       setClientInfoName('');
-      setCounterClientFirstName('');
-      setCounterClientLastName('');
+      setCounterClientName('');
+      setCounterClientEmail('');
       setCounterClientPhone('');
       setCounterClientAddress('');
       setCounterClientTaxId('');
@@ -690,19 +724,54 @@ export default function VentesPage() {
   };
 
   const handleValidate = () => {
-    if (isComptoir) {
-      const errors: Record<string, string> = {};
-      if (!counterClientFirstName.trim()) errors.counterClientFirstName = 'Prénom obligatoire';
-      if (!counterClientLastName.trim()) errors.counterClientLastName = 'Nom obligatoire';
-      if (!counterClientPhone.trim()) errors.counterClientPhone = 'Téléphone obligatoire';
-      if (!counterClientAddress.trim()) errors.counterClientAddress = 'Adresse obligatoire';
-      if (Object.keys(errors).length > 0) {
-        setCounterClientErrors(errors);
+    const missingFields: string[] = [];
+
+    // Vérification client
+    if (!customerId && !counterClientName.trim()) {
+      missingFields.push('Client sélectionné ou Nom client (pour vente comptoir)');
+    }
+
+    // Vérification lignes produit
+    if (filledLines.length === 0) {
+      missingFields.push('Minimum 1 ligne produit avec référence, quantité et prix > 0');
+    } else {
+      const hasZeroPrice = filledLines.some((l) => l.puHt <= 0);
+      if (hasZeroPrice) missingFields.push('Prix unitaire doit être > 0 pour toutes les lignes');
+    }
+
+    // Vérification date
+    if (!saleDate) {
+      missingFields.push('Date du document');
+    }
+
+    if (missingFields.length > 0) {
+      toast.error('Champs obligatoires manquants :\n• ' + missingFields.join('\n• '));
+      return;
+    }
+
+    // Validation format email si saisi (comptoir)
+    if (isComptoir && counterClientEmail.trim()) {
+      const emailReg = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailReg.test(counterClientEmail.trim())) {
+        setCounterClientErrors({ counterClientEmail: 'Format email invalide' });
         setShowCounterPanel(true);
+        toast.error('Format email invalide');
         return;
       }
-      setCounterClientErrors({});
     }
+
+    // Validation format téléphone si saisi (10 chiffres)
+    if (isComptoir && counterClientPhone.trim()) {
+      const phoneDigits = counterClientPhone.trim().replace(/\s/g, '');
+      if (!/^\+?[0-9]{8,15}$/.test(phoneDigits)) {
+        setCounterClientErrors({ counterClientPhone: 'Téléphone invalide (8–15 chiffres)' });
+        setShowCounterPanel(true);
+        toast.error('Numéro de téléphone invalide');
+        return;
+      }
+    }
+
+    setCounterClientErrors({});
     setShowValidateModal(true);
   };
 
@@ -744,8 +813,8 @@ export default function VentesPage() {
       if (submittedPaidAmount > 0 && !method) {
         throw new Error('Veuillez sélectionner une méthode de paiement.');
       }
-      const trimmedFirstName = counterClientFirstName.trim();
-      const trimmedLastName = counterClientLastName.trim();
+      const trimmedName = counterClientName.trim();
+      const trimmedEmail = counterClientEmail.trim();
       const trimmedPhone = counterClientPhone.trim();
       const trimmedAddress = counterClientAddress.trim();
 
@@ -754,11 +823,12 @@ export default function VentesPage() {
           documentType: docType,
           customerId: customerId || undefined,
           clientType: isComptoir ? 'COMPTOIR' : 'PERSISTENT',
-          counterClientFirstName: isComptoir ? trimmedFirstName : null,
-          counterClientLastName: isComptoir ? trimmedLastName : null,
+          counterClientFirstName: null,
+          counterClientLastName: isComptoir ? trimmedName || null : null,
           counterClientFullName: isComptoir
-            ? `${trimmedFirstName} ${trimmedLastName}`.trim() || null
+            ? trimmedName || null
             : clientInfoName.trim() || null,
+          counterClientEmail: trimmedEmail || null,
           counterClientPhone: trimmedPhone || null,
           counterClientAddress: trimmedAddress || null,
           counterClientTaxId: counterClientTaxId.trim() || null,
@@ -783,7 +853,9 @@ export default function VentesPage() {
         queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
         queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
       }
-      toast.success('Vente enregistrée avec succès');
+      const typeLabel = DOC_TYPE_SHORT[(newSale as { documentType: string }).documentType] ?? 'Document';
+      const num = (newSale as { invoiceNumber: string }).invoiceNumber ?? '';
+      toast.success(`Document ${typeLabel} N°${num} enregistré`);
       setShowValidateModal(false);
       clearDraft();
       resetForm();
@@ -1035,41 +1107,30 @@ export default function VentesPage() {
         </p>
       </div>
 
-      {/* Tab selector */}
-      <div className="rounded-lg border border-border/70 bg-white p-1 flex flex-wrap gap-1">
-        <button
-          type="button"
-          onClick={() => setActiveTab('MAIN')}
-          className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-            activeTab === 'MAIN'
-              ? 'bg-primary text-white shadow-sm'
-              : 'text-text-secondary hover:bg-muted hover:text-text-primary'
-          }`}
-        >
-          <FileText size={13} />
-          Nouvelle vente
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('AVOIR_TAB')}
-          className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-            activeTab === 'AVOIR_TAB'
-              ? 'bg-red-600 text-white shadow-sm'
-              : 'text-text-secondary hover:bg-red-50 hover:text-red-700'
-          }`}
-        >
-          <FileText size={13} />
-          Avoir
-        </button>
+      {/* Tab selector — 5 document types */}
+      <div className="rounded-lg border border-border/70 bg-white p-1.5 flex flex-wrap gap-1.5 overflow-x-auto">
+        {DOC_TAB_CONFIG.map(({ id, label, Icon, activeClass, hoverClass }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setActiveTab(id)}
+            className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
+              activeTab === id ? activeClass : hoverClass
+            }`}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Avoir page — rendered when Avoir tab is active */}
-      {activeTab === 'AVOIR_TAB' && (
+      {activeTab === 'AVOIR' && (
         <AvoirPage />
       )}
 
-      {/* All content below only shown on the main "Nouvelle vente" tab */}
-      {activeTab === 'MAIN' && (
+      {/* All content below only shown on non-Avoir tabs */}
+      {activeTab !== 'AVOIR' && (
       <>
 
       {/* Document header: client + date */}
@@ -1109,15 +1170,24 @@ export default function VentesPage() {
                 isComptoir
                   ? isCounterInfoComplete
                     ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                   : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
               }`}
             >
               <span className="flex items-center gap-2">
                 <UserCircle size={15} />
                 {isComptoir
-                  ? isCounterInfoComplete ? 'Infos client complètes ✓' : 'Compléter infos client *'
+                  ? 'Compléter infos client (optionnel)'
                   : 'Informations client'}
+                {isComptoir && (
+                  <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    isCounterInfoComplete
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-slate-200 text-slate-500'
+                  }`}>
+                    {isCounterInfoComplete ? 'Infos complétées' : 'Infos minimales'}
+                  </span>
+                )}
               </span>
               <ChevronDown
                 size={14}
@@ -1129,45 +1199,53 @@ export default function VentesPage() {
               <div className="rounded-lg border border-border bg-slate-50 p-4 space-y-3">
                 {isComptoir ? (
                   <>
+                    <p className="text-xs text-text-muted">
+                      Informations optionnelles — l'enregistrement est possible sans les remplir.
+                    </p>
+                    {/* Nom client + Email (affichés en priorité) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label htmlFor="ccf-firstName" className="text-xs">Prénom *</Label>
+                        <Label htmlFor="ccf-name" className="text-xs">Nom client *</Label>
                         <Input
-                          id="ccf-firstName"
-                          value={counterClientFirstName}
+                          id="ccf-name"
+                          value={counterClientName}
                           onChange={(e) => {
-                            setCounterClientFirstName(e.target.value);
-                            if (counterClientErrors.counterClientFirstName) {
-                              setCounterClientErrors((p) => ({ ...p, counterClientFirstName: '' }));
+                            setCounterClientName(e.target.value);
+                            if (counterClientErrors.counterClientName) {
+                              setCounterClientErrors((p) => ({ ...p, counterClientName: '' }));
                             }
                           }}
-                          placeholder="Prénom"
-                          className={`h-8 text-sm ${counterClientErrors.counterClientFirstName ? 'border-red-400' : ''}`}
+                          placeholder="Nom complet"
+                          className={`h-8 text-sm ${counterClientErrors.counterClientName ? 'border-red-400' : ''}`}
                         />
-                        {counterClientErrors.counterClientFirstName && (
-                          <p className="text-xs text-red-500">{counterClientErrors.counterClientFirstName}</p>
+                        {counterClientErrors.counterClientName && (
+                          <p className="text-xs text-red-500">{counterClientErrors.counterClientName}</p>
                         )}
                       </div>
                       <div className="space-y-1">
-                        <Label htmlFor="ccf-lastName" className="text-xs">Nom *</Label>
+                        <Label htmlFor="ccf-email" className="text-xs">Email</Label>
                         <Input
-                          id="ccf-lastName"
-                          value={counterClientLastName}
+                          id="ccf-email"
+                          type="email"
+                          value={counterClientEmail}
                           onChange={(e) => {
-                            setCounterClientLastName(e.target.value);
-                            if (counterClientErrors.counterClientLastName) {
-                              setCounterClientErrors((p) => ({ ...p, counterClientLastName: '' }));
+                            setCounterClientEmail(e.target.value);
+                            if (counterClientErrors.counterClientEmail) {
+                              setCounterClientErrors((p) => ({ ...p, counterClientEmail: '' }));
                             }
                           }}
-                          placeholder="Nom"
-                          className={`h-8 text-sm ${counterClientErrors.counterClientLastName ? 'border-red-400' : ''}`}
+                          placeholder="client@email.com"
+                          className={`h-8 text-sm ${counterClientErrors.counterClientEmail ? 'border-red-400' : ''}`}
                         />
-                        {counterClientErrors.counterClientLastName && (
-                          <p className="text-xs text-red-500">{counterClientErrors.counterClientLastName}</p>
+                        {counterClientErrors.counterClientEmail && (
+                          <p className="text-xs text-red-500">{counterClientErrors.counterClientEmail}</p>
                         )}
                       </div>
+                    </div>
+                    {/* Champs optionnels */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label htmlFor="ccf-phone" className="text-xs">Téléphone *</Label>
+                        <Label htmlFor="ccf-phone" className="text-xs">Téléphone</Label>
                         <Input
                           id="ccf-phone"
                           value={counterClientPhone}
@@ -1196,22 +1274,14 @@ export default function VentesPage() {
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="ccf-address" className="text-xs">Adresse *</Label>
+                      <Label htmlFor="ccf-address" className="text-xs">Adresse</Label>
                       <Input
                         id="ccf-address"
                         value={counterClientAddress}
-                        onChange={(e) => {
-                          setCounterClientAddress(e.target.value);
-                          if (counterClientErrors.counterClientAddress) {
-                            setCounterClientErrors((p) => ({ ...p, counterClientAddress: '' }));
-                          }
-                        }}
+                        onChange={(e) => setCounterClientAddress(e.target.value)}
                         placeholder="Adresse complète"
-                        className={`h-8 text-sm ${counterClientErrors.counterClientAddress ? 'border-red-400' : ''}`}
+                        className="h-8 text-sm"
                       />
-                      {counterClientErrors.counterClientAddress && (
-                        <p className="text-xs text-red-500">{counterClientErrors.counterClientAddress}</p>
-                      )}
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor="ccf-note" className="text-xs">Note (optionnel)</Label>
@@ -1317,6 +1387,16 @@ export default function VentesPage() {
         </div>
       )}
 
+      {/* Payment info banner — shown for doc types that don't accept payment */}
+      {(() => {
+        const cfg = DOC_TAB_CONFIG.find((t) => t.id === activeTab);
+        return cfg && !cfg.acceptsPayment ? (
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
+            Paiement disponible uniquement pour <strong>Bon de livraison</strong> et <strong>Facture</strong>.
+          </div>
+        ) : null;
+      })()}
+
       {/* Save action */}
       <div className="rounded-lg border border-border/70 bg-white p-4">
         <div className="flex gap-2 justify-end">
@@ -1330,7 +1410,7 @@ export default function VentesPage() {
               onClick={handleValidate}
               disabled={!canSave || createMutation.isPending}
             >
-              Valider
+              {DOC_TAB_CONFIG.find((t) => t.id === activeTab)?.saveLabel ?? 'Valider'}
             </Button>
           )}
         </div>
@@ -1735,13 +1815,14 @@ export default function VentesPage() {
         />
       )}
 
-      {/* Validate document modal — type selection + payment */}
+      {/* Validate document modal — confirms the active tab type + optional payment */}
       {showValidateModal && (
         <ValidateDocumentModal
+          docType={activeTab}
           isPending={createMutation.isPending}
           paymentMethods={paymentMethodsQuery.data ?? []}
           totals={totals}
-          onConfirm={(docType, paid, method) => createMutation.mutate({ docType, paid, method })}
+          onConfirm={(paid, method) => createMutation.mutate({ docType: activeTab, paid, method })}
           onCancel={() => setShowValidateModal(false)}
         />
       )}

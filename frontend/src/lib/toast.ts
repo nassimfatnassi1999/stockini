@@ -10,29 +10,50 @@ export interface ToastItem {
   type: ToastType;
   message: string;
   action?: ToastAction;
+  duration: number;
+  createdAt: number;
 }
+
+const DURATIONS: Record<ToastType, number> = {
+  success: 4000,
+  error: 6000,
+  warning: 5000,
+  info: 3000,
+};
+
+const MAX_TOASTS = 3;
 
 type Listener = (toasts: ToastItem[]) => void;
 
 let toasts: ToastItem[] = [];
 const listeners: Listener[] = [];
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function notify() {
   listeners.forEach((l) => l([...toasts]));
 }
 
+export function remove(id: string) {
+  timers.get(id) && clearTimeout(timers.get(id)!);
+  timers.delete(id);
+  toasts = toasts.filter((t) => t.id !== id);
+  notify();
+}
+
 function add(type: ToastType, message: string, action?: ToastAction) {
   if (toasts.some((t) => t.type === type && t.message === message)) return;
 
-  const id = `${Date.now()}-${Math.random()}`;
-  toasts = [...toasts, { id, type, message, action }];
-  notify();
-  setTimeout(() => remove(id), 6000);
-}
+  // Drop oldest if already at max
+  if (toasts.length >= MAX_TOASTS) {
+    remove(toasts[0].id);
+  }
 
-function remove(id: string) {
-  toasts = toasts.filter((t) => t.id !== id);
+  const duration = DURATIONS[type];
+  const id = `${Date.now()}-${Math.random()}`;
+  toasts = [...toasts, { id, type, message, action, duration, createdAt: Date.now() }];
   notify();
+  const timer = setTimeout(() => remove(id), duration);
+  timers.set(id, timer);
 }
 
 export const toast = {
