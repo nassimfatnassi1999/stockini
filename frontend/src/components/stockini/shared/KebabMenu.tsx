@@ -1,16 +1,16 @@
 'use client';
 
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { MoreVertical } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 export interface KebabMenuItem {
-  label: string;
-  icon: React.ReactNode;
-  onClick: () => void;
+  label?: string;
+  icon?: React.ReactNode;
+  onClick?: () => void;
   disabled?: boolean;
   variant?: 'default' | 'destructive';
   hidden?: boolean;
+  divider?: boolean;
 }
 
 interface KebabMenuProps {
@@ -19,119 +19,74 @@ interface KebabMenuProps {
 }
 
 export function KebabMenu({ items, triggerClassName }: KebabMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
   const visibleItems = items.filter((i) => !i.hidden);
-
-  const openMenu = () => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    const ITEM_HEIGHT = 36;
-    const PADDING = 8;
-    const MENU_HEIGHT = visibleItems.length * ITEM_HEIGHT + PADDING * 2;
-    const MENU_WIDTH = 190;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const top = spaceBelow < MENU_HEIGHT ? rect.top - MENU_HEIGHT - 4 : rect.bottom + 4;
-    const left = Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8);
-    setPos({ top, left: Math.max(8, left) });
-    setOpen(true);
-  };
-
-  const close = useCallback(() => setOpen(false), []);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleMouse = (e: MouseEvent) => {
-      if (
-        menuRef.current && !menuRef.current.contains(e.target as Node) &&
-        triggerRef.current && !triggerRef.current.contains(e.target as Node)
-      ) close();
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    document.addEventListener('mousedown', handleMouse);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handleMouse);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [open, close]);
-
-  useEffect(() => {
-    if (!open || !menuRef.current) return;
-    const first = menuRef.current.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])');
-    first?.focus();
-  }, [open]);
-
-  const handleMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!menuRef.current) return;
-    const menuItems = Array.from(
-      menuRef.current.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])'),
-    );
-    const focused = document.activeElement as HTMLButtonElement;
-    const index = menuItems.indexOf(focused);
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      menuItems[(index + 1) % menuItems.length]?.focus();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      menuItems[(index - 1 + menuItems.length) % menuItems.length]?.focus();
-    } else if (e.key === 'Tab') {
-      close();
-    }
-  };
-
   if (visibleItems.length === 0) return null;
 
   return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label="Actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={openMenu}
-        className={triggerClassName ?? 'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'}
-      >
-        <MoreVertical size={15} />
-      </button>
-
-      {open && typeof window !== 'undefined' && createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
           aria-label="Actions"
-          onKeyDown={handleMenuKeyDown}
-          style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: 190, zIndex: 9999 }}
-          className="rounded-lg border border-border bg-white py-1 shadow-lg"
+          className={
+            triggerClassName ??
+            'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 data-[state=open]:bg-muted data-[state=open]:text-text-primary'
+          }
         >
-          {visibleItems.map((item, i) => (
-            <button
-              key={i}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              onClick={() => { item.onClick(); close(); }}
-              className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 ${
-                item.variant === 'destructive'
-                  ? 'text-red-600 hover:bg-red-50 hover:text-red-700 focus:bg-red-50'
-                  : 'text-text-primary hover:bg-muted/60 focus:bg-muted/60'
-              }`}
-            >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4">
-                {item.icon}
-              </span>
-              {item.label}
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </>
+          <MoreVertical size={15} />
+        </button>
+      </DropdownMenu.Trigger>
+
+      {/* Portal: renders in document.body → escapes overflow:hidden, z-index stacking, scroll containers */}
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          side="bottom"
+          align="end"
+          sideOffset={4}
+          collisionPadding={8}
+          className={[
+            // Layout
+            'min-w-[220px] rounded-lg border border-border bg-white py-1 shadow-lg',
+            // Radix animation hooks
+            'origin-[var(--radix-dropdown-menu-content-transform-origin)]',
+            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
+            // Side-aware slide
+            'data-[side=bottom]:slide-in-from-top-2',
+            'data-[side=top]:slide-in-from-bottom-2',
+            // z-index safe (above modals and slideovers)
+            'z-[9999]',
+          ].join(' ')}
+        >
+          {visibleItems.map((item, i) =>
+            item.divider ? (
+              <DropdownMenu.Separator
+                key={`sep-${i}`}
+                className="mx-2 my-1 h-px bg-slate-100"
+              />
+            ) : (
+              <DropdownMenu.Item
+                key={i}
+                disabled={item.disabled}
+                onSelect={item.onClick}
+                className={[
+                  'flex w-full cursor-default select-none items-center gap-2.5 px-4 py-2 text-sm outline-none',
+                  'transition-colors',
+                  'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40',
+                  item.variant === 'destructive'
+                    ? 'text-red-600 data-[highlighted]:bg-red-50 data-[highlighted]:text-red-700'
+                    : 'text-text-primary data-[highlighted]:bg-muted/60',
+                ].join(' ')}
+              >
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4">
+                  {item.icon}
+                </span>
+                {item.label}
+              </DropdownMenu.Item>
+            ),
+          )}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }

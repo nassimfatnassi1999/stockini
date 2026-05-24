@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
@@ -117,19 +118,25 @@ const PDF_ACTIONS = GENERATABLE_DOC_TYPES;
 // Types de documents transformables (source)
 const TRANSFORMABLE_TYPES: SalesDocumentType[] = ['DEVIS', 'BON_COMMANDE', 'BON_LIVRAISON'];
 
-// Transformations autorisées par type source
-const ALLOWED_TRANSFORMS: Record<string, Array<{ value: SalesDocumentType; label: string }>> = {
-  DEVIS: [
-    { value: 'BON_COMMANDE', label: 'Bon de commande' },
-    { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
-    { value: 'FACTURE', label: 'Facture' },
-  ],
-  BON_COMMANDE: [
-    { value: 'BON_LIVRAISON', label: 'Bon de livraison' },
-    { value: 'FACTURE', label: 'Facture' },
-  ],
-  BON_LIVRAISON: [{ value: 'FACTURE', label: 'Facture' }],
+// Flux strict : seul le step suivant est autorisé (pas de saut d'étape, pas de retour arrière)
+const NEXT_TRANSFORM: Record<string, SalesDocumentType> = {
+  DEVIS: 'BON_COMMANDE',
+  BON_COMMANDE: 'BON_LIVRAISON',
+  BON_LIVRAISON: 'FACTURE',
 };
+
+// Tous les types dans l'ordre pour le dropdown de transformation
+const ALL_TRANSFORM_OPTIONS: Array<{
+  type: SalesDocumentType;
+  label: string;
+  Icon: React.ElementType;
+}> = [
+  { type: 'DEVIS', label: 'Devis', Icon: FileText },
+  { type: 'BON_COMMANDE', label: 'Bon de commande', Icon: ClipboardList },
+  { type: 'BON_LIVRAISON', label: 'Bon de livraison', Icon: Truck },
+  { type: 'FACTURE', label: 'Facture', Icon: Receipt },
+  { type: 'AVOIR', label: 'Avoir', Icon: RotateCcw },
+];
 
 const DOC_TYPE_BADGE: Record<string, string> = {
   DEVIS: 'bg-gray-100 text-gray-600 border-gray-200',
@@ -215,109 +222,202 @@ const DOC_TAB_CONFIG: Array<{
   },
 ];
 
-// ─── Transform dialog ────────────────────────────────────────────────────────
+// ─── Transform picker modal ───────────────────────────────────────────────────
 
-interface TransformDialogProps {
-  sourceSale: Sale;
-  isPending: boolean;
-  onConfirm: (targetType: SalesDocumentType) => void;
+interface TransformPickerModalProps {
+  sale: Sale;
+  onSelect: (targetType: SalesDocumentType) => void;
   onCancel: () => void;
 }
 
-function TransformDialog({ sourceSale, isPending, onConfirm, onCancel }: TransformDialogProps) {
-  const options = ALLOWED_TRANSFORMS[sourceSale.documentType] ?? [];
-  const [selected, setSelected] = useState<SalesDocumentType | ''>(options[0]?.value ?? '');
+function TransformPickerModal({ sale, onSelect, onCancel }: TransformPickerModalProps) {
+  const sourceLabel = DOC_TYPE_SHORT[sale.documentType] ?? sale.documentType;
+  const recommendedTarget = NEXT_TRANSFORM[sale.documentType];
 
-  const sourceAppliedStock = sourceSale.stockImpactDone;
-  const targetAppliesStock = selected === 'BON_LIVRAISON' || selected === 'FACTURE';
+  if (typeof window === 'undefined') return null;
 
-  const footer = (
-    <div className="flex gap-2">
-      <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={isPending}>
-        Annuler
-      </Button>
-      <Button
-        size="sm"
-        className="flex-1 bg-violet-600 text-white hover:bg-violet-700"
-        onClick={() => selected && onConfirm(selected as SalesDocumentType)}
-        disabled={isPending || !selected || options.length === 0}
-      >
-        {isPending ? 'En cours…' : 'Confirmer la transformation'}
-      </Button>
-    </div>
-  );
-
-  return (
-    <SlideOver
-      title="Transformer le document"
-      subtitle={sourceSale.invoiceNumber}
-      open={true}
-      onClose={onCancel}
-      width={460}
-      footer={footer}
-    >
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-violet-100">
-            <ArrowRightLeft size={18} className="text-violet-600" />
-          </div>
-          <p className="text-xs text-text-muted">
-            <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium mr-1 ${DOC_TYPE_BADGE[sourceSale.documentType] ?? ''}`}>
-              {DOC_TYPE_SHORT[sourceSale.documentType] ?? sourceSale.documentType}
-            </span>
-            <span className="font-mono">{sourceSale.invoiceNumber}</span>
-          </p>
-        </div>
-
-        {options.length === 0 ? (
-          <p className="text-sm text-red-600">Aucune transformation disponible pour ce type de document.</p>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-text-primary">Transformer en</p>
-            <div className="flex flex-col gap-2">
-              {options.map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
-                    selected === opt.value
-                      ? 'border-violet-400 bg-violet-50'
-                      : 'border-border hover:border-violet-200 hover:bg-surface'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="targetType"
-                    value={opt.value}
-                    checked={selected === opt.value}
-                    onChange={() => setSelected(opt.value)}
-                    className="accent-violet-600"
-                  />
-                  <div>
-                    <span className="text-sm font-medium text-text-primary">{opt.label}</span>
-                    {(opt.value === 'BON_LIVRAISON' || opt.value === 'FACTURE') && (
-                      <p className="text-xs text-text-muted">
-                        {sourceAppliedStock ? 'Stock déjà appliqué — pas de double décrément' : 'Diminue le stock immédiatement'}
-                      </p>
-                    )}
-                  </div>
-                </label>
-              ))}
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative w-full max-w-sm animate-in fade-in zoom-in-95 duration-200 rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Transformer depuis</p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-medium ${DOC_TYPE_BADGE[sale.documentType] ?? ''}`}>
+                {sourceLabel}
+              </span>
+              <span className="font-mono text-xs font-semibold text-slate-600">{sale.invoiceNumber}</span>
             </div>
           </div>
-        )}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={16} />
+          </button>
+        </div>
 
-        {targetAppliesStock && !sourceAppliedStock && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        {/* Options — all clickable, no disabled */}
+        <div className="space-y-1.5 p-3">
+          {ALL_TRANSFORM_OPTIONS.map((opt) => {
+            const isRecommended = opt.type === recommendedTarget;
+            const isSame = opt.type === sale.documentType;
+            return (
+              <button
+                key={opt.type}
+                type="button"
+                onClick={() => onSelect(opt.type)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                  isRecommended
+                    ? 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-300 hover:bg-emerald-50'
+                    : 'border-transparent hover:border-slate-200 hover:bg-slate-50',
+                  isSame && 'opacity-50',
+                )}
+              >
+                <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${DOC_TYPE_BADGE[opt.type] ?? ''}`}>
+                  <opt.Icon size={10} />
+                  {opt.label}
+                </span>
+                <span
+                  className={cn(
+                    'ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                    isRecommended
+                      ? 'border border-emerald-200 bg-emerald-50 text-emerald-600'
+                      : 'text-slate-400',
+                  )}
+                >
+                  {isSame ? 'Même type' : isRecommended ? 'Disponible →' : 'Indisponible'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-100 px-4 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-9 w-full rounded-lg border border-slate-200 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Annuler
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ─── Transform dropdown button (per row) ─────────────────────────────────────
+
+interface TransformDropdownButtonProps {
+  sale: Sale;
+  onSelect: (targetType: SalesDocumentType) => void;
+}
+
+function TransformDropdownButton({ sale, onSelect }: TransformDropdownButtonProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium border border-orange-200/70 bg-orange-50 text-orange-700 transition-all duration-150 hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100 whitespace-nowrap"
+      >
+        <ArrowRightLeft size={12} />
+        Transformer
+      </button>
+      {open && (
+        <TransformPickerModal
+          sale={sale}
+          onSelect={(t) => { setOpen(false); onSelect(t); }}
+          onCancel={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Transform confirm modal ──────────────────────────────────────────────────
+
+interface TransformConfirmModalProps {
+  sale: Sale;
+  targetType: SalesDocumentType;
+  isPending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function TransformConfirmModal({ sale, targetType, isPending, onConfirm, onCancel }: TransformConfirmModalProps) {
+  const sourceLabel = DOC_TYPE_SHORT[sale.documentType] ?? sale.documentType;
+  const targetLabel = DOC_TYPE_SHORT[targetType] ?? targetType;
+  const targetFull = ALL_TRANSFORM_OPTIONS.find((o) => o.type === targetType)?.label ?? targetType;
+  const targetAppliesStock = targetType === 'BON_LIVRAISON' || targetType === 'FACTURE';
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={!isPending ? onCancel : undefined} />
+      <div className="relative bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-sm mx-4 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-orange-100">
+            <ArrowRightLeft size={18} className="text-orange-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-slate-900 text-sm">Transformer en {targetFull}</h3>
+            <p className="text-xs text-slate-400">Cette action est irréversible</p>
+          </div>
+        </div>
+
+        <p className="text-sm text-slate-700 mb-4 leading-relaxed">
+          Confirmer la transformation de{' '}
+          <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium mx-0.5 ${DOC_TYPE_BADGE[sale.documentType] ?? ''}`}>
+            {sourceLabel}
+          </span>
+          {' '}<span className="font-mono font-semibold text-slate-900">{sale.invoiceNumber}</span>{' '}
+          en{' '}
+          <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium mx-0.5 ${DOC_TYPE_BADGE[targetType] ?? ''}`}>
+            {targetLabel}
+          </span>
+          {' '}?
+        </p>
+
+        {targetAppliesStock && !sale.stockImpactDone && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 mb-4">
             Le stock sera décrémenté pour chaque article au moment de la transformation.
           </div>
         )}
-        {targetAppliesStock && sourceAppliedStock && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+        {targetAppliesStock && sale.stockImpactDone && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 mb-4">
             Stock déjà appliqué sur la source — aucun double décrément.
           </div>
         )}
+
+        <div className="flex gap-2 mt-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            className="flex-1 h-9 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isPending}
+            className="flex-1 h-9 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? 'En cours…' : 'Transformer'}
+          </button>
+        </div>
       </div>
-    </SlideOver>
+    </div>
   );
 }
 
@@ -460,7 +560,8 @@ export default function VentesPage() {
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
   const [activeHistoryTab, setActiveHistoryTab] = useState<'ventes' | 'documents'>('ventes');
   const [showValidateModal, setShowValidateModal] = useState(false);
-  const [transformTarget, setTransformTarget] = useState<Sale | null>(null);
+  const [transformTarget, setTransformTarget] = useState<{ sale: Sale; targetType: SalesDocumentType } | null>(null);
+  const [transformPickerSale, setTransformPickerSale] = useState<Sale | null>(null);
 
   // ── Sales history pagination + filters ────────────────────────────────────
   const [salesPage, setSalesPage] = useState(1);
@@ -901,8 +1002,8 @@ export default function VentesPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
-      const label = DOC_TYPE_SHORT[newSale.documentType] ?? newSale.documentType;
-      toast.success(`Document transformé → ${label} ${newSale.invoiceNumber}`);
+      const label = ALL_TRANSFORM_OPTIONS.find((o) => o.type === newSale.documentType)?.label ?? newSale.documentType;
+      toast.success(`Document transformé en ${label} !`);
       setTransformTarget(null);
       setSelectedInvoiceIds([]);
     },
@@ -1006,6 +1107,29 @@ export default function VentesPage() {
     } finally {
       setDocMenuGenerating(null);
     }
+  };
+
+  const handleGenerateForRow = async (saleId: string, type: SalesDocumentType) => {
+    try {
+      const result = await stockiniApi.generateDocuments([saleId], type);
+      queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      const label = GENERATABLE_DOC_TYPES.find((d) => d.type === type)?.label ?? type;
+      toast.success(`${label} généré avec succès`, {
+        label: 'Voir dans Documents',
+        onClick: () => router.push('/documents'),
+      });
+    } catch (err) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors de la génération du document');
+    }
+  };
+
+  const handleEmailForRow = async (sale: Sale) => {
+    setIsDocMenuOpen(false);
+    setSelectedInvoiceIds([sale.id]);
+    await loadEmailPreview([sale.id]);
+    setIsEmailToastOpen(true);
   };
 
   // ── Document selection from history — only tracks state, never auto-opens ──
@@ -1471,6 +1595,17 @@ export default function VentesPage() {
                 onEmail={handleEmailClick}
                 emailLoading={emailPreviewLoading}
                 onClear={() => setSelectedInvoiceIds([])}
+                transformButton={(() => {
+                  if (selectedInvoiceIds.length !== 1) return null;
+                  const sel = salesList.find((s) => s.id === selectedInvoiceIds[0]);
+                  if (!sel || !(TRANSFORMABLE_TYPES as string[]).includes(sel.documentType) || sel.transformedToId || sel.status === 'CANCELLED') return null;
+                  return (
+                    <TransformDropdownButton
+                      sale={sel}
+                      onSelect={(targetType) => setTransformTarget({ sale: sel, targetType })}
+                    />
+                  );
+                })()}
               />
             )}
             {activeHistoryTab === 'documents' && selectedDocumentIds.length > 0 && (
@@ -1603,10 +1738,14 @@ export default function VentesPage() {
                                 {DOC_TYPE_SHORT[sale.documentType] ?? sale.documentType}
                               </span>
                               {sale.transformedToId && (
-                                <span className="text-[10px] font-medium text-emerald-600">Transformé</span>
+                                <span className="inline-flex items-center rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+                                  Transformé ›
+                                </span>
                               )}
                               {sale.sourceDocumentId && !sale.transformedToId && (
-                                <span className="text-[10px] font-medium text-violet-600">Issu d'une transf.</span>
+                                <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
+                                  Issu d'une transf.
+                                </span>
                               )}
                             </div>
                           </div>
@@ -1642,29 +1781,33 @@ export default function VentesPage() {
                         </td>
                         {hasActions && (
                           <td className="px-4 py-2.5">
-                            <KebabMenu
-                              items={[
-                                {
-                                  label: 'Voir les détails',
-                                  icon: <Eye size={14} />,
-                                  onClick: () => setSelectedSaleId(sale.id),
-                                  hidden: !canViewDetails,
-                                },
-                                {
-                                  label: 'Transformer',
-                                  icon: <ArrowRightLeft size={14} />,
-                                  onClick: () => setTransformTarget(sale),
-                                  hidden: !(TRANSFORMABLE_TYPES as string[]).includes(sale.documentType) || !!sale.transformedToId || sale.status === 'CANCELLED',
-                                },
-                                {
-                                  label: 'Mettre à la corbeille',
-                                  icon: <Trash2 size={14} />,
-                                  onClick: () => setDeleteTarget(sale),
-                                  variant: 'destructive',
-                                  hidden: !canDeleteSale,
-                                },
-                              ]}
-                            />
+                            <div className="flex items-center gap-1.5 justify-end">
+                              {/* Transformer dropdown — visible uniquement si le type est transformable et non encore transformé */}
+                              {(TRANSFORMABLE_TYPES as string[]).includes(sale.documentType) &&
+                                !sale.transformedToId &&
+                                sale.status !== 'CANCELLED' && (
+                                  <TransformDropdownButton
+                                    sale={sale}
+                                    onSelect={(targetType) => setTransformTarget({ sale, targetType })}
+                                  />
+                                )}
+                              <KebabMenu
+                                items={[
+                                  { label: 'Générer devis', icon: <FileText size={14} />, onClick: () => handleGenerateForRow(sale.id, 'DEVIS') },
+                                  { label: 'Générer bon de commande', icon: <ClipboardList size={14} />, onClick: () => handleGenerateForRow(sale.id, 'BON_COMMANDE') },
+                                  { label: 'Générer bon de livraison', icon: <Truck size={14} />, onClick: () => handleGenerateForRow(sale.id, 'BON_LIVRAISON') },
+                                  { label: 'Générer facture', icon: <Receipt size={14} />, onClick: () => handleGenerateForRow(sale.id, 'FACTURE') },
+                                  { label: 'Générer avoir', icon: <RotateCcw size={14} />, onClick: () => handleGenerateForRow(sale.id, 'AVOIR') },
+                                  { divider: true },
+                                  { label: 'Transformer…', icon: <ArrowRightLeft size={14} />, onClick: () => setTransformPickerSale(sale) },
+                                  { label: 'Envoyer', icon: <Mail size={14} />, onClick: () => handleEmailForRow(sale) },
+                                  { divider: true },
+                                  { label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setSelectedSaleId(sale.id), hidden: !canViewDetails },
+                                  { divider: true },
+                                  { label: 'Mettre à la corbeille', icon: <Trash2 size={14} />, onClick: () => setDeleteTarget(sale), variant: 'destructive', hidden: !canDeleteSale },
+                                ]}
+                              />
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -1805,12 +1948,25 @@ export default function VentesPage() {
         />
       )}
 
-      {/* Transform dialog — per-row, opened from KebabMenu */}
+      {/* Transform picker modal — opened from kebab menu */}
+      {transformPickerSale && (
+        <TransformPickerModal
+          sale={transformPickerSale}
+          onSelect={(targetType) => {
+            setTransformTarget({ sale: transformPickerSale, targetType });
+            setTransformPickerSale(null);
+          }}
+          onCancel={() => setTransformPickerSale(null)}
+        />
+      )}
+
+      {/* Transform confirm modal — opened from TransformDropdownButton per row */}
       {transformTarget && (
-        <TransformDialog
-          sourceSale={transformTarget}
+        <TransformConfirmModal
+          sale={transformTarget.sale}
+          targetType={transformTarget.targetType}
           isPending={transformMutation.isPending}
-          onConfirm={(targetType) => transformMutation.mutate({ id: transformTarget.id, targetType })}
+          onConfirm={() => transformMutation.mutate({ id: transformTarget.sale.id, targetType: transformTarget.targetType })}
           onCancel={() => setTransformTarget(null)}
         />
       )}

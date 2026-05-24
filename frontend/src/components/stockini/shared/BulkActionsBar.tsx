@@ -1,6 +1,7 @@
 'use client';
 
-import { ArrowRightLeft, Download, Loader2, Mail, X } from 'lucide-react';
+import type React from 'react';
+import { Download, Loader2, Mail, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BulkActionsBarProps {
@@ -8,9 +9,9 @@ interface BulkActionsBarProps {
   onDownload: () => void;
   onEmail: () => void;
   emailLoading?: boolean;
-  canTransform?: boolean;
-  onTransform?: () => void;
   onClear: () => void;
+  /** Bouton Transformer (dropdown) injecté entre Générer et Envoyer */
+  transformButton?: React.ReactNode;
 }
 
 export function BulkActionsBar({
@@ -18,9 +19,8 @@ export function BulkActionsBar({
   onDownload,
   onEmail,
   emailLoading,
-  canTransform,
-  onTransform,
   onClear,
+  transformButton,
 }: BulkActionsBarProps) {
   return (
     <div
@@ -54,6 +54,9 @@ export function BulkActionsBar({
         Générer
       </button>
 
+      {/* Transformer — dropdown injecté (entre Générer et Envoyer) */}
+      {transformButton}
+
       {/* Envoyer — blue */}
       <button
         type="button"
@@ -74,23 +77,6 @@ export function BulkActionsBar({
         )}
         Envoyer
       </button>
-
-      {/* Transformer — violet */}
-      {canTransform && onTransform && (
-        <button
-          type="button"
-          onClick={onTransform}
-          className={cn(
-            'inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium',
-            'border border-violet-200/70 bg-violet-50 text-violet-700',
-            'transition-all duration-150',
-            'hover:-translate-y-px hover:border-violet-300 hover:bg-violet-100',
-          )}
-        >
-          <ArrowRightLeft size={12} />
-          Transformer
-        </button>
-      )}
 
       <div className="h-4 w-px bg-slate-200" />
 
