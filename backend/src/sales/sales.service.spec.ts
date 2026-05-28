@@ -173,7 +173,11 @@ describe('SalesService document references', () => {
           data: expect.objectContaining({
             invoiceNumber: expectedReference,
             documentType,
-            paymentStatus: documentType === DocumentType.FACTURE ? PaymentStatus.UNPAID : null,
+            paymentStatus: (
+              [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+            ).includes(documentType)
+              ? PaymentStatus.UNPAID
+              : null,
             subtotal: AUTO_NET_HT,
             discount: 0,
             tax: AUTO_TAX,

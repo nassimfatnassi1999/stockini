@@ -15,7 +15,7 @@ import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { AvoirsService } from './avoirs.service';
-import { CreateAvoirDto } from './dto/avoir.dto';
+import { CreateCreditNoteDto } from './dto/avoir.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('avoirs')
@@ -30,7 +30,7 @@ export class AvoirsController {
 
   @RequirePermissions('sales.create')
   @Post()
-  create(@Body() dto: CreateAvoirDto, @CurrentUser() user?: AuthUser) {
+  create(@Body() dto: CreateCreditNoteDto, @CurrentUser() user?: AuthUser) {
     return this.avoirsService.create(dto, user);
   }
 

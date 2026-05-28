@@ -1,14 +1,17 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   CaisseMovementType,
+  CreditNoteStatus,
   DocumentStatus,
   DocumentType,
   PaymentMethod,
   PaymentType,
+  Prisma,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
@@ -20,7 +23,11 @@ import { PdfService } from '../documents/pdf.service';
 import { MinioService } from '../documents/minio.service';
 import { SettingsService } from '../settings/settings.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateAvoirDto } from './dto/avoir.dto';
+import { CreateCreditNoteDto, type RefundMethod } from './dto/avoir.dto';
+import {
+  calculateCreditNoteLineTotals,
+  calculateCreditNoteTotals,
+} from '../credit-notes/utils/credit-note-calculation.util';
 
 const AVOIR_INCLUDE = {
   sale: { select: { invoiceNumber: true, customerId: true } },
@@ -39,6 +46,8 @@ const AVOIR_INCLUDE = {
 
 @Injectable()
 export class AvoirsService {
+  private readonly logger = new Logger(AvoirsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockService: StockService,
@@ -55,7 +64,9 @@ export class AvoirsService {
       include: {
         items: {
           include: {
-            product: { select: { id: true, reference: true, name: true } },
+            product: {
+              select: { id: true, reference: true, name: true, tva: true },
+            },
           },
         },
         customer: { select: { id: true, name: true } },
@@ -83,14 +94,18 @@ export class AvoirsService {
       items: sale.items
         .map((item) => {
           const alreadyReturned = returnedMap.get(item.id) ?? 0;
+          const cancelledQuantity = 0;
           return {
             saleItemId: item.id,
             productId: item.productId,
             product: item.product,
             quantiteSold: item.quantity,
             quantiteDejaRetournee: alreadyReturned,
-            quantiteRetournable: item.quantity - alreadyReturned,
+            quantiteAnnulee: cancelledQuantity,
+            quantiteRetournable:
+              item.quantity - alreadyReturned - cancelledQuantity,
             unitPrice: Number(item.unitPrice),
+            tvaRate: Number(item.product?.tva ?? 19),
             total: Number(item.total),
           };
         })
@@ -98,204 +113,266 @@ export class AvoirsService {
     };
   }
 
-  async create(dto: CreateAvoirDto, user?: AuthUser) {
+  async create(dto: CreateCreditNoteDto, user?: AuthUser) {
     if (!dto.items.length) {
       throw new BadRequestException(
         'Un avoir doit inclure au moins un article',
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // Validate sale
-      const sale = await tx.sale.findFirst({
-        where: { id: dto.saleId, deletedAt: null },
-        include: { items: { include: { product: true } } },
-      });
-      if (!sale)
-        throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
-      if (
-        sale.status !== SaleStatus.COMPLETED ||
-        !(
-          [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
-        ).includes(sale.documentType) ||
-        !sale.stockImpactDone
-      ) {
-        throw new BadRequestException(
-          'Un avoir doit être lié à une facture ou un bon de livraison validé avec stock impacté',
-        );
-      }
+    const refundMethod = this.resolveRefundMethod(dto);
 
-      // Validate customer matches
-      if (
-        dto.customerId &&
-        sale.customerId &&
-        dto.customerId !== sale.customerId
-      ) {
-        throw new BadRequestException(
-          'Le client ne correspond pas à la facture',
-        );
-      }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${dto.saleId} FOR UPDATE`;
 
-      const effectiveCustomerId = dto.customerId ?? sale.customerId;
-
-      // Map saleItems by id and by productId for lookup
-      const saleItemsById = new Map(sale.items.map((i) => [i.id, i]));
-      const saleItemsByProductId = new Map(
-        sale.items.map((i) => [i.productId, i]),
-      );
-
-      // Check already-returned quantities
-      const existingReturns = await tx.creditNoteItem.groupBy({
-        by: ['saleItemId'],
-        _sum: { quantiteRetournee: true },
-        where: {
-          saleItemId: { in: sale.items.map((i) => i.id) },
-          creditNote: { statut: { not: 'CANCELLED' } },
-        },
-      });
-      const returnedMap = new Map(
-        existingReturns.map((r) => [
-          r.saleItemId,
-          r._sum.quantiteRetournee ?? 0,
-        ]),
-      );
-
-      // Validate each item
-      const resolvedItems: Array<{
-        saleItemId: string;
-        productId: string;
-        designation: string;
-        quantiteRetournee: number;
-        prixUnitaireHt: number;
-        tva: number;
-        totalHt: number;
-        totalTtc: number;
-        motifLigne?: string;
-      }> = [];
-
-      for (const dtoItem of dto.items) {
-        const saleItem = dtoItem.saleItemId
-          ? saleItemsById.get(dtoItem.saleItemId)
-          : saleItemsByProductId.get(dtoItem.productId);
-
-        if (!saleItem) {
-          throw new BadRequestException(
-            `Le produit ${dtoItem.productId} ne fait pas partie de cette facture`,
-          );
-        }
-
-        const alreadyReturned = returnedMap.get(saleItem.id) ?? 0;
-        const returnable = saleItem.quantity - alreadyReturned;
-
-        if (dtoItem.quantiteRetournee > returnable) {
-          throw new BadRequestException(
-            `Quantité retournable insuffisante pour ${saleItem.product?.name ?? dtoItem.productId} (max: ${returnable})`,
-          );
-        }
-
-        const unitPriceHt = Number(saleItem.unitPrice);
-        const tvaRate = 19;
-        const totalHt = unitPriceHt * dtoItem.quantiteRetournee;
-        const totalTtc = totalHt * (1 + tvaRate / 100);
-
-        resolvedItems.push({
-          saleItemId: saleItem.id,
-          productId: saleItem.productId,
-          designation: saleItem.product?.name ?? dtoItem.productId,
-          quantiteRetournee: dtoItem.quantiteRetournee,
-          prixUnitaireHt: unitPriceHt,
-          tva: tvaRate,
-          totalHt,
-          totalTtc,
-          motifLigne: dtoItem.motifLigne,
+        // Validate sale
+        const sale = await tx.sale.findFirst({
+          where: { id: dto.saleId, deletedAt: null },
+          include: { items: { include: { product: true } } },
         });
-      }
+        if (!sale)
+          throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
+        const saleCanBeReturned =
+          sale.status === SaleStatus.COMPLETED ||
+          sale.status === SaleStatus.PARTIALLY_REFUNDED;
+        if (
+          !saleCanBeReturned ||
+          !(
+            [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+          ).includes(sale.documentType) ||
+          !sale.stockImpactDone
+        ) {
+          throw new BadRequestException(
+            'Un avoir doit être lié à une facture ou un bon de livraison validé avec stock impacté',
+          );
+        }
 
-      const subtotal = resolvedItems.reduce((s, i) => s + i.totalHt, 0);
-      const tax = resolvedItems.reduce(
-        (s, i) => s + (i.totalTtc - i.totalHt),
-        0,
-      );
-      const total = subtotal + tax;
-      const montantRembourse = total;
+        // Validate customer matches
+        if (
+          dto.customerId &&
+          sale.customerId &&
+          dto.customerId !== sale.customerId
+        ) {
+          throw new BadRequestException(
+            'Le client ne correspond pas à la facture',
+          );
+        }
 
-      const numero = await this.references.generateSimple(
-        'AV',
-        'creditNote',
-        tx,
-      );
+        const effectiveCustomerId = dto.customerId ?? sale.customerId;
+        if (refundMethod === 'CUSTOMER_CREDIT' && !effectiveCustomerId) {
+          throw new BadRequestException(
+            'Le crédit client nécessite un client enregistré',
+          );
+        }
 
-      const avoir = await tx.creditNote.create({
-        data: {
-          numero,
-          saleId: dto.saleId,
-          customerId: effectiveCustomerId,
-          motif: dto.motif,
-          subtotal,
-          tax,
-          total,
-          montantRembourse,
-          createdById: user?.id,
-          items: {
-            create: resolvedItems.map((item) => ({
-              saleItemId: item.saleItemId,
-              productId: item.productId,
-              designation: item.designation,
-              quantiteRetournee: item.quantiteRetournee,
-              prixUnitaireHt: item.prixUnitaireHt,
-              tva: item.tva,
-              totalHt: item.totalHt,
-              totalTtc: item.totalTtc,
-              motifLigne: item.motifLigne,
-            })),
+        // Map saleItems by id and by productId for lookup
+        const saleItemsById = new Map(sale.items.map((i) => [i.id, i]));
+        const saleItemsByProductId = new Map(
+          sale.items.map((i) => [i.productId, i]),
+        );
+
+        // Check already-returned quantities
+        const existingReturns = await tx.creditNoteItem.groupBy({
+          by: ['saleItemId'],
+          _sum: { quantiteRetournee: true },
+          where: {
+            saleItemId: { in: sale.items.map((i) => i.id) },
+            creditNote: { statut: { not: 'CANCELLED' } },
           },
-        },
-        include: AVOIR_INCLUDE,
-      });
-
-      // Restore stock for returned products
-      for (const item of resolvedItems) {
-        await this.stockService.applyMovement(tx, {
-          productId: item.productId,
-          type: StockMovementType.CUSTOMER_RETURN,
-          quantity: item.quantiteRetournee,
-          reason: `Retour client - Avoir ${numero}`,
-          userId: user?.id,
         });
-      }
+        const returnedMap = new Map(
+          existingReturns.map((r) => [
+            r.saleItemId,
+            r._sum.quantiteRetournee ?? 0,
+          ]),
+        );
 
-      // Record refund payment (debit caisse)
-      if (montantRembourse > 0) {
-        const paymentMethod =
-          (dto.paymentMethod as PaymentMethod) ?? PaymentMethod.CASH;
-        const payment = await tx.payment.create({
+        const seenSaleItems = new Set<string>();
+
+        // Validate each item
+        const resolvedItems: Array<{
+          saleItemId: string;
+          productId: string;
+          designation: string;
+          quantiteRetournee: number;
+          prixUnitaireHt: number;
+          tva: number;
+          totalHt: number;
+          totalTtc: number;
+          motifLigne?: string;
+        }> = [];
+
+        for (const dtoItem of dto.items) {
+          if (!Number.isInteger(dtoItem.quantiteRetournee)) {
+            throw new BadRequestException(
+              'La quantité retournée doit être un entier',
+            );
+          }
+          if (dtoItem.quantiteRetournee <= 0) {
+            throw new BadRequestException(
+              'La quantité retournée doit être supérieure à 0',
+            );
+          }
+
+          const saleItem = dtoItem.saleItemId
+            ? saleItemsById.get(dtoItem.saleItemId)
+            : saleItemsByProductId.get(dtoItem.productId);
+
+          if (!saleItem) {
+            throw new BadRequestException(
+              `Le produit ${dtoItem.productId} ne fait pas partie de cette facture`,
+            );
+          }
+          if (seenSaleItems.has(saleItem.id)) {
+            throw new BadRequestException(
+              `La ligne ${saleItem.product?.name ?? dtoItem.productId} est présente plusieurs fois`,
+            );
+          }
+          seenSaleItems.add(saleItem.id);
+
+          const alreadyReturned = returnedMap.get(saleItem.id) ?? 0;
+          const returnable = saleItem.quantity - alreadyReturned;
+
+          if (dtoItem.quantiteRetournee > returnable) {
+            throw new BadRequestException(
+              `Quantité retournable insuffisante pour ${saleItem.product?.name ?? dtoItem.productId} (max: ${returnable})`,
+            );
+          }
+
+          const unitPriceHt = Number(saleItem.unitPrice);
+          const tvaRate = Number(saleItem.product?.tva ?? 19);
+          const lineTotals = calculateCreditNoteLineTotals({
+            quantity: dtoItem.quantiteRetournee,
+            unitPriceHt,
+            tvaRate,
+          });
+
+          resolvedItems.push({
+            saleItemId: saleItem.id,
+            productId: saleItem.productId,
+            designation: saleItem.product?.name ?? dtoItem.productId,
+            quantiteRetournee: dtoItem.quantiteRetournee,
+            prixUnitaireHt: unitPriceHt,
+            tva: tvaRate,
+            totalHt: lineTotals.totalHt,
+            totalTtc: lineTotals.totalTtc,
+            motifLigne: dtoItem.motifLigne,
+          });
+        }
+
+        const totals = calculateCreditNoteTotals(
+          resolvedItems.map((item) => ({
+            quantity: item.quantiteRetournee,
+            unitPriceHt: item.prixUnitaireHt,
+            tvaRate: item.tva,
+          })),
+        );
+        const subtotal = totals.totalHt;
+        const tax = totals.totalTva;
+        const total = totals.totalTtc;
+        const montantRembourse = refundMethod === 'NONE' ? 0 : total;
+
+        const numero = await this.references.generateSimple(
+          'AV',
+          'creditNote',
+          tx,
+        );
+
+        const avoir = await tx.creditNote.create({
           data: {
-            reference: await this.references.generate('AV-PAY', 'payment', tx),
-            type: PaymentType.CREDIT_NOTE_REFUND,
-            method: paymentMethod,
-            amount: montantRembourse,
-            cashImpactDone: true,
+            numero,
             saleId: dto.saleId,
             customerId: effectiveCustomerId,
-            creditNoteId: avoir.id,
-            note: `Remboursement avoir ${numero}`,
+            motif: dto.motif,
+            subtotal,
+            tax,
+            total,
+            montantRembourse,
+            statut:
+              refundMethod === 'NONE'
+                ? CreditNoteStatus.CREATED
+                : CreditNoteStatus.REFUNDED,
+            createdById: user?.id,
+            items: {
+              create: resolvedItems.map((item) => ({
+                saleItemId: item.saleItemId,
+                productId: item.productId,
+                designation: item.designation,
+                quantiteRetournee: item.quantiteRetournee,
+                prixUnitaireHt: item.prixUnitaireHt,
+                tva: item.tva,
+                totalHt: item.totalHt,
+                totalTtc: item.totalTtc,
+                motifLigne: item.motifLigne,
+              })),
+            },
           },
+          include: AVOIR_INCLUDE,
         });
 
-        await this.caisseService.recordMovement(tx, {
-          type: CaisseMovementType.ANNULATION_VENTE,
-          montant: -montantRembourse,
-          motif: `Remboursement avoir ${numero}`,
-          referenceDoc: payment.reference,
-          userId: user?.id,
-        });
-      }
+        // Restore stock for returned products
+        for (const item of resolvedItems) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.CUSTOMER_RETURN,
+            quantity: item.quantiteRetournee,
+            reason: `Retour client - Avoir ${numero}`,
+            userId: user?.id,
+          });
+        }
 
-      return tx.creditNote.findUniqueOrThrow({
-        where: { id: avoir.id },
-        include: AVOIR_INCLUDE,
+        if (refundMethod !== 'NONE' && montantRembourse > 0) {
+          const paymentMethod = this.paymentMethodForRefund(refundMethod);
+          const payment = await tx.payment.create({
+            data: {
+              reference: await this.references.generate(
+                'AV-PAY',
+                'payment',
+                tx,
+              ),
+              type: PaymentType.CREDIT_NOTE_REFUND,
+              method: paymentMethod,
+              amount: montantRembourse,
+              cashImpactDone: refundMethod === 'CASH',
+              saleId: dto.saleId,
+              customerId: effectiveCustomerId,
+              creditNoteId: avoir.id,
+              note: `Remboursement avoir ${numero}`,
+            },
+          });
+
+          if (refundMethod === 'CASH') {
+            await this.caisseService.recordMovement(tx, {
+              type: CaisseMovementType.ANNULATION_VENTE,
+              montant: -montantRembourse,
+              motif: `Remboursement espèces avoir ${numero}`,
+              referenceDoc: payment.reference,
+              userId: user?.id,
+            });
+          }
+          if (refundMethod === 'CUSTOMER_CREDIT' && effectiveCustomerId) {
+            await tx.customer.update({
+              where: { id: effectiveCustomerId },
+              data: { creditBalance: { increment: montantRembourse } },
+            });
+          }
+        }
+
+        await this.updateSourceSaleRefundStatus(tx, sale.id);
+
+        return tx.creditNote.findUniqueOrThrow({
+          where: { id: avoir.id },
+          include: AVOIR_INCLUDE,
+        });
       });
-    });
+    } catch (error) {
+      this.logger.error(
+        `Erreur création avoir pour vente ${dto.saleId}: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
   }
 
   findAll(customerId?: string, saleId?: string) {
@@ -369,9 +446,13 @@ export class AvoirsService {
         factureOrigine: avoir.sale.invoiceNumber,
         customerName,
         isCounterClient: isAvoirComptoir,
-        customerAddress: isAvoirComptoir ? avoir.sale?.counterClientAddress : avoir.customer?.address ?? null,
-        customerPhone: isAvoirComptoir ? avoir.sale?.counterClientPhone : avoir.customer?.phone ?? null,
-        customerEmail: isAvoirComptoir ? null : avoir.customer?.email ?? null,
+        customerAddress: isAvoirComptoir
+          ? avoir.sale?.counterClientAddress
+          : (avoir.customer?.address ?? null),
+        customerPhone: isAvoirComptoir
+          ? avoir.sale?.counterClientPhone
+          : (avoir.customer?.phone ?? null),
+        customerEmail: isAvoirComptoir ? null : (avoir.customer?.email ?? null),
         customerTaxId: isAvoirComptoir ? avoir.sale?.counterClientTaxId : null,
         customerNote: isAvoirComptoir ? avoir.sale?.counterClientNote : null,
         motif: avoir.motif,
@@ -446,6 +527,75 @@ export class AvoirsService {
     }
 
     return { buffer: pdfBuffer, fileName };
+  }
+
+  private resolveRefundMethod(dto: CreateCreditNoteDto): RefundMethod {
+    if (dto.refundMethod) return dto.refundMethod;
+    if (dto.paymentMethod === 'CREDIT') return 'CUSTOMER_CREDIT';
+    if (
+      dto.paymentMethod === 'CASH' ||
+      dto.paymentMethod === 'CARD' ||
+      dto.paymentMethod === 'BANK_TRANSFER' ||
+      dto.paymentMethod === 'CHECK'
+    ) {
+      return dto.paymentMethod;
+    }
+    return 'CASH';
+  }
+
+  private paymentMethodForRefund(refundMethod: RefundMethod): PaymentMethod {
+    switch (refundMethod) {
+      case 'CUSTOMER_CREDIT':
+        return PaymentMethod.CREDIT;
+      case 'NONE':
+        return PaymentMethod.CREDIT;
+      default:
+        return refundMethod;
+    }
+  }
+
+  private async updateSourceSaleRefundStatus(
+    tx: Prisma.TransactionClient,
+    saleId: string,
+  ) {
+    const sale = await tx.sale.findUniqueOrThrow({
+      where: { id: saleId },
+      include: { items: { select: { id: true, quantity: true } } },
+    });
+
+    const activeReturns = await tx.creditNoteItem.groupBy({
+      by: ['saleItemId'],
+      _sum: { quantiteRetournee: true },
+      where: {
+        saleItemId: { in: sale.items.map((item) => item.id) },
+        creditNote: { statut: { not: 'CANCELLED' } },
+      },
+    });
+    const returnedByLine = new Map(
+      activeReturns.map((row) => [
+        row.saleItemId,
+        row._sum.quantiteRetournee ?? 0,
+      ]),
+    );
+    const allQuantitiesReturned = sale.items.every(
+      (item) => (returnedByLine.get(item.id) ?? 0) >= item.quantity,
+    );
+
+    const refundedTotals = await tx.creditNote.aggregate({
+      where: { saleId, statut: { not: 'CANCELLED' } },
+      _sum: { total: true },
+    });
+    const refundedTotal = Number(refundedTotals._sum.total ?? 0);
+    const saleTotal = Number(sale.total);
+    const nextStatus =
+      allQuantitiesReturned || refundedTotal >= saleTotal - 0.001
+        ? SaleStatus.REFUNDED
+        : SaleStatus.PARTIALLY_REFUNDED;
+
+    await tx.sale.update({
+      where: { id: saleId },
+      data: { status: nextStatus },
+    });
   }
 
   private async getCompanySettings() {

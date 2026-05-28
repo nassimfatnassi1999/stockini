@@ -13,10 +13,10 @@ export interface Product {
   barcode?: string | null;
   name: string;
   description?: string | null;
-  tva: number | string;                 // TVA en % (défaut 19)
-  purchasePrice: number | string;       // Prix d'achat HT
-  purchasePriceTtc: number | string;    // Prix d'achat TTC (HT × (1 + TVA/100))
-  salePrice: number | string;           // Prix de vente HT (purchaseHT × 1.4)
+  tva: number | string; // TVA en % (défaut 19)
+  purchasePrice: number | string; // Prix d'achat HT
+  purchasePriceTtc: number | string; // Prix d'achat TTC (HT × (1 + TVA/100))
+  salePrice: number | string; // Prix de vente HT (purchaseHT × 1.4)
   lastSellingPrice?: number | string | null;
   lastSaleDate?: string | null;
   lastSaleDocumentId?: string | null;
@@ -34,12 +34,12 @@ export interface Product {
 }
 
 export type CaisseMovementType =
-  | 'ENCAISSEMENT_VENTE'
-  | 'DECAISSEMENT_ACHAT'
-  | 'DEPOT_MANUEL'
-  | 'RETRAIT_MANUEL'
-  | 'ANNULATION_VENTE'
-  | 'ANNULATION_ACHAT';
+  | "ENCAISSEMENT_VENTE"
+  | "DECAISSEMENT_ACHAT"
+  | "DEPOT_MANUEL"
+  | "RETRAIT_MANUEL"
+  | "ANNULATION_VENTE"
+  | "ANNULATION_ACHAT";
 
 export interface CaisseMovement {
   id: Id;
@@ -66,7 +66,7 @@ export interface Customer {
   phone?: string | null;
   email?: string | null;
   address?: string | null;
-  type: 'INDIVIDUAL' | 'GARAGE' | 'COMPANY';
+  type: "INDIVIDUAL" | "GARAGE" | "COMPANY";
   taxNumber?: string | null;
   creditBalance: number | string;
   debtAmount?: number;
@@ -105,7 +105,7 @@ export interface Sale {
   transformedToId?: string | null;
   createdAt: string;
   customer?: Customer | null;
-  clientType?: 'PERSISTENT' | 'COMPTOIR' | null;
+  clientType?: "PERSISTENT" | "COMPTOIR" | null;
   counterClientFirstName?: string | null;
   counterClientLastName?: string | null;
   counterClientFullName?: string | null;
@@ -144,7 +144,7 @@ export interface SaleDetail {
   status: string;
   createdAt: string;
   customer?: Customer | null;
-  clientType?: 'PERSISTENT' | 'COMPTOIR' | null;
+  clientType?: "PERSISTENT" | "COMPTOIR" | null;
   counterClientFirstName?: string | null;
   counterClientLastName?: string | null;
   counterClientFullName?: string | null;
@@ -161,7 +161,12 @@ export interface Purchase {
   status: string;
   createdAt: string;
   supplier?: Supplier | null;
-  items?: Array<{ id: Id; quantity: number; receivedQuantity?: number; unitCost?: number | string }>;
+  items?: Array<{
+    id: Id;
+    quantity: number;
+    receivedQuantity?: number;
+    unitCost?: number | string;
+  }>;
   deletedAt?: string | null;
   deletedBy?: string | null;
 }
@@ -212,9 +217,14 @@ export interface Payment {
   deletedBy?: string | null;
 }
 
-export type SalesDocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE' | 'AVOIR';
-export type EmailStatus = 'PENDING' | 'SENT' | 'FAILED';
-export type DocumentStatus = 'GENERATED' | 'SENT' | 'DELETED';
+export type SalesDocumentType =
+  | "DEVIS"
+  | "BON_COMMANDE"
+  | "BON_LIVRAISON"
+  | "FACTURE"
+  | "AVOIR";
+export type EmailStatus = "PENDING" | "SENT" | "FAILED";
+export type DocumentStatus = "GENERATED" | "SENT" | "DELETED";
 
 export interface GeneratedDocument {
   id: Id;
@@ -285,7 +295,14 @@ export interface ShareLinkResponse {
   expiresInDays: number;
 }
 
-export type TrashEntityType = 'product' | 'customer' | 'supplier' | 'sale' | 'purchase' | 'payment' | 'document';
+export type TrashEntityType =
+  | "product"
+  | "customer"
+  | "supplier"
+  | "sale"
+  | "purchase"
+  | "payment"
+  | "document";
 
 export interface TrashItem {
   id: Id;
@@ -351,7 +368,7 @@ export interface DropdownOption {
   updatedAt: string;
 }
 
-export type CreditNoteStatus = 'CREATED' | 'REFUNDED' | 'CANCELLED';
+export type CreditNoteStatus = "CREATED" | "REFUNDED" | "CANCELLED";
 
 export interface ReturnableItem {
   saleItemId: Id;
@@ -359,8 +376,10 @@ export interface ReturnableItem {
   product: { id: Id; reference: string; name: string } | null;
   quantiteSold: number;
   quantiteDejaRetournee: number;
+  quantiteAnnulee: number;
   quantiteRetournable: number;
   unitPrice: number;
+  tvaRate: number;
   total: number;
 }
 
@@ -402,7 +421,13 @@ export interface CreditNote {
   createdAt: string;
   updatedAt: string;
   sale?: { invoiceNumber: string; customerId?: Id | null } | null;
-  customer?: { id: Id; name: string; phone?: string | null; email?: string | null; address?: string | null } | null;
+  customer?: {
+    id: Id;
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+  } | null;
   createdBy?: { id: Id; fullName: string } | null;
   items: CreditNoteItem[];
   payments?: Payment[];
@@ -438,7 +463,7 @@ export interface SalesQueryParams {
   customerId?: string;
   payableOnly?: boolean;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }
 
 export interface PurchasesQueryParams {
@@ -451,7 +476,7 @@ export interface PurchasesQueryParams {
   paymentStatus?: string;
   supplierId?: string;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }
 
 export interface StockMovementsQueryParams {
@@ -464,7 +489,7 @@ export interface StockMovementsQueryParams {
   dateFrom?: string;
   dateTo?: string;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }
 
 export interface PaymentsQueryParams {
@@ -479,5 +504,5 @@ export interface PaymentsQueryParams {
   dateFrom?: string;
   dateTo?: string;
   sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortOrder?: "asc" | "desc";
 }

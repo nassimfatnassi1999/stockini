@@ -52,6 +52,8 @@ enum SaleStatus {
   COMPLETED
   CANCELLED
   RETURNED
+  PARTIALLY_REFUNDED
+  REFUNDED
 }
 
 enum PurchaseStatus {

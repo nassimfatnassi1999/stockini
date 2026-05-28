@@ -3,13 +3,31 @@ import {
   IsNotEmpty,
   IsNumber,
   IsOptional,
+  IsIn,
   IsString,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class CreateAvoirItemDto {
+export type RefundMethod =
+  | 'CASH'
+  | 'CARD'
+  | 'BANK_TRANSFER'
+  | 'CHECK'
+  | 'CUSTOMER_CREDIT'
+  | 'NONE';
+
+const REFUND_METHODS = [
+  'CASH',
+  'CARD',
+  'BANK_TRANSFER',
+  'CHECK',
+  'CUSTOMER_CREDIT',
+  'NONE',
+] as const satisfies readonly RefundMethod[];
+
+export class CreditNoteLineDto {
   @IsString()
   @IsNotEmpty()
   productId!: string;
@@ -27,7 +45,7 @@ export class CreateAvoirItemDto {
   motifLigne?: string;
 }
 
-export class CreateAvoirDto {
+export class CreateCreditNoteDto {
   @IsString()
   @IsNotEmpty()
   saleId!: string;
@@ -44,8 +62,15 @@ export class CreateAvoirDto {
   @IsOptional()
   paymentMethod?: string;
 
+  @IsIn(REFUND_METHODS)
+  @IsOptional()
+  refundMethod?: RefundMethod;
+
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateAvoirItemDto)
-  items!: CreateAvoirItemDto[];
+  @Type(() => CreditNoteLineDto)
+  items!: CreditNoteLineDto[];
 }
+
+export { CreateCreditNoteDto as CreateAvoirDto };
+export { CreditNoteLineDto as CreateAvoirItemDto };
