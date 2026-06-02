@@ -12,6 +12,9 @@ export const PERMISSIONS = {
   CLIENTS_DELETE: 'clients.delete',
   CLIENTS_EXPORT: 'clients.export',
   CLIENTS_VIEW_HISTORY: 'clients.view_history',
+  CLIENTS_LOCK: 'clients.lock',
+  CLIENTS_UNLOCK: 'clients.unlock',
+  CLIENTS_UPDATE_DEBT_DUE_DATE: 'clients.update_debt_due_date',
 
   // ── Produits ──────────────────────────────────────────────────────────────────
   PRODUCTS_VIEW: 'products.view',
@@ -181,6 +184,9 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'clients.delete', module: 'clients', action: 'delete', label: 'Supprimer', description: 'Supprimer un client' },
   { code: 'clients.export', module: 'clients', action: 'export', label: 'Exporter', description: 'Exporter la liste des clients' },
   { code: 'clients.view_history', module: 'clients', action: 'view_history', label: 'Voir historique', description: "Voir l'historique d'un client" },
+  { code: 'clients.lock', module: 'clients', action: 'lock', label: 'Verrouiller', description: 'Verrouiller un client (bloquer création documents)' },
+  { code: 'clients.unlock', module: 'clients', action: 'unlock', label: 'Déverrouiller', description: 'Déverrouiller un client' },
+  { code: 'clients.update_debt_due_date', module: 'clients', action: 'update_debt_due_date', label: 'Échéance dette', description: "Définir la date d'échéance de dette et l'auto-lock d'un client" },
 
   // ── Produits ──────────────────────────────────────────────────────────────────
   { code: 'products.view', module: 'products', action: 'view', label: 'Consulter', description: 'Consulter les produits' },

@@ -1,5 +1,7 @@
 import { CustomerType } from '@prisma/client';
 import {
+  IsBoolean,
+  IsDateString,
   IsEmail,
   IsEnum,
   IsNumber,
@@ -36,6 +38,14 @@ export class CreateCustomerDto {
   @IsNumber()
   @Min(0)
   creditBalance?: number;
+
+  @IsOptional()
+  @IsDateString()
+  debtDueDate?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  autoLockEnabled?: boolean;
 }
 
 export class UpdateCustomerDto {
@@ -67,4 +77,20 @@ export class UpdateCustomerDto {
   @IsNumber()
   @Min(0)
   creditBalance?: number;
+}
+
+export class LockCustomerDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
+export class UpdateDebtSettingsDto {
+  @IsOptional()
+  @IsDateString()
+  debtDueDate?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  autoLockEnabled?: boolean;
 }

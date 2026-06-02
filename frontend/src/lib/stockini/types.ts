@@ -71,6 +71,12 @@ export interface Customer {
   creditBalance: number | string;
   debtAmount?: number;
   unpaidInvoicesCount?: number;
+  isLocked?: boolean;
+  lockedAt?: string | null;
+  lockedReason?: string | null;
+  lockedByUserId?: string | null;
+  debtDueDate?: string | null;
+  autoLockEnabled?: boolean;
   deletedAt?: string | null;
   deletedBy?: string | null;
 }

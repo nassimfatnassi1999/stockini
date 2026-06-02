@@ -15,7 +15,7 @@ import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CustomersService } from './customers.service';
-import { CreateCustomerDto, UpdateCustomerDto } from './dto/customer.dto';
+import { CreateCustomerDto, LockCustomerDto, UpdateCustomerDto, UpdateDebtSettingsDto } from './dto/customer.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('customers')
@@ -53,6 +53,24 @@ export class CustomersController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
     return this.customersService.update(id, dto);
+  }
+
+  @RequirePermissions('clients.lock')
+  @Patch(':id/lock')
+  lock(@Param('id') id: string, @Body() dto: LockCustomerDto, @CurrentUser() user: AuthUser) {
+    return this.customersService.lockCustomer(id, user.id, dto);
+  }
+
+  @RequirePermissions('clients.unlock')
+  @Patch(':id/unlock')
+  unlock(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.customersService.unlockCustomer(id, user.id);
+  }
+
+  @RequirePermissions('clients.update_debt_due_date')
+  @Patch(':id/debt-settings')
+  updateDebtSettings(@Param('id') id: string, @Body() dto: UpdateDebtSettingsDto) {
+    return this.customersService.updateDebtSettings(id, dto);
   }
 
   @RequirePermissions('clients.delete')

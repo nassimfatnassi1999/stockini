@@ -8,7 +8,7 @@ import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Search, Plus, Trash2 } from 'lucide-react';
+import { Search, Plus, Trash2, Lock, Unlock } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { ModalFormGrid, fullSpan } from '@/components/shared/ModalForm';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
@@ -31,6 +31,8 @@ interface CreateCustomerForm {
   address: string;
   type: 'INDIVIDUAL' | 'GARAGE' | 'COMPANY';
   taxNumber: string;
+  debtDueDate: string;
+  autoLockEnabled: boolean;
 }
 
 const EMPTY_FORM: CreateCustomerForm = {
@@ -40,6 +42,8 @@ const EMPTY_FORM: CreateCustomerForm = {
   address: '',
   type: 'INDIVIDUAL',
   taxNumber: '',
+  debtDueDate: '',
+  autoLockEnabled: true,
 };
 
 function formatCurrency(value: number | string): string {
@@ -52,6 +56,79 @@ function typeLabel(type: string): string {
   return CUSTOMER_TYPES.find((t) => t.value === type)?.label ?? type;
 }
 
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('fr-TN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// ── Lock confirmation dialog ─────────────────────────────────────────────────
+interface LockDialogProps {
+  customer: Customer;
+  onConfirm: (reason: string) => void;
+  onCancel: () => void;
+  isPending: boolean;
+}
+function LockDialog({ customer, onConfirm, onCancel, isPending }: LockDialogProps) {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+        <h2 className="mb-2 text-base font-semibold">Verrouiller le client</h2>
+        <p className="mb-4 text-sm text-text-secondary">
+          Voulez-vous verrouiller <strong>{customer.name}</strong> ? Il ne pourra plus créer de factures ou BL.
+        </p>
+        <div className="mb-4 space-y-1.5">
+          <Label htmlFor="lock-reason">Raison (optionnelle)</Label>
+          <Input
+            id="lock-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ex: impayés, litige…"
+            autoFocus
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={isPending}>Annuler</Button>
+          <Button size="sm" variant="destructive" onClick={() => onConfirm(reason)} disabled={isPending}>
+            {isPending ? 'Verrouillage…' : 'Verrouiller'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Unlock confirmation dialog ───────────────────────────────────────────────
+interface UnlockDialogProps {
+  customer: Customer;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isPending: boolean;
+}
+function UnlockDialog({ customer, onConfirm, onCancel, isPending }: UnlockDialogProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+        <h2 className="mb-2 text-base font-semibold">Déverrouiller le client</h2>
+        <p className="mb-4 text-sm text-text-secondary">
+          Voulez-vous déverrouiller <strong>{customer.name}</strong> et lui permettre de créer des factures et BL à nouveau ?
+        </p>
+        {customer.lockedReason && (
+          <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Raison du verrouillage : {customer.lockedReason}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={isPending}>Annuler</Button>
+          <Button size="sm" onClick={onConfirm} disabled={isPending}>
+            {isPending ? 'Déverrouillage…' : 'Déverrouiller'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ClientsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
@@ -61,6 +138,8 @@ export default function ClientsPage() {
   const [form, setForm] = useState<CreateCustomerForm>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
+  const [lockTarget, setLockTarget] = useState<Customer | null>(null);
+  const [unlockTarget, setUnlockTarget] = useState<Customer | null>(null);
   const [refPreview, setRefPreview] = useState<string | null>(null);
   const refFetchController = useRef<AbortController | null>(null);
 
@@ -80,7 +159,6 @@ export default function ClientsPage() {
       .then((r) => setRefPreview(r.data.reference))
       .catch(() => {});
     return () => controller.abort();
-  // Re-fetch whenever the modal opens or the type changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showModal, form.type]);
 
@@ -128,6 +206,39 @@ export default function ClientsPage() {
     },
   });
 
+  const lockMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.patch<Customer>(`/customers/${id}/lock`, { reason: reason || undefined }).then((r) => r.data),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<Customer[]>(['customers', search], (prev) =>
+        prev ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)) : prev,
+      );
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      toast.success('Client verrouillé');
+      setLockTarget(null);
+    },
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors du verrouillage');
+    },
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: (id: string) => api.patch<Customer>(`/customers/${id}/unlock`).then((r) => r.data),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<Customer[]>(['customers', search], (prev) =>
+        prev ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)) : prev,
+      );
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      toast.success('Client déverrouillé');
+      setUnlockTarget(null);
+    },
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors du déverrouillage');
+    },
+  });
+
   const customers = customersQuery.data ?? [];
   const customerTypeOptions = customerTypesQuery.data?.length
     ? customerTypesQuery.data.map((option) => ({ value: option.value, label: option.label }))
@@ -141,15 +252,17 @@ export default function ClientsPage() {
       return;
     }
     setFormError(null);
-    const payload: Partial<CreateCustomerForm> = {
+    const payload: Record<string, unknown> = {
       name: form.name.trim(),
       type: form.type,
+      autoLockEnabled: form.autoLockEnabled,
       ...(form.phone.trim() && { phone: form.phone.trim() }),
       ...(form.email.trim() && { email: form.email.trim() }),
       ...(form.address.trim() && { address: form.address.trim() }),
       ...(form.taxNumber.trim() && { taxNumber: form.taxNumber.trim() }),
+      ...(form.debtDueDate.trim() && { debtDueDate: form.debtDueDate.trim() }),
     };
-    createMutation.mutate(payload);
+    createMutation.mutate(payload as Partial<CreateCustomerForm>);
   };
 
   const closeModal = () => {
@@ -216,6 +329,9 @@ export default function ClientsPage() {
                     Nom
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    Statut
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
                     Référence
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -249,6 +365,24 @@ export default function ClientsPage() {
                         {customer.name}
                       </Link>
                     </td>
+                    <td className="px-4 py-3">
+                      {customer.isLocked ? (
+                        <span
+                          className="app-status-badge border-red-200 bg-red-50 text-red-700 inline-flex items-center gap-1"
+                          title={[
+                            customer.lockedReason,
+                            customer.lockedAt ? `le ${formatDate(customer.lockedAt)}` : null,
+                          ].filter(Boolean).join(' — ')}
+                        >
+                          <Lock size={10} />
+                          Verrouillé
+                        </span>
+                      ) : (
+                        <span className="app-status-badge border-green-200 bg-green-50 text-green-700">
+                          Actif
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs font-semibold text-text-secondary">{customer.reference}</td>
                     <td className="px-4 py-3">
                       <span className="app-status-badge border-slate-200 bg-slate-50 text-slate-700">
@@ -277,6 +411,22 @@ export default function ClientsPage() {
                       <KebabMenu
                         items={[
                           {
+                            label: 'Verrouiller',
+                            icon: <Lock size={14} />,
+                            onClick: () => setLockTarget(customer),
+                            hidden: !can('clients.lock') || !!customer.isLocked,
+                          },
+                          {
+                            label: 'Déverrouiller',
+                            icon: <Unlock size={14} />,
+                            onClick: () => setUnlockTarget(customer),
+                            hidden: !can('clients.unlock') || !customer.isLocked,
+                          },
+                          {
+                            divider: true,
+                            hidden: !can('clients.lock') && !can('clients.unlock'),
+                          },
+                          {
                             label: 'Supprimer',
                             icon: <Trash2 size={14} />,
                             onClick: () => setTrashTarget({ id: customer.id, name: customer.name }),
@@ -300,6 +450,24 @@ export default function ClientsPage() {
           isPending={deleteMutation.isPending}
           onConfirm={() => deleteMutation.mutate(trashTarget.id)}
           onCancel={() => setTrashTarget(null)}
+        />
+      )}
+
+      {lockTarget && (
+        <LockDialog
+          customer={lockTarget}
+          isPending={lockMutation.isPending}
+          onConfirm={(reason) => lockMutation.mutate({ id: lockTarget.id, reason })}
+          onCancel={() => setLockTarget(null)}
+        />
+      )}
+
+      {unlockTarget && (
+        <UnlockDialog
+          customer={unlockTarget}
+          isPending={unlockMutation.isPending}
+          onConfirm={() => unlockMutation.mutate(unlockTarget.id)}
+          onCancel={() => setUnlockTarget(null)}
         />
       )}
 
@@ -413,6 +581,31 @@ export default function ClientsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, taxNumber: e.target.value }))}
                 placeholder="Matricule fiscal optionnel"
               />
+            </div>
+
+            {/* Date d'échéance dette */}
+            <div className="space-y-1.5">
+              <Label htmlFor="customer-debt-due">Date d&apos;échéance dette</Label>
+              <Input
+                id="customer-debt-due"
+                type="date"
+                value={form.debtDueDate}
+                onChange={(e) => setForm((f) => ({ ...f, debtDueDate: e.target.value }))}
+              />
+            </div>
+
+            {/* Auto-lock */}
+            <div className="flex items-center gap-2 self-end pb-1.5">
+              <input
+                id="customer-auto-lock"
+                type="checkbox"
+                checked={form.autoLockEnabled}
+                onChange={(e) => setForm((f) => ({ ...f, autoLockEnabled: e.target.checked }))}
+                className="h-4 w-4 rounded border-input"
+              />
+              <Label htmlFor="customer-auto-lock" className="cursor-pointer">
+                Auto-lock si échéance dépassée
+              </Label>
             </div>
           </ModalFormGrid>
         </form>

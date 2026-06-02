@@ -18,7 +18,7 @@ function buildClearService(countResult = 3) {
   const references = {} as any;
   const settings = {} as any;
   const caisseService = {} as any;
-  const service = new PaymentsService(prisma, references, settings, caisseService);
+  const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any);
   return { service, prisma };
 }
 
@@ -164,7 +164,7 @@ describe('PaymentsService.paySale', () => {
       ),
     } as any;
 
-    const service = new PaymentsService(prisma, references, settings, caisseService);
+    const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any);
     return { service, tx, caisseService };
   }
 
@@ -421,6 +421,7 @@ describe('PaymentsService.payPurchase', () => {
       references,
       settings,
       caisseService,
+      { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any,
     );
     return { service, tx, caisseService };
   }

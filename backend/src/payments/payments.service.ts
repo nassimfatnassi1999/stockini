@@ -8,6 +8,7 @@ import {
   SaleStatus,
 } from '@prisma/client';
 import { CaisseService } from '../caisse/caisse.service';
+import { CustomersService } from '../customers/customers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -22,6 +23,7 @@ export class PaymentsService {
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
+    private readonly customersService: CustomersService,
   ) {}
 
   async findAll(query?: PaymentQueryDto) {
@@ -97,7 +99,7 @@ export class PaymentsService {
 
   async remove(id: string, userId?: string) {
     this.logger.log(`DELETE /payments/${id} called by ${userId ?? 'unknown'}`);
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findFirstOrThrow({
         where: { id, deletedAt: null },
         include: {
@@ -172,12 +174,19 @@ export class PaymentsService {
       }
 
       this.logger.log(`Payment ${id} soft-deleted by ${userId ?? 'unknown'}`);
-      return { id };
+      return { id, customerId: payment.customerId };
     });
+
+    // Recalcule verrouillage après suppression paiement (la dette peut réapparaître)
+    if (result.customerId) {
+      await this.customersService.recalculateClientLockStatus(result.customerId);
+    }
+
+    return { id: result.id };
   }
 
   async paySale(saleId: string, dto: PaySaleDto, userId?: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // CREDIT cannot be used as a later payment method — no treasury event.
       if (dto.method === 'CREDIT') {
         throw new BadRequestException(
@@ -255,6 +264,13 @@ export class PaymentsService {
 
       return payment;
     });
+
+    // Recalcule verrouillage après paiement (la dette peut être soldée)
+    if (result.customerId) {
+      await this.customersService.recalculateClientLockStatus(result.customerId);
+    }
+
+    return result;
   }
 
   async payPurchase(purchaseId: string, dto: PayPurchaseDto, userId?: string) {

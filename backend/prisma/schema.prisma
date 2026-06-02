@@ -257,6 +257,12 @@ model Customer {
   origin                CustomerOrigin        @default(MANUAL)
   taxNumber             String?
   creditBalance         Decimal               @default(0) @db.Decimal(12, 3)
+  isLocked              Boolean               @default(false)
+  lockedAt              DateTime?
+  lockedReason          String?
+  lockedByUserId        String?
+  debtDueDate           DateTime?
+  autoLockEnabled       Boolean               @default(true)
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
   deletedAt             DateTime?
@@ -270,6 +276,7 @@ model Customer {
   @@index([name])
   @@index([reference])
   @@index([deletedAt])
+  @@index([isLocked])
 }
 
 model Supplier {

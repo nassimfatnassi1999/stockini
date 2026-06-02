@@ -132,6 +132,7 @@ describe('SalesService document references', () => {
       references as any,
       { assertActiveOption: jest.fn() } as any,
       { recordMovement: jest.fn().mockResolvedValue({}) } as any,
+      { assertClientNotLocked: jest.fn().mockResolvedValue(undefined), recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     return {

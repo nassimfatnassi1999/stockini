@@ -15,6 +15,7 @@ import {
   StockMovementType,
 } from '@prisma/client';
 import { CaisseService } from '../caisse/caisse.service';
+import { CustomersService } from '../customers/customers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -67,6 +68,7 @@ export class SalesService {
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
+    private readonly customersService: CustomersService,
   ) {}
 
   async getNextReference(
@@ -131,6 +133,11 @@ export class SalesService {
     const isDevis = documentType === DocumentType.DEVIS;
     const acceptsPayment = PAYMENT_ACCEPTING_TYPES.has(documentType);
 
+    // ── Blocage client verrouillé (hors DEVIS) ────────────────────────────────
+    if (!isDevis && resolvedCustomerId) {
+      await this.customersService.assertClientNotLocked(resolvedCustomerId);
+    }
+
     if (dto.paymentMethod) {
       await this.settings.assertActiveOption(
         'payment_methods',
@@ -147,7 +154,7 @@ export class SalesService {
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
     const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
 
-    return this.prisma.$transaction(async (tx) => {
+    const sale = await this.prisma.$transaction(async (tx) => {
       const prefix = this.prefixForDocument(documentType);
       const invoiceNumber = await this.references.generateSimple(
         prefix,
@@ -386,6 +393,13 @@ export class SalesService {
         },
       });
     });
+
+    // Recalcule le statut de verrouillage après création (BL/Facture créent une dette)
+    if (resolvedCustomerId) {
+      await this.customersService.recalculateClientLockStatus(resolvedCustomerId);
+    }
+
+    return sale;
   }
 
   async validate(id: string, user?: AuthUser) {
@@ -699,7 +713,7 @@ export class SalesService {
   ) {
     const userId = user?.id;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const source = await tx.sale.findFirstOrThrow({
         where: { id: sourceId, deletedAt: null },
         include: { items: true, customer: true },
@@ -728,6 +742,11 @@ export class SalesService {
         throw new BadRequestException(
           'Le document source ne contient aucun article',
         );
+      }
+
+      // ── Blocage client verrouillé pour les transformations vers BL/Facture ──
+      if (source.customerId && STOCK_IMPACTING_TYPES.has(targetType)) {
+        await this.customersService.assertClientNotLocked(source.customerId);
       }
 
       const targetAppliesStock = STOCK_IMPACTING_TYPES.has(targetType);
@@ -851,6 +870,14 @@ export class SalesService {
         },
       });
     });
+
+    // Recalcule le statut de verrouillage si transformation vers BL/Facture
+    const transformedSale = result as { customerId?: string | null };
+    if (transformedSale.customerId && STOCK_IMPACTING_TYPES.has(targetType)) {
+      await this.customersService.recalculateClientLockStatus(transformedSale.customerId);
+    }
+
+    return result;
   }
 
   async recalculateLastSalePrices() {
