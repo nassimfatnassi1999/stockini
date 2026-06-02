@@ -37,6 +37,7 @@ const TYPE_LABELS: Record<string, string> = {
   RETRAIT_MANUEL:      'Retrait manuel',
   ANNULATION_VENTE:    'Annulation vente',
   ANNULATION_ACHAT:    'Annulation achat',
+  CASH_RESET:          'Remise à zéro caisse',
 };
 
 function fmt(n: number) {

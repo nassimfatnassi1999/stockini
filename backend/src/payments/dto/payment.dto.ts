@@ -95,3 +95,21 @@ export class PayPurchaseDto {
   @IsString()
   note?: string;
 }
+
+export class ClearPaymentHistoryDto {
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+}

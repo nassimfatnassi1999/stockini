@@ -2,11 +2,12 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ReferencesModule } from '../references/references.module';
 import { CustomersModule } from '../customers/customers.module';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { CaisseController } from './caisse.controller';
 import { CaisseService } from './caisse.service';
 
 @Module({
-  imports: [PrismaModule, ReferencesModule, CustomersModule],
+  imports: [PrismaModule, ReferencesModule, CustomersModule, AuditLogsModule],
   controllers: [CaisseController],
   providers: [CaisseService],
   exports: [CaisseService],

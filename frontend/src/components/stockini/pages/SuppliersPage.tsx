@@ -7,7 +7,9 @@ import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { stockiniApi } from '@/lib/stockini/api';
+import { money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { Supplier } from '@/lib/stockini/types';
 import { CrudModal } from '../shared/CrudModal';
@@ -85,14 +87,25 @@ export function SuppliersPage() {
         subtitle=""
         loading={query.isLoading}
         error={query.error}
-        headers={['Référence', 'Fournisseur', 'Contact', 'Téléphone', 'Email', 'Conditions', 'Actions']}
-        rows={data.map((supplier: Supplier) => [
+        headers={['Référence', 'Fournisseur', 'Contact', 'Téléphone', 'Email', 'Conditions', 'Notre dette', 'Actions']}
+        rows={data.map((supplier: Supplier) => {
+          const debt = Number(supplier.totalDebt ?? 0);
+          return [
           <span key="reference" className="font-mono font-semibold">{supplier.reference}</span>,
           <Identity key="name" name={supplier.name} />,
           supplier.contactPerson ?? '-',
           supplier.phone ?? '-',
           supplier.email ?? '-',
           supplier.paymentTerms ?? '-',
+          <Badge
+            key="debt"
+            title="Ce que nous devons au fournisseur (somme des restes à payer)"
+            className={debt > 0
+              ? 'border-red-200 bg-red-50 font-mono text-red-700'
+              : 'border-emerald-200 bg-emerald-50 font-mono text-emerald-700'}
+          >
+            {money(debt)}
+          </Badge>,
           <RowActions
             key="actions"
             onEdit={() => {
@@ -113,7 +126,8 @@ export function SuppliersPage() {
             canEdit={can('suppliers.update')}
             canDelete={can('suppliers.delete')}
           />,
-        ])}
+          ];
+        })}
       />
       {editing && can(modalPermission) && (
         <CrudModal

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownCircle, ArrowUpCircle, Check } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Check, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,8 @@ import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { CaisseMovement, CaisseMovementType, Purchase } from '@/lib/stockini/types';
+import { usePermissions } from '@/lib/hooks/usePermissions';
+import { ClearHistoryModal } from './shared/ClearHistoryModal';
 
 function PageHeader({ title, subtitle, actions }: { title: string; subtitle: string; actions?: React.ReactNode }) {
   return (
@@ -96,17 +98,31 @@ interface CaisseOpForm {
 
 export function DepensesPage() {
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
+  const canClearHistory = can('finance.history.clear');
   const [activeTab, setActiveTab] = useState<'invoices' | 'history' | 'caisse'>('invoices');
   const [payTarget, setPayTarget] = useState<Purchase | null>(null);
+  const [showClearSupplierModal, setShowClearSupplierModal] = useState(false);
+  const [showClearCaisseModal, setShowClearCaisseModal] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', method: 'CASH', note: '' });
   const [caisseOp, setCaisseOp] = useState<CaisseOp | null>(null);
   const [caisseForm, setCaisseForm] = useState<CaisseOpForm>({ montant: '', motif: '' });
   const [caisseTypeFilter, setCaisseTypeFilter] = useState<CaisseMovementType | ''>('');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceSupplierFilter, setInvoiceSupplierFilter] = useState('');
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'' | 'UNPAID' | 'PARTIAL'>('');
   const paymentMethodOptions = usePaymentMethodOptions();
 
+  const suppliersQuery = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
+
   const purchasesQuery = useQuery({
-    queryKey: ['stockini-purchases', 'supplier-expenses'],
-    queryFn: () => stockiniApi.purchases({ page: 1, limit: 100 }),
+    queryKey: ['stockini-payable-purchases', invoiceSearch, invoiceSupplierFilter, invoiceStatusFilter],
+    queryFn: () =>
+      stockiniApi.payablePurchases({
+        search: invoiceSearch || undefined,
+        supplierId: invoiceSupplierFilter || undefined,
+        paymentStatus: invoiceStatusFilter || undefined,
+      }),
   });
   const paymentsQuery = useQuery({
     queryKey: ['stockini-payments', 'supplier-expenses'],
@@ -118,17 +134,19 @@ export function DepensesPage() {
     queryFn: () => stockiniApi.caisseHistorique(caisseTypeFilter || undefined),
   });
 
-  const purchasesData = Array.isArray(purchasesQuery.data?.data) ? purchasesQuery.data.data : [];
-  const unpaidPurchases = purchasesData.filter(
-    (p) => (p.paymentStatus === 'UNPAID' || p.paymentStatus === 'PARTIAL') && !p.deletedAt,
-  );
+  // Le backend ne renvoie déjà que les factures avec reste à payer > 0 (hors annulées).
+  const unpaidPurchases = Array.isArray(purchasesQuery.data?.data) ? purchasesQuery.data.data : [];
+  const totalRemaining = Number(purchasesQuery.data?.totalRemaining ?? 0);
+  const suppliers = suppliersQuery.data ?? [];
   const paymentsData = paymentsQuery.data?.data ?? [];
   const supplierPayments = paymentsData.filter((p) => !p.deletedAt);
 
   const payMutation = useMutation({
     mutationFn: () => stockiniApi.payPurchase(payTarget!.id, { amount: Number(payForm.amount), method: payForm.method, note: payForm.note || undefined }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-payable-purchases'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-suppliers'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
@@ -170,6 +188,26 @@ export function DepensesPage() {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg ?? 'Erreur lors du dépôt');
     },
+  });
+
+  const clearSupplierMutation = useMutation({
+    mutationFn: () => stockiniApi.clearSupplierPaymentsHistory(),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+      setShowClearSupplierModal(false);
+      toast.success(`Historique vidé (${res.count} entrées masquées)`);
+    },
+    onError: () => toast.error('Erreur lors du vidage de l\'historique'),
+  });
+
+  const clearCaisseMutation = useMutation({
+    mutationFn: () => stockiniApi.clearCaisseHistory(),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
+      setShowClearCaisseModal(false);
+      toast.success(`Historique caisse vidé (${res.count} entrées masquées)`);
+    },
+    onError: () => toast.error('Erreur lors du vidage de l\'historique caisse'),
   });
 
   const remaining = payTarget ? Number(payTarget.remainingAmount) : 0;
@@ -225,6 +263,40 @@ export function DepensesPage() {
       {activeTab === 'invoices' && (
         <Card className="shadow-card">
           <CardContent className="p-0">
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  type="search"
+                  placeholder="Rechercher un document achat..."
+                  value={invoiceSearch}
+                  onChange={(e) => setInvoiceSearch(e.target.value)}
+                  className="h-9 sm:max-w-xs"
+                />
+                <select
+                  value={invoiceSupplierFilter}
+                  onChange={(e) => setInvoiceSupplierFilter(e.target.value)}
+                  className="app-select h-9 text-sm"
+                >
+                  <option value="">Tous les fournisseurs</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={invoiceStatusFilter}
+                  onChange={(e) => setInvoiceStatusFilter(e.target.value as '' | 'UNPAID' | 'PARTIAL')}
+                  className="app-select h-9 text-sm"
+                >
+                  <option value="">Tous les statuts</option>
+                  <option value="UNPAID">Non payé</option>
+                  <option value="PARTIAL">Partiellement payé</option>
+                </select>
+              </div>
+              <div className="text-sm whitespace-nowrap">
+                <span className="text-text-muted">Total à payer : </span>
+                <span className="font-mono font-bold text-red-600">{money(totalRemaining)}</span>
+              </div>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -263,6 +335,19 @@ export function DepensesPage() {
       )}
 
       {activeTab === 'history' && (
+        <>
+          {canClearHistory && (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClearSupplierModal(true)}
+                className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 hover:border-red-300"
+              >
+                <Trash2 size={13} />
+                Vider l&apos;historique
+              </button>
+            </div>
+          )}
         <Card className="shadow-card">
           <CardContent className="p-0">
             <Table>
@@ -294,9 +379,23 @@ export function DepensesPage() {
             </Table>
           </CardContent>
         </Card>
+        </>
       )}
 
       {activeTab === 'caisse' && (
+        <>
+          {canClearHistory && (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClearCaisseModal(true)}
+                className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 hover:border-red-300"
+              >
+                <Trash2 size={13} />
+                Vider l&apos;historique
+              </button>
+            </div>
+          )}
         <Card className="shadow-card">
           <CardContent className="p-0">
             <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -354,7 +453,24 @@ export function DepensesPage() {
             </Table>
           </CardContent>
         </Card>
+        </>
       )}
+
+      <ClearHistoryModal
+        open={showClearSupplierModal}
+        onClose={() => setShowClearSupplierModal(false)}
+        onConfirm={() => clearSupplierMutation.mutate()}
+        isPending={clearSupplierMutation.isPending}
+        moduleName="Paiements fournisseurs"
+      />
+
+      <ClearHistoryModal
+        open={showClearCaisseModal}
+        onClose={() => setShowClearCaisseModal(false)}
+        onConfirm={() => clearCaisseMutation.mutate()}
+        isPending={clearCaisseMutation.isPending}
+        moduleName="Historique caisse"
+      />
 
       {/* Modal paiement fournisseur */}
       <SlideOver

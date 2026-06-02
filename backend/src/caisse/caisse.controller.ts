@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Patch,
   Post,
   Query,
@@ -17,8 +18,10 @@ import {
   CaisseConfigUpdateDto,
   CaisseOperationDto,
   CashAnalyticsQueryDto,
+  CashResetDto,
   CashSummaryQueryDto,
   CashTransactionsQueryDto,
+  ClearCaisseHistoryDto,
 } from './dto/caisse.dto';
 import { CaisseService } from './caisse.service';
 
@@ -85,6 +88,24 @@ export class CaisseController {
   @Patch('config')
   updateConfig(@Body() dto: CaisseConfigUpdateDto) {
     return this.caisseService.setAllowNegative(dto.allowNegative ?? false);
+  }
+
+  // ─── Reset balance ────────────────────────────────────────────────────────────
+
+  @RequirePermissions('cash.reset_balance')
+  @Post('reset')
+  @HttpCode(200)
+  resetBalance(@Body() dto: CashResetDto, @CurrentUser() user?: AuthUser) {
+    return this.caisseService.resetBalance(dto.motif, user?.id);
+  }
+
+  // ─── Clear history (soft-clear, display only) ─────────────────────────────────
+
+  @RequirePermissions('finance.history.clear')
+  @Post('history/clear')
+  @HttpCode(200)
+  clearHistory(@Body() dto: ClearCaisseHistoryDto, @CurrentUser() user?: AuthUser) {
+    return this.caisseService.clearHistory(dto, user!.id);
   }
 
   // ─── Backfill (idempotent) ────────────────────────────────────────────────────

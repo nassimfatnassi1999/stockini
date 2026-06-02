@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================
-# CRM Geodetection — MinIO Setup (VPS, no Docker)
+# Stockini — MinIO Setup (VPS, no Docker)
 # =============================================================
 # Usage: sudo bash deploy/vps/setup_minio.sh
 # =============================================================
@@ -36,7 +36,7 @@ set +a
 
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required in .env}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required in .env}"
-MINIO_BUCKET="${MINIO_BUCKET:-crm-documents}"
+MINIO_BUCKET="${MINIO_BUCKET:-generated-documents}"
 
 if [[ "$MINIO_ACCESS_KEY" == CHANGE_ME* ]] || [[ "$MINIO_SECRET_KEY" == CHANGE_ME* ]]; then
   log_err "Replace MINIO_ACCESS_KEY and MINIO_SECRET_KEY in .env before running this script."

@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Strict Firewall / UFW (Step 4)
+# Stockini — Strict Firewall / UFW (Step 4)
 # =============================================================
 # Run on VPS:  sudo bash deploy/scripts/4_setup_firewall.sh
 #
@@ -22,7 +22,7 @@ require_root
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Firewall Setup"
+echo "  Stockini — Firewall Setup"
 echo "========================================="
 echo ""
 

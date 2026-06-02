@@ -1,22 +1,20 @@
 'use client';
 
 import type React from 'react';
-import { Download, Loader2, Mail, X } from 'lucide-react';
+import { Loader2, Mail, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BulkActionsBarProps {
   count: number;
-  onDownload: () => void;
   onEmail: () => void;
   emailLoading?: boolean;
   onClear: () => void;
-  /** Bouton Transformer (dropdown) injecté entre Générer et Envoyer */
+  /** Bouton Transformer (dropdown) injecté avant Envoyer */
   transformButton?: React.ReactNode;
 }
 
 export function BulkActionsBar({
   count,
-  onDownload,
   onEmail,
   emailLoading,
   onClear,
@@ -39,22 +37,7 @@ export function BulkActionsBar({
 
       <div className="h-4 w-px bg-slate-200" />
 
-      {/* Générer — orange */}
-      <button
-        type="button"
-        onClick={onDownload}
-        className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium',
-          'border border-orange-200/70 bg-orange-50 text-orange-700',
-          'transition-all duration-150',
-          'hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100',
-        )}
-      >
-        <Download size={12} />
-        Générer
-      </button>
-
-      {/* Transformer — dropdown injecté (entre Générer et Envoyer) */}
+      {/* Transformer — dropdown injecté avant Envoyer */}
       {transformButton}
 
       {/* Envoyer — blue */}

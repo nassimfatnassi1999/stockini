@@ -87,6 +87,7 @@ export const PERMISSIONS = {
   CAISSE_CLOSE: 'caisse.close',
   CAISSE_ADMIN: 'caisse.admin',
   CAISSE_EXPORT: 'caisse.export',
+  CASH_RESET_BALANCE: 'cash.reset_balance',
 
   // ── Dépenses / paiements fournisseurs ─────────────────────────────────────────
   EXPENSES_VIEW: 'expenses.view',
@@ -136,12 +137,16 @@ export const PERMISSIONS = {
   TRASH_RESTORE: 'trash.restore',
   TRASH_PERMANENT_DELETE: 'trash.permanent_delete',
   TRASH_EMPTY: 'trash.empty',
+  TRASH_PREVIEW_DELETE_IMPACT: 'trash.preview_delete_impact',
 
   // ── Documentation ─────────────────────────────────────────────────────────────
   DOCUMENTATION_VIEW: 'documentation.view',
   DOCUMENTATION_CREATE: 'documentation.create',
   DOCUMENTATION_UPDATE: 'documentation.update',
   DOCUMENTATION_DELETE: 'documentation.delete',
+
+  // ── Historiques financiers ────────────────────────────────────────────────────
+  FINANCE_HISTORY_CLEAR: 'finance.history.clear',
 
   // ── Base de données ───────────────────────────────────────────────────────────
   DATABASE_VIEW: 'database.view',
@@ -251,6 +256,7 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'caisse.close', module: 'caisse', action: 'close', label: 'Clôturer', description: 'Clôturer la caisse en fin de journée' },
   { code: 'caisse.admin', module: 'caisse', action: 'admin', label: 'Administrer', description: 'Configurer la caisse (solde négatif, paramètres avancés)' },
   { code: 'caisse.export', module: 'caisse', action: 'export', label: 'Exporter', description: 'Exporter les données de caisse' },
+  { code: 'cash.reset_balance', module: 'caisse', action: 'reset_balance', label: 'Remise à zéro de la caisse', description: 'Autorise la remise à zéro du solde de caisse.' },
 
   // ── Dépenses / paiements fournisseurs ─────────────────────────────────────────
   { code: 'expenses.view', module: 'expenses', action: 'view', label: 'Consulter', description: 'Consulter les dépenses' },
@@ -300,12 +306,16 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'trash.restore', module: 'trash', action: 'restore', label: 'Restaurer', description: 'Restaurer un élément depuis la corbeille' },
   { code: 'trash.permanent_delete', module: 'trash', action: 'permanent_delete', label: 'Suppr. définitive', description: 'Supprimer définitivement un élément' },
   { code: 'trash.empty', module: 'trash', action: 'empty', label: 'Vider la corbeille', description: 'Supprimer définitivement tous les éléments de la corbeille' },
+  { code: 'trash.preview_delete_impact', module: 'trash', action: 'preview_delete_impact', label: 'Prévisualiser impact', description: "Voir l'impact d'une suppression définitive avant confirmation" },
 
   // ── Documentation ─────────────────────────────────────────────────────────────
   { code: 'documentation.view', module: 'documentation', action: 'view', label: 'Consulter', description: 'Consulter la documentation Stockini' },
   { code: 'documentation.create', module: 'documentation', action: 'create', label: 'Créer', description: 'Créer un article de documentation' },
   { code: 'documentation.update', module: 'documentation', action: 'update', label: 'Modifier', description: 'Modifier un article de documentation' },
   { code: 'documentation.delete', module: 'documentation', action: 'delete', label: 'Supprimer', description: 'Supprimer un article de documentation' },
+
+  // ── Historiques financiers ────────────────────────────────────────────────────
+  { code: 'finance.history.clear', module: 'finance', action: 'history.clear', label: 'Vider historique', description: 'Masquer les entrées des historiques financiers (paiements, caisse). Action irréversible réservée au Super Admin.' },
 
   // ── Base de données ───────────────────────────────────────────────────────────
   { code: 'database.view', module: 'database', action: 'view', label: 'Consulter', description: 'Consulter la section base de données' },

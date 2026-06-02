@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — SSH Hardening (Step 5)
+# Stockini — SSH Hardening (Step 5)
 # =============================================================
 # Run on VPS:  sudo bash deploy/scripts/5_secure_ssh.sh
 #
@@ -23,11 +23,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 require_root
 
 SSHD_CONFIG="/etc/ssh/sshd_config"
-SSHD_HARDENING="/etc/ssh/sshd_config.d/99-crm-hardening.conf"
+SSHD_HARDENING="/etc/ssh/sshd_config.d/99-stockini-hardening.conf"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — SSH Hardening"
+echo "  Stockini — SSH Hardening"
 echo "========================================="
 echo ""
 
@@ -53,7 +53,7 @@ log_ok "Backup of sshd_config created"
 # ── Create hardening drop-in config ──────────────────────────
 cat > "$SSHD_HARDENING" << 'EOF'
 # =============================================================
-# CRM Apprensur — SSH Hardening (drop-in)
+# Stockini — SSH Hardening (drop-in)
 # =============================================================
 PermitRootLogin no
 PasswordAuthentication no

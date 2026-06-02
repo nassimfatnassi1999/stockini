@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================
-# CRM Geodetection — VPS Monitoring Dashboard
+# Stockini — VPS Monitoring Dashboard
 # =============================================================
 # Usage: bash deploy/vps/monitor.sh
 #
@@ -158,7 +158,7 @@ health_check_backend() {
   done
 
   fail "Backend ne répond PAS sur http://127.0.0.1:${port}/health après ${max_attempts} tentatives"
-  warn "  → Vérifiez les logs: pm2 logs crm-backend --lines 50"
+  warn "  → Vérifiez les logs: pm2 logs stockini-backend --lines 50"
   return 1
 }
 
@@ -172,7 +172,7 @@ check_all_status() {
   if command -v pm2 &>/dev/null; then
     PM2_STATUS=$(pm2 jlist 2>/dev/null | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
     if [ "$PM2_STATUS" = "online" ]; then
-      ok "crm-backend: ${GREEN}online${NC}"
+      ok "stockini-backend: ${GREEN}online${NC}"
       PM2_MEM=$(pm2 jlist 2>/dev/null | grep -o '"memory":[0-9]*' | head -1 | cut -d: -f2)
       if [ -n "$PM2_MEM" ]; then
         PM2_MEM_MB=$((PM2_MEM / 1024 / 1024))
@@ -187,7 +187,7 @@ check_all_status() {
         info "Uptime: ${UPTIME_H}h ${UPTIME_M}m"
       fi
     else
-      fail "crm-backend: ${RED}${PM2_STATUS:-not found}${NC}"
+      fail "stockini-backend: ${RED}${PM2_STATUS:-not found}${NC}"
     fi
   else
     fail "PM2 not installed"
@@ -212,15 +212,15 @@ check_all_status() {
 
   # Frontend
   echo -e "  ${BOLD}Frontend${NC}"
-  if command -v pm2 &>/dev/null && pm2 jlist 2>/dev/null | grep -q '"name":"crm-frontend"'; then
-    ok "crm-frontend: ${GREEN}configured in PM2${NC}"
+  if command -v pm2 &>/dev/null && pm2 jlist 2>/dev/null | grep -q '"name":"stockini-frontend"'; then
+    ok "stockini-frontend: ${GREEN}configured in PM2${NC}"
     if curl -sf --connect-timeout 2 http://127.0.0.1:3000 > /dev/null 2>&1; then
       ok "Port 3000: ${GREEN}responding${NC}"
     else
       fail "Port 3000: ${RED}not responding${NC}"
     fi
   else
-    fail "crm-frontend: ${RED}not found in PM2${NC}"
+    fail "stockini-frontend: ${RED}not found in PM2${NC}"
   fi
   echo ""
 
@@ -266,7 +266,7 @@ check_all_status() {
 show_pm2_logs() {
   header "📋 PM2 LOGS (last 50 lines)"
   echo ""
-  pm2 logs crm-backend --lines 50 --nostream 2>/dev/null || fail "No PM2 logs"
+  pm2 logs stockini-backend --lines 50 --nostream 2>/dev/null || fail "No PM2 logs"
   pause
 }
 
@@ -295,7 +295,7 @@ show_pg_status() {
   if command -v psql &>/dev/null; then
     sudo -u postgres psql -c "SELECT datname, numbackends as connections FROM pg_stat_database WHERE datname NOT LIKE 'template%';" 2>/dev/null || fail "Cannot query PostgreSQL"
     echo ""
-    sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('geodetection_crm')) AS db_size;" 2>/dev/null
+    sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('stockpro')) AS db_size;" 2>/dev/null
   else
     fail "psql not found"
   fi
@@ -315,7 +315,7 @@ restart_backend() {
     backend_port="${backend_port:-3001}"
   fi
 
-  pm2 restart crm-backend --update-env 2>/dev/null && ok "Backend restarted" || { fail "Restart failed"; pause; return; }
+  pm2 restart stockini-backend --update-env 2>/dev/null && ok "Backend restarted" || { fail "Restart failed"; pause; return; }
   echo ""
 
   # Health check after restart
@@ -400,7 +400,7 @@ clear_backend() {
 
   # Stop PM2
   info "Arrêt de PM2..."
-  pm2 stop crm-backend 2>/dev/null || true
+  pm2 stop stockini-backend 2>/dev/null || true
 
   # Clean
   info "Suppression dist/ et node_modules/..."
@@ -481,7 +481,7 @@ clear_backend() {
 module.exports = {
   apps: [
     {
-      name: 'crm-backend',
+      name: 'stockini-backend',
       cwd: '${BACKEND_DIR}',
       script: '${MAIN_JS_RELATIVE}',
       instances: 1,
@@ -508,7 +508,7 @@ ECOSYSTEM
   # Start PM2
   cd "$PROJECT_ROOT"
   info "Démarrage PM2..."
-  pm2 delete crm-backend 2>/dev/null || true
+  pm2 delete stockini-backend 2>/dev/null || true
 
   # Kill stray process on port
   BACKEND_PORT=$(grep BACKEND_PORT "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
@@ -528,7 +528,7 @@ ECOSYSTEM
     ok "Backend démarré: ${GREEN}online${NC}"
   else
     fail "Backend status: ${RED}${PM2_STATUS:-inconnu}${NC}"
-    warn "Vérifiez: pm2 logs crm-backend"
+    warn "Vérifiez: pm2 logs stockini-backend"
     pm2 save 2>/dev/null
     pause
     return
@@ -551,7 +551,7 @@ ECOSYSTEM
     warn "Le processus PM2 tourne mais l'application a probablement une erreur au démarrage."
     warn "Diagnostics :"
     echo ""
-    pm2 logs crm-backend --lines 30 --nostream 2>/dev/null || true
+    pm2 logs stockini-backend --lines 30 --nostream 2>/dev/null || true
   fi
   pause
 }
@@ -579,7 +579,7 @@ clear_frontend() {
 
   echo -e "  ${YELLOW}⚠  Ceci va :${NC}"
   echo -e "    • Supprimer ${BOLD}frontend/.next/${NC} et ${BOLD}frontend/node_modules/${NC}"
-  echo -e "    • Réinstaller, rebuild et redémarrer ${BOLD}crm-frontend${NC} avec PM2"
+  echo -e "    • Réinstaller, rebuild et redémarrer ${BOLD}stockini-frontend${NC} avec PM2"
   echo ""
   read -rp "  ▸ Continuer ? (O/n) " confirm
   confirm="${confirm:-O}"
@@ -720,10 +720,10 @@ clear_and_delete() {
 
   echo ""
   info "1. Arrêt du backend et frontend (PM2)..."
-  pm2 stop crm-backend 2>/dev/null || true
-  pm2 delete crm-backend 2>/dev/null || true
-  pm2 stop crm-frontend 2>/dev/null || true
-  pm2 delete crm-frontend 2>/dev/null || true
+  pm2 stop stockini-backend 2>/dev/null || true
+  pm2 delete stockini-backend 2>/dev/null || true
+  pm2 stop stockini-frontend 2>/dev/null || true
+  pm2 delete stockini-frontend 2>/dev/null || true
   pm2 save --force 2>/dev/null || true
 
   info "2. Suppression des dossiers backend..."
@@ -735,8 +735,8 @@ clear_and_delete() {
   info "4. Vidage de la base de données PostgreSQL..."
   if [ -n "$ENV_FILE" ]; then
     set -a; source "$ENV_FILE"; set +a
-    local DB_NAME_VAL="${DB_NAME:-geodetection_crm}"
-    local DB_USER_VAL="${DB_USER:-geodetection}"
+    local DB_NAME_VAL="${DB_NAME:-stockpro}"
+    local DB_USER_VAL="${DB_USER:-stockpro}"
 
     # Drop and recreate public schema
     sudo -u postgres psql -d "$DB_NAME_VAL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO $DB_USER_VAL; GRANT ALL ON SCHEMA public TO public;" >/dev/null 2>&1
@@ -842,15 +842,15 @@ backup_database() {
   fi
   set -a; source "$ENV_FILE"; set +a
 
-  local DB_NAME_VAL="${DB_NAME:-geodetection_crm}"
-  local DB_USER_VAL="${DB_USER:-geodetection}"
+  local DB_NAME_VAL="${DB_NAME:-stockpro}"
+  local DB_USER_VAL="${DB_USER:-stockpro}"
   local BACKUP_BASE="/home/ubuntu/backup-db"
 
   # Create backup dir
   mkdir -p "$BACKUP_BASE"
 
   local TIMESTAMP=$(date +'%d%m%Y')
-  local BACKUP_FILE="$BACKUP_BASE/backup_geodetection_crm_${TIMESTAMP}.sql"
+  local BACKUP_FILE="$BACKUP_BASE/backup_stockpro_${TIMESTAMP}.sql"
 
   # Show current DB size
   DB_SIZE=$(sudo -u postgres psql -tAc "SELECT pg_size_pretty(pg_database_size('$DB_NAME_VAL'));" 2>/dev/null | tr -d '[:space:]')
@@ -951,8 +951,8 @@ restore_database() {
   fi
   set -a; source "$ENV_FILE"; set +a
 
-  local DB_NAME_VAL="${DB_NAME:-geodetection_crm}"
-  local DB_USER_VAL="${DB_USER:-geodetection}"
+  local DB_NAME_VAL="${DB_NAME:-stockpro}"
+  local DB_USER_VAL="${DB_USER:-stockpro}"
   local BACKUP_BASE="/home/ubuntu/backup-db"
 
   # Check backup dir
@@ -1125,7 +1125,7 @@ run_redeploy() {
   echo -e "    \u2022 npm ci (backend + frontend)"
   echo -e "    \u2022 prisma migrate deploy (aborte si \u00e9chec)"
   echo -e "    \u2022 npm run build (backend + frontend)"
-  echo -e "    \u2022 red\u00e9marrer PM2 (crm-backend)"
+  echo -e "    \u2022 red\u00e9marrer PM2 (stockini-backend)"
   echo -e "    \u2022 health check /health"
   echo ""
   echo -e "  ${YELLOW}Si une migration P3009 bloque, lancez d'abord :${NC}"
@@ -1157,7 +1157,7 @@ main_menu() {
     clear
     echo ""
     echo -e "${BOLD}${CYAN}  ╔═══════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}  ║   CRM Geodetection — Monitoring Dashboard ║${NC}"
+    echo -e "${BOLD}${CYAN}  ║   Stockini — Monitoring Dashboard ║${NC}"
     echo -e "${BOLD}${CYAN}  ╚═══════════════════════════════════════════╝${NC}"
     echo ""
 

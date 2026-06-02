@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -13,7 +14,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
+import { ClearPaymentHistoryDto, PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -57,5 +58,19 @@ export class PaymentsController {
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.paymentsService.remove(id, user?.id);
+  }
+
+  @RequirePermissions('finance.history.clear')
+  @Post('history/clear')
+  @HttpCode(200)
+  clearCustomerHistory(@Body() dto: ClearPaymentHistoryDto, @CurrentUser() user?: AuthUser) {
+    return this.paymentsService.clearCustomerPaymentsHistory(dto, user!.id);
+  }
+
+  @RequirePermissions('finance.history.clear')
+  @Post('supplier-history/clear')
+  @HttpCode(200)
+  clearSupplierHistory(@Body() dto: ClearPaymentHistoryDto, @CurrentUser() user?: AuthUser) {
+    return this.paymentsService.clearSupplierPaymentsHistory(dto, user!.id);
   }
 }

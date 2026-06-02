@@ -32,13 +32,17 @@ export class CustomersService {
     return this.references.peekNextCustomerReference(type ?? 'INDIVIDUAL');
   }
 
-  // Calcule la dette totale d'un client : somme des restes à payer sur FACTURE non annulées
+  // Calcule la dette totale d'un client : somme des restes à payer sur FACTURE/BL non annulés/supprimés
   async getClientDebt(clientId: string): Promise<{ debtAmount: number; unpaidInvoicesCount: number }> {
     const invoices = await this.prisma.sale.findMany({
       where: {
         customerId: clientId,
-        documentType: 'FACTURE',
+        deletedAt: null,
         status: { not: 'CANCELLED' },
+        OR: [
+          { documentType: 'FACTURE' },
+          { documentType: 'BON_LIVRAISON', transformedToId: null },
+        ],
       },
       select: { total: true, paidAmount: true },
     });
@@ -49,7 +53,7 @@ export class CustomersService {
     for (const inv of invoices) {
       const total = new Prisma.Decimal(inv.total ?? 0);
       const paid = new Prisma.Decimal(inv.paidAmount ?? 0);
-      const remaining = total.minus(paid);
+      const remaining = Prisma.Decimal.max(total.minus(paid), new Prisma.Decimal(0));
       if (remaining.greaterThan(0)) {
         debtAmount = debtAmount.plus(remaining);
         unpaidInvoicesCount++;
@@ -63,16 +67,23 @@ export class CustomersService {
   async getTotalClientDebt(): Promise<number> {
     const invoices = await this.prisma.sale.findMany({
       where: {
-        documentType: 'FACTURE',
+        deletedAt: null,
         status: { not: 'CANCELLED' },
         customerId: { not: null },
+        OR: [
+          { documentType: 'FACTURE' },
+          { documentType: 'BON_LIVRAISON', transformedToId: null },
+        ],
       },
       select: { total: true, paidAmount: true },
     });
 
     let total = new Prisma.Decimal(0);
     for (const inv of invoices) {
-      const remaining = new Prisma.Decimal(inv.total ?? 0).minus(new Prisma.Decimal(inv.paidAmount ?? 0));
+      const remaining = Prisma.Decimal.max(
+        new Prisma.Decimal(inv.total ?? 0).minus(new Prisma.Decimal(inv.paidAmount ?? 0)),
+        new Prisma.Decimal(0),
+      );
       if (remaining.greaterThan(0)) {
         total = total.plus(remaining);
       }
@@ -95,12 +106,16 @@ export class CustomersService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Calcul des dettes en une seule requête groupée
+    // Calcul des dettes en une seule requête groupée (FACTURE + BL non transformés, non supprimés, non annulés)
     const invoices = await this.prisma.sale.findMany({
       where: {
-        documentType: 'FACTURE',
+        deletedAt: null,
         status: { not: 'CANCELLED' },
         customerId: { in: customers.map((c) => c.id) },
+        OR: [
+          { documentType: 'FACTURE' },
+          { documentType: 'BON_LIVRAISON', transformedToId: null },
+        ],
       },
       select: { customerId: true, total: true, paidAmount: true },
     });
@@ -108,7 +123,10 @@ export class CustomersService {
     const debtMap = new Map<string, { debtAmount: Prisma.Decimal; unpaidInvoicesCount: number }>();
     for (const inv of invoices) {
       if (!inv.customerId) continue;
-      const remaining = new Prisma.Decimal(inv.total ?? 0).minus(new Prisma.Decimal(inv.paidAmount ?? 0));
+      const remaining = Prisma.Decimal.max(
+        new Prisma.Decimal(inv.total ?? 0).minus(new Prisma.Decimal(inv.paidAmount ?? 0)),
+        new Prisma.Decimal(0),
+      );
       if (remaining.greaterThan(0)) {
         const entry = debtMap.get(inv.customerId) ?? { debtAmount: new Prisma.Decimal(0), unpaidInvoicesCount: 0 };
         entry.debtAmount = entry.debtAmount.plus(remaining);

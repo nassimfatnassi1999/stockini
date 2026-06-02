@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Sale" ADD COLUMN "totalRefunded" DECIMAL(12,3) NOT NULL DEFAULT 0;

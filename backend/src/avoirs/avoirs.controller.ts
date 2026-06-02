@@ -28,6 +28,12 @@ export class AvoirsController {
     return this.avoirsService.getReturnableItems(saleId);
   }
 
+  @RequirePermissions('sales.view')
+  @Get('sales/:saleId/credit-notes')
+  findBySale(@Param('saleId') saleId: string) {
+    return this.avoirsService.findAll(undefined, saleId);
+  }
+
   @RequirePermissions('sales.create')
   @Post()
   create(@Body() dto: CreateCreditNoteDto, @CurrentUser() user?: AuthUser) {

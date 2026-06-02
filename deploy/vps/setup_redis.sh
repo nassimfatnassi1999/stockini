@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Redis Setup (VPS)
+# Stockini — Redis Setup (VPS)
 # =============================================================
 # Usage: sudo bash deploy/vps/setup_redis.sh
 #
@@ -28,7 +28,7 @@ fi
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Redis Setup"
+echo "  Stockini — Redis Setup"
 echo "========================================="
 echo ""
 

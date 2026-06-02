@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Security Policy Manager (Interactive)
+# Stockini — Security Policy Manager (Interactive)
 # =============================================================
 # Complete security hardening in one beautiful interactive script
 # Run: sudo bash deploy/scripts/security-politic.sh
@@ -33,7 +33,7 @@ show_banner() {
   cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║        🛡️  CRM Geodetection — Security Policy Manager  🛡️        ║
+║        🛡️  Stockini — Security Policy Manager  🛡️        ║
 ║                                                               ║
 ║             Complete VPS Hardening & Protection              ║
 ║                                                               ║
@@ -77,7 +77,7 @@ check_security_status() {
   fi
   
   # SSH Status
-  if [ -f /etc/ssh/sshd_config.d/99-crm-hardening.conf ]; then
+  if [ -f /etc/ssh/sshd_config.d/99-stockini-hardening.conf ]; then
     status_text+="✅ SSH Hardening: CONFIGURED\n"
     status_text+="   • Root login disabled\n"
     status_text+="   • Password auth disabled (key-only)\n"
@@ -96,7 +96,7 @@ check_security_status() {
   fi
   
   # Logging Status
-  if [ -f /usr/local/bin/crm-security-monitor.sh ] && crontab -l 2>/dev/null | grep -q crm-security-monitor; then
+  if [ -f /usr/local/bin/stockini-security-monitor.sh ] && crontab -l 2>/dev/null | grep -q stockini-security-monitor; then
     status_text+="✅ Security Monitoring: ACTIVE\n"
     status_text+="   • Log rotation configured\n"
     status_text+="   • Cron monitoring (every 15min)\n\n"
@@ -184,7 +184,7 @@ setup_ssh_hardening() {
   log_info "Starting SSH hardening..."
   
   SSHD_CONFIG="/etc/ssh/sshd_config"
-  SSHD_HARDENING="/etc/ssh/sshd_config.d/99-crm-hardening.conf"
+  SSHD_HARDENING="/etc/ssh/sshd_config.d/99-stockini-hardening.conf"
   
   # Safety check
   REAL_USER="${SUDO_USER:-$USER}"
@@ -206,7 +206,7 @@ setup_ssh_hardening() {
   
   # Create hardening config
   cat > "$SSHD_HARDENING" << 'EOF'
-# CRM Apprensur — SSH Hardening
+# Stockini — SSH Hardening
 PermitRootLogin no
 PasswordAuthentication no
 ChallengeResponseAuthentication no
@@ -271,7 +271,7 @@ setup_fail2ban() {
   JAIL_LOCAL="/etc/fail2ban/jail.local"
   
   cat > "$JAIL_LOCAL" << 'EOF'
-# CRM Apprensur — Fail2ban Jails
+# Stockini — Fail2ban Jails
 
 [DEFAULT]
 bantime  = 3600
@@ -324,11 +324,11 @@ logpath  = /var/log/nginx/error.log
 maxretry = 5
 bantime  = 3600
 
-# CRM Login Protection
-[crm-login]
+# Stockini Login Protection
+[stockini-login]
 enabled  = true
 port     = http,https
-filter   = crm-login
+filter   = stockini-login
 logpath  = /var/log/nginx/access.log
 maxretry = 5
 bantime  = 1800
@@ -337,10 +337,10 @@ EOF
   
   log_ok "Jail config created"
   
-  # Create CRM login filter
-  CRM_FILTER="/etc/fail2ban/filter.d/crm-login.conf"
-  cat > "$CRM_FILTER" << 'EOF'
-# CRM Login Filter
+  # Create Stockini login filter
+  STOCKINI_FILTER="/etc/fail2ban/filter.d/stockini-login.conf"
+  cat > "$STOCKINI_FILTER" << 'EOF'
+# Stockini Login Filter
 [Definition]
 failregex = ^<HOST> .* "POST /api/auth/login HTTP/.*" 401
             ^<HOST> .* "POST /api/auth/login HTTP/.*" 429
@@ -367,7 +367,7 @@ EOF
   
   local status=$(fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' || echo "N/A")
   
-  show_success "Fail2ban setup complete!\n\nActive jails:$status\n\nProtection enabled for:\n✅ SSH brute force (ban 1h after 5 fails)\n✅ SSH aggressive (ban 24h after 3 fails)\n✅ Nginx bot scanners\n✅ CRM login attempts"
+  show_success "Fail2ban setup complete!\n\nActive jails:$status\n\nProtection enabled for:\n✅ SSH brute force (ban 1h after 5 fails)\n✅ SSH aggressive (ban 24h after 3 fails)\n✅ Nginx bot scanners\n✅ Stockini login attempts"
 }
 
 # ── 4. LOGGING & MONITORING ──────────────────────────────────
@@ -378,10 +378,10 @@ setup_logging() {
   
   # Create log directories
   mkdir -p /var/log/nginx
-  mkdir -p /var/log/crm-geodetection
+  mkdir -p /var/log/stockini
   
   # Nginx log rotation
-  LOGROTATE_CONF="/etc/logrotate.d/crm-nginx"
+  LOGROTATE_CONF="/etc/logrotate.d/stockini-nginx"
   cat > "$LOGROTATE_CONF" << 'EOF'
 /var/log/nginx/*.log {
     daily
@@ -400,10 +400,10 @@ EOF
   log_ok "Log rotation configured"
   
   # Security monitoring script
-  MONITOR_SCRIPT="/usr/local/bin/crm-security-monitor.sh"
+  MONITOR_SCRIPT="/usr/local/bin/stockini-security-monitor.sh"
   cat > "$MONITOR_SCRIPT" << 'MONITOR'
 #!/bin/bash
-LOG_DIR="/var/log/crm-geodetection"
+LOG_DIR="/var/log/stockini"
 ALERT_LOG="$LOG_DIR/security-alerts.log"
 NGINX_LOG="/var/log/nginx/access.log"
 AUTH_LOG="/var/log/auth.log"
@@ -435,11 +435,11 @@ if [ -f "$NGINX_LOG" ]; then
     echo "[$TIMESTAMP] ALERT: IP $TOP_ADDR made $TOP_COUNT requests" >> "$ALERT_LOG"
   fi
   
-  # CRM login failures
+  # Stockini login failures
   LOGIN_FAILS=$(tail -2000 "$NGINX_LOG" 2>/dev/null | \
     grep "POST /api/auth/login" | awk '{print $9}' | grep -c "401" || true)
   if [ "$LOGIN_FAILS" -gt 20 ]; then
-    echo "[$TIMESTAMP] ALERT: $LOGIN_FAILS failed CRM login attempts" >> "$ALERT_LOG"
+    echo "[$TIMESTAMP] ALERT: $LOGIN_FAILS failed Stockini login attempts" >> "$ALERT_LOG"
   fi
 fi
 
@@ -463,18 +463,18 @@ MONITOR
   
   # Install cron
   CRON_LINE="*/15 * * * * $MONITOR_SCRIPT"
-  if ! crontab -l 2>/dev/null | grep -q "crm-security-monitor"; then
+  if ! crontab -l 2>/dev/null | grep -q "stockini-security-monitor"; then
     (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
     log_ok "Cron job installed (every 15min)"
   fi
   
   # Optional email alerts
-  if confirm "Do you want to configure email alerts for security events?\n\nThis requires SMTP credentials (Brevo, SendGrid, etc.)"; then
+  if confirm "Do you want to configure email alerts for security events?\n\nThis requires SMTP credentials (Gmail, SendGrid, etc.)"; then
     if ! command -v msmtp &>/dev/null; then
       apt-get install -y msmtp msmtp-mta
     fi
     
-    SMTP_HOST=$(get_input "SMTP Configuration" "SMTP host (e.g. smtp-relay.brevo.com):" "smtp-relay.brevo.com")
+    SMTP_HOST=$(get_input "SMTP Configuration" "SMTP host (e.g. smtp.gmail.com):" "smtp.gmail.com")
     SMTP_PORT=$(get_input "SMTP Configuration" "SMTP port:" "587")
     SMTP_USER=$(get_input "SMTP Configuration" "SMTP username:" "")
     SMTP_PASS=$(get_input "SMTP Configuration" "SMTP password:" "")
@@ -504,7 +504,7 @@ MSMTP
 # Email alerts
 LAST_ALERT=\$(tail -1 "$LOG_DIR/security-alerts.log" 2>/dev/null | grep "ALERT" || true)
 if [ -n "\$LAST_ALERT" ]; then
-  echo -e "Subject: [CRM Security Alert] \$(hostname)\\n\\n\$LAST_ALERT" | \
+  echo -e "Subject: [Stockini Security Alert] \$(hostname)\\n\\n\$LAST_ALERT" | \
     msmtp "$ALERT_EMAIL" 2>/dev/null || true
 fi
 EMAILBLOCK
@@ -512,7 +512,7 @@ EMAILBLOCK
     log_ok "Email alerts configured"
   fi
   
-  show_success "Logging & monitoring setup complete!\n\n✅ Nginx log rotation (30 days)\n✅ Security monitor (every 15min)\n✅ Alert log: /var/log/crm-geodetection/security-alerts.log\n\nView alerts:\n  tail -f /var/log/crm-geodetection/security-alerts.log"
+  show_success "Logging & monitoring setup complete!\n\n✅ Nginx log rotation (30 days)\n✅ Security monitor (every 15min)\n✅ Alert log: /var/log/stockini/security-alerts.log\n\nView alerts:\n  tail -f /var/log/stockini/security-alerts.log"
 }
 
 # ── 5. COMPLETE HARDENING (ALL IN ONE) ──────────────────────

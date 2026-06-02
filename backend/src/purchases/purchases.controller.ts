@@ -16,6 +16,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreatePurchaseDto,
+  PayablePurchaseQueryDto,
   PurchasePaginationDto,
   ReceivePurchaseDto,
   UpdatePurchaseDto,
@@ -37,6 +38,13 @@ export class PurchasesController {
   @Get()
   findAll(@Query() query: PurchasePaginationDto) {
     return this.purchasesService.findAll(query);
+  }
+
+  /** Factures fournisseurs à payer (reste à payer > 0). Doit précéder la route ':id'. */
+  @RequirePermissions('purchases.view')
+  @Get('payable')
+  findPayable(@Query() query: PayablePurchaseQueryDto) {
+    return this.purchasesService.findPayable(query);
   }
 
   @RequirePermissions('purchases.view')

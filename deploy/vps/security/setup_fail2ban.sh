@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Fail2ban Setup (Step 6)
+# Stockini — Fail2ban Setup (Step 6)
 # =============================================================
 # Run on VPS:  sudo bash deploy/scripts/6_setup_fail2ban.sh
 #
@@ -12,7 +12,7 @@ set -e
 # Protects against:
 #   - SSH brute force (ban after 5 attempts, 1h)
 #   - Nginx brute force / scanning (ban after 10 attempts, 10min)
-#   - CRM login brute force (ban after 5 attempts, 30min)
+#   - Stockini login brute force (ban after 5 attempts, 30min)
 # =============================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -20,7 +20,7 @@ require_root
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Fail2ban Setup"
+echo "  Stockini — Fail2ban Setup"
 echo "========================================="
 echo ""
 
@@ -39,7 +39,7 @@ JAIL_LOCAL="/etc/fail2ban/jail.local"
 
 cat > "$JAIL_LOCAL" << 'EOF'
 # =============================================================
-# CRM Apprensur — Fail2ban Jails
+# Stockini — Fail2ban Jails
 # =============================================================
 
 [DEFAULT]
@@ -93,11 +93,11 @@ logpath  = /var/log/nginx/error.log
 maxretry = 5
 bantime  = 3600
 
-# ── CRM Login Protection ────────────────────────────────────
-[crm-login]
+# ── Stockini Login Protection ────────────────────────────────────
+[stockini-login]
 enabled  = true
 port     = http,https
-filter   = crm-login
+filter   = stockini-login
 logpath  = /var/log/nginx/access.log
 maxretry = 5
 bantime  = 1800
@@ -106,18 +106,18 @@ EOF
 
 log_ok "Jail config written to $JAIL_LOCAL"
 
-# ── 3. Create custom CRM login filter ───────────────────────
-CRM_FILTER="/etc/fail2ban/filter.d/crm-login.conf"
+# ── 3. Create custom Stockini login filter ───────────────────────
+STOCKINI_FILTER="/etc/fail2ban/filter.d/stockini-login.conf"
 
-cat > "$CRM_FILTER" << 'EOF'
-# CRM Apprensur — Detect failed login attempts (401 on /api/auth/login)
+cat > "$STOCKINI_FILTER" << 'EOF'
+# Stockini — Detect failed login attempts (401 on /api/auth/login)
 [Definition]
 failregex = ^<HOST> .* "POST /api/auth/login HTTP/.*" 401
             ^<HOST> .* "POST /api/auth/login HTTP/.*" 429
 ignoreregex =
 EOF
 
-log_ok "CRM login filter created at $CRM_FILTER"
+log_ok "Stockini login filter created at $STOCKINI_FILTER"
 
 # ── 4. Create nginx-badbots filter if missing ────────────────
 BADBOTS_FILTER="/etc/fail2ban/filter.d/nginx-badbots.conf"
@@ -153,7 +153,7 @@ echo "    ✅ sshd-aggressive — ban after 3 fails (24h)"
 echo "    ✅ nginx-botsearch — ban scanners (10min)"
 echo "    ✅ nginx-badbots   — ban bad UAs (24h)"
 echo "    ✅ nginx-http-auth — ban auth fails (1h)"
-echo "    ✅ crm-login       — ban login brute force (30min)"
+echo "    ✅ stockini-login       — ban login brute force (30min)"
 echo ""
 echo "  Useful commands:"
 echo "    fail2ban-client status"

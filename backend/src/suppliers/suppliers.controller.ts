@@ -35,6 +35,12 @@ export class SuppliersController {
   }
 
   @RequirePermissions('suppliers.view')
+  @Get(':id/debt')
+  getDebt(@Param('id') id: string) {
+    return this.suppliersService.getDebt(id);
+  }
+
+  @RequirePermissions('suppliers.view')
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.suppliersService.findOne(id);

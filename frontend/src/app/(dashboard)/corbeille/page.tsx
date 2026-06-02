@@ -7,7 +7,7 @@ import { toast } from '@/lib/toast';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
-import { PermanentDeleteDialog } from '@/components/stockini/PermanentDeleteDialog';
+import { PermanentDeleteWithImpactDialog } from '@/components/stockini/PermanentDeleteWithImpactDialog';
 import { EmptyTrashDialog } from '@/components/stockini/EmptyTrashDialog';
 import { FileText, RotateCcw, Trash2 } from 'lucide-react';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
@@ -101,15 +101,21 @@ export default function CorbeillePage() {
   });
 
   const permanentDeleteMutation = useMutation({
-    mutationFn: ({ entity, id }: { entity: TrashEntityType; id: string }) =>
-      stockiniApi.permanentDeleteTrashItem(entity, id),
+    mutationFn: ({ entity, id, confirmCascade }: { entity: TrashEntityType; id: string; confirmCascade?: boolean }) =>
+      stockiniApi.permanentDeleteTrashItem(entity, id, confirmCascade),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trash'] });
+      queryClient.invalidateQueries({ queryKey: ['trash-impact'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['avoirs'] });
       toast.success('Élément supprimé définitivement.');
       setPermanentTarget(null);
     },
-    onError: () => {
-      toast.error('Échec de la suppression définitive');
+    onError: (err: unknown) => {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Échec de la suppression définitive');
     },
   });
 
@@ -302,11 +308,15 @@ export default function CorbeillePage() {
       </div>
 
       {permanentTarget && (
-        <PermanentDeleteDialog
-          label={`${ENTITY_LABELS[permanentTarget.entity]} — ${permanentTarget.name}`}
+        <PermanentDeleteWithImpactDialog
+          item={permanentTarget}
           isPending={permanentDeleteMutation.isPending}
-          onConfirm={() =>
-            permanentDeleteMutation.mutate({ entity: permanentTarget.entity, id: permanentTarget.id })
+          onConfirm={(confirmCascade) =>
+            permanentDeleteMutation.mutate({
+              entity: permanentTarget.entity,
+              id: permanentTarget.id,
+              confirmCascade,
+            })
           }
           onCancel={() => setPermanentTarget(null)}
         />

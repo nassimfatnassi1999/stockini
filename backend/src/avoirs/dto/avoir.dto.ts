@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -43,6 +44,11 @@ export class CreditNoteLineDto {
   @IsString()
   @IsOptional()
   motifLigne?: string;
+
+  /** true = restaurer le stock pour cette ligne (défaut). false = avoir commercial sans retour physique. */
+  @IsBoolean()
+  @IsOptional()
+  restock?: boolean;
 }
 
 export class CreateCreditNoteDto {
@@ -65,6 +71,11 @@ export class CreateCreditNoteDto {
   @IsIn(REFUND_METHODS)
   @IsOptional()
   refundMethod?: RefundMethod;
+
+  /** Restaurer le stock globalement (priorité sur restock par ligne si false). Défaut: true. */
+  @IsBoolean()
+  @IsOptional()
+  restock?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })

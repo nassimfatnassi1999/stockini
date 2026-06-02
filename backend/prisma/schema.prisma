@@ -31,6 +31,7 @@ enum CaisseMovementType {
   RETRAIT_MANUEL
   ANNULATION_VENTE
   ANNULATION_ACHAT
+  CASH_RESET
 }
 
 enum CashDirection {
@@ -159,6 +160,7 @@ model User {
   documentEmailLogs     DocumentEmailLog[]
   creditNotes           CreditNote[]
   productPriceHistories ProductPriceHistory[]
+  historyClearLogs      HistoryClearLog[]
 
   @@index([roleId])
 }
@@ -311,6 +313,9 @@ model Sale {
   total                   Decimal               @db.Decimal(12, 3)
   paidAmount              Decimal               @default(0) @db.Decimal(12, 3)
   remainingAmount         Decimal               @default(0) @db.Decimal(12, 3)
+  totalRefunded           Decimal               @default(0) @db.Decimal(12, 3)
+  totalInitialTtc         Decimal?              @db.Decimal(12, 3)
+  totalCurrentTtc         Decimal?              @db.Decimal(12, 3)
   paymentStatus           PaymentStatus?
   status                  SaleStatus            @default(DRAFT)
   documentType            DocumentType          @default(DEVIS)
@@ -449,6 +454,8 @@ model Payment {
   createdAt      DateTime      @default(now())
   deletedAt      DateTime?
   deletedBy      String?
+  clearedAt      DateTime?
+  clearedBy      String?
   sale           Sale?         @relation(fields: [saleId], references: [id])
   purchase       Purchase?     @relation(fields: [purchaseId], references: [id])
   customer       Customer?     @relation(fields: [customerId], references: [id])
@@ -651,6 +658,8 @@ model CaisseMovement {
   referenceDoc String?
   userId       String?
   createdAt    DateTime           @default(now())
+  clearedAt    DateTime?
+  clearedBy    String?
   user         User?              @relation(fields: [userId], references: [id])
 
   @@index([type])
@@ -664,6 +673,21 @@ model CaisseConfig {
   solde         Decimal  @default(0) @db.Decimal(12, 3)
   allowNegative Boolean  @default(false)
   updatedAt     DateTime @updatedAt
+}
+
+model HistoryClearLog {
+  id         String   @id @default(cuid())
+  module     String
+  userId     String?
+  count      Int
+  clearedAt  DateTime @default(now())
+  filtersJson Json?
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([module])
+  @@index([clearedAt])
+  @@index([userId])
+  @@map("history_clear_logs")
 }
 
 model CashTransaction {

@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Frontend Setup (VPS)
+# Stockini — Frontend Setup (VPS)
 # =============================================================
 # Usage: bash deploy/vps/setup_frontend.sh
 #
@@ -49,7 +49,7 @@ FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Frontend Setup"
+echo "  Stockini — Frontend Setup"
 echo "========================================="
 echo ""
 
@@ -137,8 +137,8 @@ if [ ! -f "$FRONTEND_ECOSYSTEM" ]; then
 module.exports = {
   apps: [
     {
-      name: "crm-frontend",
-      cwd: "/home/ubuntu/CRM-geoDetectionreseaux/frontend",
+      name: "stockini-frontend",
+      cwd: "/home/ubuntu/stockini/frontend",
       script: "node_modules/next/dist/bin/next",
       args: "start -p 3000",
       instances: 1,
@@ -168,8 +168,8 @@ if [ -n "$PORT_PID" ]; then
   sleep 1
 fi
 
-if pm2 describe crm-frontend >/dev/null 2>&1; then
-    pm2 reload "$FRONTEND_ECOSYSTEM" --only crm-frontend
+if pm2 describe stockini-frontend >/dev/null 2>&1; then
+    pm2 reload "$FRONTEND_ECOSYSTEM" --only stockini-frontend
 else
     pm2 start "$FRONTEND_ECOSYSTEM"
 fi
@@ -191,7 +191,7 @@ done
 
 if [ "$FRONTEND_OK" -eq 0 ]; then
   log_err "Frontend is not responding on port $FRONTEND_PORT"
-  pm2 logs crm-frontend --lines 40 --nostream 2>/dev/null || true
+  pm2 logs stockini-frontend --lines 40 --nostream 2>/dev/null || true
   exit 1
 fi
 
@@ -201,9 +201,9 @@ echo "========================================="
 echo -e "${GREEN}  Frontend setup complete!${NC}"
 echo "========================================="
 echo ""
-echo "  PM2 app:    crm-frontend"
+echo "  PM2 app:    stockini-frontend"
 echo "  Port:       $FRONTEND_PORT"
-echo "  Logs:       pm2 logs crm-frontend"
+echo "  Logs:       pm2 logs stockini-frontend"
 echo ""
 echo "  Next: sudo bash deploy/vps/setup_nginx.sh"
 echo "    or: copy deploy/vps/nginx-stockini-msp.conf manually"

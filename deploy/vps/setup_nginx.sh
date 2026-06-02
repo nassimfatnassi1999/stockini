@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Nginx Setup (VPS)
+# Stockini — Nginx Setup (VPS)
 # =============================================================
 # Usage: sudo bash deploy/vps/setup_nginx.sh
 #
@@ -43,7 +43,7 @@ NGINX_ENABLED="/etc/nginx/sites-enabled/$SITE_NAME"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Nginx Setup"
+echo "  Stockini — Nginx Setup"
 echo "========================================="
 echo ""
 

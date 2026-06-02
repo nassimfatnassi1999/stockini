@@ -11,7 +11,7 @@ import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
+import { ClearPaymentHistoryDto, PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -44,6 +44,7 @@ export class PaymentsService {
 
     const where: Prisma.PaymentWhereInput = {
       deletedAt: null,
+      clearedAt: null,
       ...(query?.type && { type: query.type }),
       ...(query?.method && { method: query.method }),
       ...(query?.customerId && { customerId: query.customerId }),
@@ -304,6 +305,76 @@ export class PaymentsService {
 
       return payment;
     });
+  }
+
+  async clearCustomerPaymentsHistory(dto: ClearPaymentHistoryDto, userId: string) {
+    const where: Prisma.PaymentWhereInput = {
+      deletedAt: null,
+      clearedAt: null,
+      type: PaymentType.CUSTOMER_PAYMENT,
+      ...((dto.dateFrom || dto.dateTo) && {
+        createdAt: {
+          ...(dto.dateFrom && { gte: new Date(dto.dateFrom) }),
+          ...(dto.dateTo && { lte: new Date(dto.dateTo) }),
+        },
+      }),
+      ...(dto.customerId && { customerId: dto.customerId }),
+    };
+
+    const count = await this.prisma.payment.count({ where });
+    if (count > 0) {
+      await this.prisma.payment.updateMany({
+        where,
+        data: { clearedAt: new Date(), clearedBy: userId },
+      });
+    }
+
+    await this.prisma.historyClearLog.create({
+      data: {
+        module: 'customer_payments',
+        userId,
+        count,
+        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, customerId: dto.customerId } as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(`Customer payment history cleared by ${userId}: ${count} records`);
+    return { count };
+  }
+
+  async clearSupplierPaymentsHistory(dto: ClearPaymentHistoryDto, userId: string) {
+    const where: Prisma.PaymentWhereInput = {
+      deletedAt: null,
+      clearedAt: null,
+      type: PaymentType.SUPPLIER_PAYMENT,
+      ...((dto.dateFrom || dto.dateTo) && {
+        createdAt: {
+          ...(dto.dateFrom && { gte: new Date(dto.dateFrom) }),
+          ...(dto.dateTo && { lte: new Date(dto.dateTo) }),
+        },
+      }),
+      ...(dto.supplierId && { supplierId: dto.supplierId }),
+    };
+
+    const count = await this.prisma.payment.count({ where });
+    if (count > 0) {
+      await this.prisma.payment.updateMany({
+        where,
+        data: { clearedAt: new Date(), clearedBy: userId },
+      });
+    }
+
+    await this.prisma.historyClearLog.create({
+      data: {
+        module: 'supplier_payments',
+        userId,
+        count,
+        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, supplierId: dto.supplierId } as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(`Supplier payment history cleared by ${userId}: ${count} records`);
+    return { count };
   }
 
   private computePaymentStatus(

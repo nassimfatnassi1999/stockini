@@ -17,6 +17,8 @@ import type {
   ShareLinkResponse,
   DashboardReport,
   PaginatedResponse,
+  PayablePurchasesResponse,
+  PayablePurchasesQueryParams,
   PurchasesQueryParams,
   SalesQueryParams,
   StockMovementsQueryParams,
@@ -154,6 +156,12 @@ export const stockiniApi = {
         PaginatedResponse<Purchase>
       >("/purchases", { params: cleanPaginationParams(params) })
       .then((r) => r.data),
+  payablePurchases: (params?: PayablePurchasesQueryParams) =>
+    api
+      .get<PayablePurchasesResponse>("/purchases/payable", {
+        params: cleanQueryParams(params),
+      })
+      .then((r) => r.data),
   purchase: (id: string) =>
     api.get<PurchaseDetail>(`/purchases/${id}`).then((r) => r.data),
   createPurchase: (data: unknown) =>
@@ -274,8 +282,20 @@ export const stockiniApi = {
       .then((r) => r.data.map(normalizeTrashItem)),
   restoreTrashItem: (entity: TrashEntityType, id: string) =>
     api.patch(`/trash/${entity}/${id}/restore`).then((r) => r.data),
-  permanentDeleteTrashItem: (entity: TrashEntityType, id: string) =>
-    api.delete(`/trash/${entity}/${id}/permanent`).then((r) => r.data),
+  previewTrashDeleteImpact: (entity: TrashEntityType, id: string) =>
+    api
+      .get<import("./types").DeleteImpactResult>(`/trash/${entity}/${id}/delete-impact`)
+      .then((r) => r.data),
+  permanentDeleteTrashItem: (
+    entity: TrashEntityType,
+    id: string,
+    confirmCascade?: boolean,
+  ) =>
+    api
+      .delete(`/trash/${entity}/${id}/permanent`, {
+        data: { confirmCascade: confirmCascade ?? false },
+      })
+      .then((r) => r.data),
   emptyTrash: () =>
     api
       .delete<{
@@ -442,6 +462,11 @@ export const stockiniApi = {
     api.post<CreditNote>("/avoirs", data).then((r) => r.data),
   avoirsByCustomer: (customerId: string) =>
     api.get<CreditNote[]>(`/avoirs/clients/${customerId}`).then((r) => r.data),
+  /** Historique des avoirs liés à une facture ou un BL */
+  saleCreditNotes: (saleId: string) =>
+    api
+      .get<CreditNote[]>(`/avoirs/sales/${saleId}/credit-notes`)
+      .then((r) => r.data),
   avoirPdfUrl: (id: string) => `/api/avoirs/${id}/pdf`,
 
   // ── Caisse ────────────────────────────────────────────────────────────────
@@ -459,6 +484,14 @@ export const stockiniApi = {
     api.post<CaisseMovement>("/caisse/depot", data).then((r) => r.data),
   caisseSetAllowNegative: (allowNegative: boolean) =>
     api.patch("/caisse/config", { allowNegative }).then((r) => r.data),
+
+  // ── Vider l'historique (soft-clear, display only) ─────────────────────────
+  clearCustomerPaymentsHistory: (filters?: { dateFrom?: string; dateTo?: string; customerId?: string }) =>
+    api.post<{ count: number }>("/payments/history/clear", filters ?? {}).then((r) => r.data),
+  clearSupplierPaymentsHistory: (filters?: { dateFrom?: string; dateTo?: string; supplierId?: string }) =>
+    api.post<{ count: number }>("/payments/supplier-history/clear", filters ?? {}).then((r) => r.data),
+  clearCaisseHistory: (filters?: { dateFrom?: string; dateTo?: string; type?: string }) =>
+    api.post<{ count: number }>("/caisse/history/clear", filters ?? {}).then((r) => r.data),
 
   categories: () =>
     api

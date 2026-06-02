@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================
-# CRM Geodetection — Common Utilities
+# Stockini — Common Utilities
 # =============================================================
 # Sourced by all security scripts in this directory.
 # Provides: colors, logging helpers, root check.

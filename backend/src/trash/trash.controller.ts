@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -24,6 +25,15 @@ export class TrashController {
     return this.trashService.findAll(entity ?? type);
   }
 
+  @RequirePermissions('trash.preview_delete_impact')
+  @Get(':entity/:id/delete-impact')
+  previewDeleteImpact(
+    @Param('entity') entity: string,
+    @Param('id') id: string,
+  ) {
+    return this.trashService.previewDeleteImpact(entity, id);
+  }
+
   @RequirePermissions('trash.restore')
   @Patch(':entity/:id/restore')
   restore(@Param('entity') entity: string, @Param('id') id: string) {
@@ -36,8 +46,9 @@ export class TrashController {
     @Param('entity') entity: string,
     @Param('id') id: string,
     @CurrentUser() user?: AuthUser,
+    @Body() body?: { confirmCascade?: boolean },
   ) {
-    return this.trashService.permanentDelete(entity, id, user?.id);
+    return this.trashService.permanentDelete(entity, id, user?.id, body?.confirmCascade);
   }
 
   @RequirePermissions('trash.empty')

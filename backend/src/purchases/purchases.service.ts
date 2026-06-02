@@ -13,6 +13,7 @@ import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import {
   CreatePurchaseDto,
+  PayablePurchaseQueryDto,
   PurchasePaginationDto,
   ReceivePurchaseDto,
   UpdatePurchaseDto,
@@ -125,6 +126,48 @@ export class PurchasesService {
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Factures fournisseurs « à payer » : toute facture achat avec un reste à payer > 0.
+   * Inclut les factures NON PAYÉES et PARTIELLEMENT PAYÉES, exclut les factures
+   * totalement payées (remainingAmount = 0) et les achats annulés.
+   * L'agrégation du total des dettes est calculée côté backend avec Decimal.
+   */
+  async findPayable(query?: PayablePurchaseQueryDto) {
+    const where: Prisma.PurchaseWhereInput = {
+      deletedAt: null,
+      status: { not: PurchaseStatus.CANCELLED },
+      remainingAmount: { gt: 0 },
+      ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
+      ...(query?.supplierId && { supplierId: query.supplierId }),
+      ...(query?.search && {
+        OR: [
+          { orderNumber: { contains: query.search, mode: 'insensitive' } },
+          {
+            supplier: { name: { contains: query.search, mode: 'insensitive' } },
+          },
+        ],
+      }),
+    };
+
+    const [data, aggregate] = await Promise.all([
+      this.prisma.purchase.findMany({
+        where,
+        include: { supplier: true, payments: { where: { deletedAt: null } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.purchase.aggregate({
+        where,
+        _sum: { remainingAmount: true },
+      }),
+    ]);
+
+    const totalRemaining = (
+      aggregate._sum.remainingAmount ?? new Prisma.Decimal(0)
+    ).toFixed(3);
+
+    return { data, count: data.length, totalRemaining };
   }
 
   findOne(id: string) {

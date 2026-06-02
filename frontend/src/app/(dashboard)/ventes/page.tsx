@@ -675,10 +675,6 @@ export default function VentesPage() {
     sale: Sale;
     targetType: SalesDocumentType;
   } | null>(null);
-  const [transformPickerSale, setTransformPickerSale] = useState<Sale | null>(
-    null,
-  );
-
   // ── Sales history pagination + filters ────────────────────────────────────
   const [salesPage, setSalesPage] = useState(1);
   const [salesLimit, setSalesLimit] = useState(5);
@@ -1303,27 +1299,6 @@ export default function VentesPage() {
     }
   };
 
-  const handleGenerateForRow = async (
-    saleId: string,
-    type: SalesDocumentType,
-  ) => {
-    try {
-      const result = await stockiniApi.generateDocuments([saleId], type);
-      queryClient.invalidateQueries({ queryKey: ["generated-documents"] });
-      queryClient.invalidateQueries({ queryKey: ["documents"] });
-      const label =
-        GENERATABLE_DOC_TYPES.find((d) => d.type === type)?.label ?? type;
-      toast.success(`${label} généré avec succès`, {
-        label: "Voir dans Documents",
-        onClick: () => router.push("/documents"),
-      });
-    } catch (err) {
-      const msg = (err as { response?: { data?: { message?: string } } })
-        ?.response?.data?.message;
-      toast.error(msg ?? "Erreur lors de la génération du document");
-    }
-  };
-
   const handleEmailForRow = async (sale: Sale) => {
     setIsDocMenuOpen(false);
     setSelectedInvoiceIds([sale.id]);
@@ -1416,7 +1391,7 @@ export default function VentesPage() {
     day: "numeric",
   });
 
-  const hasActions = canViewDetails || canDeleteSale;
+  const hasActions = true; // always show: kebab always has at minimum Envoyer
   const colSpan = 1 + 7 + (hasActions ? 1 : 0);
 
   return (
@@ -1878,40 +1853,57 @@ export default function VentesPage() {
                   </button>
                 </div>
                 {/* Right side actions */}
-                <div className="px-3">
-                  {activeHistoryTab === "ventes" &&
-                    selectedInvoiceIds.length > 0 && (
-                      <BulkActionsBar
-                        count={selectedInvoiceIds.length}
-                        onDownload={handleDownloadClick}
-                        onEmail={handleEmailClick}
-                        emailLoading={emailPreviewLoading}
-                        onClear={() => setSelectedInvoiceIds([])}
-                        transformButton={(() => {
-                          if (selectedInvoiceIds.length !== 1) return null;
-                          const sel = salesList.find(
-                            (s) => s.id === selectedInvoiceIds[0],
-                          );
-                          if (
-                            !sel ||
-                            !(TRANSFORMABLE_TYPES as string[]).includes(
-                              sel.documentType,
-                            ) ||
-                            sel.transformedToId ||
-                            sel.status === "CANCELLED"
-                          )
-                            return null;
-                          return (
-                            <TransformDropdownButton
-                              sale={sel}
-                              onSelect={(targetType) =>
-                                setTransformTarget({ sale: sel, targetType })
-                              }
-                            />
-                          );
-                        })()}
-                      />
-                    )}
+                <div className="px-3 flex items-center gap-2">
+                  {activeHistoryTab === "ventes" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleDownloadClick}
+                        disabled={selectedInvoiceIds.length === 0}
+                        className={cn(
+                          "inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium",
+                          "border border-orange-200/70 bg-orange-50 text-orange-700",
+                          "transition-all duration-150",
+                          "hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100",
+                          "disabled:cursor-not-allowed disabled:opacity-40",
+                        )}
+                      >
+                        <Download size={12} />
+                        Générer
+                      </button>
+                      {selectedInvoiceIds.length > 0 && (
+                        <BulkActionsBar
+                          count={selectedInvoiceIds.length}
+                          onEmail={handleEmailClick}
+                          emailLoading={emailPreviewLoading}
+                          onClear={() => setSelectedInvoiceIds([])}
+                          transformButton={(() => {
+                            if (selectedInvoiceIds.length !== 1) return null;
+                            const sel = salesList.find(
+                              (s) => s.id === selectedInvoiceIds[0],
+                            );
+                            if (
+                              !sel ||
+                              !(TRANSFORMABLE_TYPES as string[]).includes(
+                                sel.documentType,
+                              ) ||
+                              sel.transformedToId ||
+                              sel.status === "CANCELLED"
+                            )
+                              return null;
+                            return (
+                              <TransformDropdownButton
+                                sale={sel}
+                                onSelect={(targetType) =>
+                                  setTransformTarget({ sale: sel, targetType })
+                                }
+                              />
+                            );
+                          })()}
+                        />
+                      )}
+                    </>
+                  )}
                   {activeHistoryTab === "documents" &&
                     selectedDocumentIds.length > 0 && (
                       <Button
@@ -2075,6 +2067,21 @@ export default function VentesPage() {
                                             Issu d'une transf.
                                           </span>
                                         )}
+                                      {(sale.status === "PARTIALLY_REFUNDED" ||
+                                        sale.status === "REFUNDED") && (
+                                        <span
+                                          className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                                            sale.status === "REFUNDED"
+                                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                              : "border-amber-200 bg-amber-50 text-amber-700"
+                                          }`}
+                                        >
+                                          <RotateCcw size={9} />
+                                          {sale.status === "REFUNDED"
+                                            ? "Avoir total"
+                                            : "Avoir partiel"}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                 </td>
@@ -2089,8 +2096,16 @@ export default function VentesPage() {
                                 <td className="px-4 py-2.5 text-center text-xs text-slate-500">
                                   {sale.items?.length ?? 0}
                                 </td>
-                                <td className="px-4 py-2.5 font-medium tabular-nums text-slate-800">
-                                  {money(sale.total)}
+                                <td className="px-4 py-2.5 tabular-nums">
+                                  <span className="font-medium text-slate-800">
+                                    {money(sale.totalCurrentTtc ?? sale.total)}
+                                  </span>
+                                  {sale.totalCurrentTtc != null &&
+                                    Number(sale.totalCurrentTtc) < Number(sale.total) && (
+                                      <span className="ml-1 text-[11px] text-slate-400 line-through">
+                                        {money(sale.total)}
+                                      </span>
+                                    )}
                                 </td>
                                 <td className="px-4 py-2.5">
                                   {(() => {
@@ -2118,83 +2133,20 @@ export default function VentesPage() {
                                 {hasActions && (
                                   <td className="px-4 py-2.5">
                                     <div className="flex items-center gap-1.5 justify-end">
-                                      {/* Transformer dropdown — visible uniquement si le type est transformable et non encore transformé */}
-                                      {(
-                                        TRANSFORMABLE_TYPES as string[]
-                                      ).includes(sale.documentType) &&
-                                        !sale.transformedToId &&
-                                        sale.status !== "CANCELLED" && (
-                                          <TransformDropdownButton
-                                            sale={sale}
-                                            onSelect={(targetType) =>
-                                              setTransformTarget({
-                                                sale,
-                                                targetType,
-                                              })
-                                            }
-                                          />
-                                        )}
                                       <KebabMenu
                                         items={[
-                                          {
-                                            label: "Générer devis",
-                                            icon: <FileText size={14} />,
-                                            onClick: () =>
-                                              handleGenerateForRow(
-                                                sale.id,
-                                                "DEVIS",
-                                              ),
-                                          },
-                                          {
-                                            label: "Générer bon de commande",
-                                            icon: <ClipboardList size={14} />,
-                                            onClick: () =>
-                                              handleGenerateForRow(
-                                                sale.id,
-                                                "BON_COMMANDE",
-                                              ),
-                                          },
-                                          {
-                                            label: "Générer bon de livraison",
-                                            icon: <Truck size={14} />,
-                                            onClick: () =>
-                                              handleGenerateForRow(
-                                                sale.id,
-                                                "BON_LIVRAISON",
-                                              ),
-                                          },
-                                          {
-                                            label: "Générer facture",
-                                            icon: <Receipt size={14} />,
-                                            onClick: () =>
-                                              handleGenerateForRow(
-                                                sale.id,
-                                                "FACTURE",
-                                              ),
-                                          },
-                                          {
-                                            label: "Générer avoir",
-                                            icon: <RotateCcw size={14} />,
-                                            onClick: () =>
-                                              handleGenerateForRow(
-                                                sale.id,
-                                                "AVOIR",
-                                              ),
-                                          },
-                                          { divider: true },
-                                          {
-                                            label: "Transformer…",
-                                            icon: <ArrowRightLeft size={14} />,
-                                            onClick: () =>
-                                              setTransformPickerSale(sale),
-                                          },
                                           {
                                             label: "Envoyer",
                                             icon: <Mail size={14} />,
                                             onClick: () =>
                                               handleEmailForRow(sale),
                                           },
-                                          { divider: true },
+                                          {
+                                            divider: true,
+                                            hidden:
+                                              !canViewDetails &&
+                                              !canDeleteSale,
+                                          },
                                           {
                                             label: "Voir les détails",
                                             icon: <Eye size={14} />,
@@ -2202,7 +2154,12 @@ export default function VentesPage() {
                                               setSelectedSaleId(sale.id),
                                             hidden: !canViewDetails,
                                           },
-                                          { divider: true },
+                                          {
+                                            divider: true,
+                                            hidden:
+                                              !canViewDetails ||
+                                              !canDeleteSale,
+                                          },
                                           {
                                             label: "Mettre à la corbeille",
                                             icon: <Trash2 size={14} />,
@@ -2379,19 +2336,7 @@ export default function VentesPage() {
               />
             )}
 
-            {/* Transform picker modal — opened from kebab menu */}
-            {transformPickerSale && (
-              <TransformPickerModal
-                sale={transformPickerSale}
-                onSelect={(targetType) => {
-                  setTransformTarget({ sale: transformPickerSale, targetType });
-                  setTransformPickerSale(null);
-                }}
-                onCancel={() => setTransformPickerSale(null)}
-              />
-            )}
-
-            {/* Transform confirm modal — opened from TransformDropdownButton per row */}
+            {/* Transform confirm modal — opened from TransformDropdownButton in bulk bar */}
             {transformTarget && (
               <TransformConfirmModal
                 sale={transformTarget.sale}

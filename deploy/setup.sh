@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================
-# CRM Geodetection — First-Time VPS Setup (Orchestrator)
+# Stockini — First-Time VPS Setup (Orchestrator)
 # =============================================================
 # Usage: bash deploy/setup.sh
 #        (run as non-root user WITH sudo privileges)
@@ -64,7 +64,7 @@ show_banner() {
   echo "  ║    ╚═╝  ╚═╝╚═╝     ╚═╝     ╚═╝  ╚═╝╚══════╝            ║"
   echo "  ║                                                       ║"
   echo "  ║         🚀  First-Time VPS Setup                      ║"
-  echo "  ║         CRM Geodetection — Production Deployment      ║"
+  echo "  ║         Stockini — Production Deployment      ║"
   echo "  ║                                                       ║"
   echo "  ╚═══════════════════════════════════════════════════════╝"
   echo -e "${NC}"
@@ -350,7 +350,7 @@ show_summary() {
   if command -v pm2 &>/dev/null; then
     PM2_BACK=$(pm2 jlist 2>/dev/null | python3 -c \
       "import sys,json; apps=json.load(sys.stdin); \
-       a=next((x for x in apps if x['name']=='crm-backend'),None); \
+       a=next((x for x in apps if x['name']=='stockini-backend'),None); \
        print(a['pm2_env']['status'] if a else 'absent')" 2>/dev/null || echo "absent")
     if [ "$PM2_BACK" = "online" ]; then
       log_ok "Backend (PM2) : online"
@@ -365,7 +365,7 @@ show_summary() {
     log_warn "API Port 3001 : pas de réponse"
   fi
 
-  if command -v pm2 &>/dev/null && pm2 jlist 2>/dev/null | grep -q '"name":"crm-frontend"'; then
+  if command -v pm2 &>/dev/null && pm2 jlist 2>/dev/null | grep -q '"name":"stockini-frontend"'; then
     log_ok "Frontend      : PM2 configuré"
   else
     log_warn "Frontend      : non trouvé dans PM2"
@@ -401,8 +401,8 @@ show_summary() {
   echo ""
   echo -e "  ${BOLD}📋 Commandes utiles :${NC}"
   echo -e "     ${DIM}pm2 status${NC}                       — État des services"
-  echo -e "     ${DIM}pm2 logs crm-backend${NC}             — Logs backend temps réel"
-  echo -e "     ${DIM}pm2 logs crm-frontend${NC}            — Logs frontend temps réel"
+  echo -e "     ${DIM}pm2 logs stockini-backend${NC}             — Logs backend temps réel"
+  echo -e "     ${DIM}pm2 logs stockini-frontend${NC}            — Logs frontend temps réel"
   echo -e "     ${DIM}bash deploy/vps/redeploy.sh${NC}      — Redéployer une mise à jour"
   echo -e "     ${DIM}bash deploy/vps/monitor.sh${NC}       — Dashboard monitoring"
   echo ""
@@ -475,7 +475,7 @@ main() {
   if ! run_step "5/8" "Backend NestJS + PM2" \
       "$VPS_DIR/setup_backend.sh" "user"; then
     log_err "Le déploiement du backend a échoué."
-    log_err "Vérifiez: pm2 logs crm-backend"
+    log_err "Vérifiez: pm2 logs stockini-backend"
     exit 1
   fi
 
@@ -483,7 +483,7 @@ main() {
   if ! run_step "6/8" "Frontend Next.js + PM2" \
       "$VPS_DIR/setup_frontend.sh" "user"; then
     log_err "Le déploiement du frontend a échoué."
-    log_err "Vérifiez: pm2 logs crm-frontend"
+    log_err "Vérifiez: pm2 logs stockini-frontend"
     exit 1
   fi
 

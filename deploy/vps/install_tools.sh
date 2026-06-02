@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # =============================================================
-# CRM Geodetection — VPS tools installer (no production Docker)
+# Stockini — VPS tools installer (no production Docker)
 # =============================================================
 # Usage: sudo bash deploy/vps/install_tools.sh
 #
 # Installs the system tools required to run production directly
 # on the VPS: Node.js 20, PM2, PostgreSQL 16, Redis, Nginx,
-# Certbot, MinIO, and native libraries needed by Puppeteer.
+# Certbot, and MinIO. (PDFs are generated with pdfkit — no
+# Chromium/Puppeteer needed.)
 # =============================================================
 
 RED='\033[0;31m'
@@ -44,20 +45,6 @@ install_base_packages() {
     git build-essential make openssl unzip rsync lsof htop logrotate \
     nginx certbot python3-certbot-nginx ufw fail2ban
   log_ok "Base packages installed"
-}
-
-install_puppeteer_deps() {
-  log_info "Installing Chromium/Puppeteer native dependencies..."
-  local asound_pkg="libasound2t64"
-  if ! apt-cache show "$asound_pkg" >/dev/null 2>&1; then
-    asound_pkg="libasound2"
-  fi
-  apt-get install -y \
-    fonts-liberation "$asound_pkg" libatk-bridge2.0-0 libatk1.0-0 \
-    libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 \
-    libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 \
-    libxrandr2 xdg-utils
-  log_ok "Puppeteer dependencies installed"
 }
 
 install_node() {
@@ -171,7 +158,6 @@ MINIO_SERVICE
 }
 
 install_base_packages
-install_puppeteer_deps
 install_node
 install_postgres
 install_redis

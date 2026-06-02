@@ -2,7 +2,7 @@
 
 import { useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check } from 'lucide-react';
+import { Check, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
 import { Badge } from '@/components/ui/badge';
@@ -17,14 +17,15 @@ import type { Payment, PaymentsQueryParams, Sale } from '@/lib/stockini/types';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { PageHeader } from '../shared/PageHeader';
 import { useDropdownOptions } from '../shared/form-utils';
+import { ClearHistoryModal } from '../shared/ClearHistoryModal';
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function PaymentStatusBadge({ status }: { status: string | null }) {
   if (status === 'PAID')    return <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Payé</Badge>;
-  if (status === 'PARTIAL') return <Badge className="border-amber-200 bg-amber-50 text-amber-700">Partiel</Badge>;
-  if (!status)              return <Badge className="border-gray-200 bg-gray-100 text-gray-500">—</Badge>;
-  return <Badge className="border-red-200 bg-red-50 text-red-700">Non payé</Badge>;
+  if (status === 'PARTIAL') return <Badge className="border-amber-200 bg-amber-50 text-amber-700">Partiellement payé</Badge>;
+  if (status === 'UNPAID')  return <Badge className="border-red-200 bg-red-50 text-red-700">Non payé</Badge>;
+  return <Badge className="border-gray-200 bg-gray-100 text-gray-500">—</Badge>;
 }
 
 function PaymentMethodLabel({ method }: { method: string }) {
@@ -119,10 +120,9 @@ const INVOICES_FILTERS: FilterConfig[] = [
     label: 'Statut paiement',
     type: 'select',
     options: [
-      { value: '', label: 'Tous' },
+      { value: '', label: 'Tous (non soldés)' },
       { value: 'UNPAID', label: 'Non payé' },
       { value: 'PARTIAL', label: 'Partiellement payé' },
-      { value: 'PAID', label: 'Payé' },
     ],
   },
   { key: 'dateFrom', label: 'Date début', type: 'date' },
@@ -218,6 +218,19 @@ export function PaymentsPage() {
   const canViewSales        = can('sales.view');
   const canViewPayments     = can('payments.view');
   const canReceivePayment   = can('payments.receive_client_payment');
+  const canClearHistory     = can('finance.history.clear');
+
+  const [showClearModal, setShowClearModal] = useState(false);
+
+  const clearHistoryMutation = useMutation({
+    mutationFn: () => stockiniApi.clearCustomerPaymentsHistory(),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
+      setShowClearModal(false);
+      toast.success(`Historique vidé (${res.count} entrées masquées)`);
+    },
+    onError: () => toast.error('Erreur lors du vidage de l\'historique'),
+  });
 
   // ── Invoices tab state ──────────────────────────────────────────────────────
   const [invPage,    setInvPage]    = useState(1);
@@ -247,10 +260,8 @@ export function PaymentsPage() {
     placeholderData: (prev) => prev,
   });
 
+  // Le backend filtre déjà via payableOnly=true + remainingAmount>0 : pas de re-filtrage ici.
   const salesData = Array.isArray(salesQuery.data?.data) ? salesQuery.data.data : [];
-  const unpaidSales = salesData.filter(
-    (s) => (s.paymentStatus === 'UNPAID' || s.paymentStatus === 'PARTIAL') && !s.deletedAt,
-  );
 
   // ── History tab state ───────────────────────────────────────────────────────
   const [histPage,    setHistPage]    = useState(1);
@@ -313,6 +324,7 @@ export function PaymentsPage() {
 
   const unpaidCount = salesQuery.data?.total ?? 0;
 
+
   return (
     <>
       <PageHeader title="Paiements" subtitle="Gestion des encaissements clients et suivi des dettes." />
@@ -355,7 +367,7 @@ export function PaymentsPage() {
               setPayTarget(sale);
               setPayForm({ amount: Number(sale.remainingAmount).toFixed(3), method: 'CASH', note: '' });
             })}
-            data={unpaidSales}
+            data={salesData}
             total={salesQuery.data?.total ?? 0}
             page={invPage}
             limit={invLimit}
@@ -386,9 +398,22 @@ export function PaymentsPage() {
 
       {/* ── Historique des paiements ── */}
       {activeTab === 'history' && (
-        <DataTable<Payment>
-          columns={historyColumns(setSelectedSaleId)}
-          data={paymentsData}
+        <>
+          {canClearHistory && (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(true)}
+                className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 hover:border-red-300"
+              >
+                <Trash2 size={13} />
+                Vider l&apos;historique
+              </button>
+            </div>
+          )}
+          <DataTable<Payment>
+            columns={historyColumns(setSelectedSaleId)}
+            data={paymentsData}
           total={paymentsQuery.data?.total ?? 0}
           page={histPage}
           limit={histLimit}
@@ -410,7 +435,16 @@ export function PaymentsPage() {
           rowKey={(row) => row.id}
           emptyMessage="Aucun paiement enregistré."
         />
+        </>
       )}
+
+      <ClearHistoryModal
+        open={showClearModal}
+        onClose={() => setShowClearModal(false)}
+        onConfirm={() => clearHistoryMutation.mutate()}
+        isPending={clearHistoryMutation.isPending}
+        moduleName="Historique des paiements clients"
+      />
 
       {selectedSaleId && (
         <SaleDetailsModal saleId={selectedSaleId} onClose={() => setSelectedSaleId(null)} />

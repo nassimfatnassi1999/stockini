@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================
-# CRM Geodetection — Backend Setup (VPS)
+# Stockini — Backend Setup (VPS)
 # =============================================================
 # Usage: bash deploy/vps/setup_backend.sh
 #
@@ -49,7 +49,7 @@ BACKEND_DIR="$PROJECT_ROOT/backend"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Backend Setup"
+echo "  Stockini — Backend Setup"
 echo "========================================="
 echo ""
 
@@ -264,8 +264,8 @@ if [ ! -f "$BACKEND_ECOSYSTEM" ]; then
 module.exports = {
   apps: [
     {
-      name: "crm-backend",
-      cwd: "/home/ubuntu/CRM-geoDetectionreseaux/backend",
+      name: "stockini-backend",
+      cwd: "/home/ubuntu/stockini/backend",
       script: "dist/main.js",
       instances: 1,
       exec_mode: "fork",
@@ -311,8 +311,8 @@ if lsof -ti :"$BACKEND_PORT" &>/dev/null; then
   exit 1
 fi
 
-if pm2 describe crm-backend >/dev/null 2>&1; then
-    pm2 reload "$BACKEND_ECOSYSTEM" --only crm-backend
+if pm2 describe stockini-backend >/dev/null 2>&1; then
+    pm2 reload "$BACKEND_ECOSYSTEM" --only stockini-backend
 else
     pm2 start "$BACKEND_ECOSYSTEM"
 fi
@@ -355,7 +355,7 @@ if [ "$HEALTH_OK" -eq 0 ]; then
   pm2 jlist 2>/dev/null | grep -o '"restart_time":[0-9]*' | head -1 || true
   echo ""
   log_info "Last 30 PM2 logs:"
-  pm2 logs crm-backend --lines 30 --nostream 2>/dev/null || true
+  pm2 logs stockini-backend --lines 30 --nostream 2>/dev/null || true
   echo ""
   log_info "Port $BACKEND_PORT status:"
   ss -tlnp 2>/dev/null | grep ":$BACKEND_PORT" || lsof -i :"$BACKEND_PORT" 2>/dev/null || echo "  (port not in use)"
@@ -389,10 +389,10 @@ echo "========================================="
 echo -e "${GREEN}  Backend setup complete!${NC}"
 echo "========================================="
 echo ""
-echo "  PM2 app:    crm-backend"
+echo "  PM2 app:    stockini-backend"
 echo "  Port:       $BACKEND_PORT"
-echo "  Logs:       pm2 logs crm-backend"
-echo "  Restart:    pm2 restart crm-backend"
+echo "  Logs:       pm2 logs stockini-backend"
+echo "  Restart:    pm2 restart stockini-backend"
 echo "  Status:     pm2 status"
 echo ""
 echo "  Next: bash deploy/vps/setup_frontend.sh"

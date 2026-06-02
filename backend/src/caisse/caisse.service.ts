@@ -1,14 +1,16 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { CaisseMovementType, PaymentType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { CustomersService } from '../customers/customers.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import type {
   CashPeriod,
   CashQueryDto,
   CashSummaryQueryDto,
   CashTransactionsQueryDto,
   CashAnalyticsQueryDto,
+  ClearCaisseHistoryDto,
 } from './dto/caisse.dto';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
@@ -70,10 +72,13 @@ export function resolveCashDateRange(
 
 @Injectable()
 export class CaisseService {
+  private readonly logger = new Logger(CaisseService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
     private readonly customers: CustomersService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   // ─── Balance ─────────────────────────────────────────────────────────────────
@@ -123,7 +128,7 @@ export class CaisseService {
 
   historique(type?: CaisseMovementType) {
     return this.prisma.caisseMovement.findMany({
-      where: type ? { type } : undefined,
+      where: { clearedAt: null, ...(type ? { type } : {}) },
       include: { user: { select: { id: true, fullName: true, email: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -242,6 +247,7 @@ export class CaisseService {
       : undefined;
 
     const where: Prisma.CaisseMovementWhereInput = {
+      clearedAt: null,
       ...(range ? { createdAt: range } : {}),
       ...(query.type && { type: query.type }),
       ...(query.search && {
@@ -284,9 +290,12 @@ export class CaisseService {
       id: m.id,
       date: m.createdAt,
       type: m.type,
-      direction: ['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL'].includes(m.type)
-        ? 'IN'
-        : 'OUT',
+      direction:
+        m.type === CaisseMovementType.CASH_RESET
+          ? Number(m.ancienSolde) < 0 ? 'IN' : 'OUT'
+          : ['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL'].includes(m.type)
+            ? 'IN'
+            : 'OUT',
       reference: m.referenceDoc ?? null,
       montant: Number(m.montant),
       ancienSolde: Number(m.ancienSolde),
@@ -484,6 +493,106 @@ export class CaisseService {
         montant: Number(s._sum.amount ?? 0),
       })),
     };
+  }
+
+  // ─── Reset balance ────────────────────────────────────────────────────────────
+
+  async resetBalance(motif: string, userId?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const config = await tx.caisseConfig.findFirst();
+      const currentBalance = Number(config?.solde ?? 0);
+
+      if (currentBalance === 0) {
+        throw new BadRequestException('La caisse est déjà à zéro.');
+      }
+
+      // Generate RESET-YYYYMMDD-XXXX reference
+      const dateStr = new Date().toISOString().split('T')[0]!.replace(/-/g, '');
+      const counterPrefix = `RESET-${dateStr}`;
+      const counter = await tx.referenceCounter.upsert({
+        where: { prefix_year: { prefix: counterPrefix, year: 0 } },
+        update: { sequence: { increment: 1 } },
+        create: { prefix: counterPrefix, year: 0, sequence: 1 },
+      });
+      const reference = `${counterPrefix}-${String(counter.sequence).padStart(4, '0')}`;
+
+      // montant = -currentBalance so that ancienSolde + montant = 0
+      const adjustment = -currentBalance;
+
+      const configId = config?.id;
+      const nouveauSolde = 0;
+
+      if (configId) {
+        await tx.caisseConfig.update({
+          where: { id: configId },
+          data: { solde: nouveauSolde },
+        });
+      } else {
+        await tx.caisseConfig.create({ data: { solde: nouveauSolde } });
+      }
+
+      const movement = await tx.caisseMovement.create({
+        data: {
+          type: CaisseMovementType.CASH_RESET,
+          montant: Math.abs(adjustment),
+          ancienSolde: currentBalance,
+          nouveauSolde,
+          motif,
+          referenceDoc: reference,
+          userId,
+        },
+      });
+
+      await this.auditLogs.create({
+        userId,
+        action: 'cash.reset',
+        entity: 'CaisseMovement',
+        entityId: movement.id,
+        metadata: {
+          ancienSolde: currentBalance,
+          nouveauSolde: 0,
+          motif,
+          reference,
+        },
+      });
+
+      return { movement, reference, ancienSolde: currentBalance, nouveauSolde: 0 };
+    });
+  }
+
+  // ─── Clear history (soft-clear, display only) ─────────────────────────────────
+
+  async clearHistory(dto: ClearCaisseHistoryDto, userId: string) {
+    const where: Prisma.CaisseMovementWhereInput = {
+      clearedAt: null,
+      ...((dto.dateFrom || dto.dateTo) && {
+        createdAt: {
+          ...(dto.dateFrom && { gte: new Date(dto.dateFrom) }),
+          ...(dto.dateTo && { lte: new Date(dto.dateTo) }),
+        },
+      }),
+      ...(dto.type && { type: dto.type }),
+    };
+
+    const count = await this.prisma.caisseMovement.count({ where });
+    if (count > 0) {
+      await this.prisma.caisseMovement.updateMany({
+        where,
+        data: { clearedAt: new Date(), clearedBy: userId },
+      });
+    }
+
+    await this.prisma.historyClearLog.create({
+      data: {
+        module: 'caisse_movements',
+        userId,
+        count,
+        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, type: dto.type } as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(`Caisse movement history cleared by ${userId}: ${count} records`);
+    return { count };
   }
 
   // ─── Backfill ─────────────────────────────────────────────────────────────────

@@ -191,6 +191,8 @@ export class AvoirsService {
         const seenSaleItems = new Set<string>();
 
         // Validate each item
+        const globalRestock = dto.restock !== false;
+
         const resolvedItems: Array<{
           saleItemId: string;
           productId: string;
@@ -201,6 +203,7 @@ export class AvoirsService {
           totalHt: number;
           totalTtc: number;
           motifLigne?: string;
+          restock: boolean;
         }> = [];
 
         for (const dtoItem of dto.items) {
@@ -258,6 +261,7 @@ export class AvoirsService {
             totalHt: lineTotals.totalHt,
             totalTtc: lineTotals.totalTtc,
             motifLigne: dtoItem.motifLigne,
+            restock: dtoItem.restock !== undefined ? dtoItem.restock : globalRestock,
           });
         }
 
@@ -311,8 +315,9 @@ export class AvoirsService {
           include: AVOIR_INCLUDE,
         });
 
-        // Restore stock for returned products
+        // Restore stock only for lines where restock is enabled
         for (const item of resolvedItems) {
+          if (!item.restock) continue;
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
             type: StockMovementType.CUSTOMER_RETURN,
@@ -586,15 +591,28 @@ export class AvoirsService {
       _sum: { total: true },
     });
     const refundedTotal = Number(refundedTotals._sum.total ?? 0);
-    const saleTotal = Number(sale.total);
+
+    // Snapshot the original total on the very first avoir (never overwrite after that).
+    const initialTtc =
+      sale.totalInitialTtc != null
+        ? Number(sale.totalInitialTtc)
+        : Number(sale.total);
+    const currentTtc = Math.max(0, initialTtc - refundedTotal);
+
     const nextStatus =
-      allQuantitiesReturned || refundedTotal >= saleTotal - 0.001
+      allQuantitiesReturned || refundedTotal >= initialTtc - 0.001
         ? SaleStatus.REFUNDED
         : SaleStatus.PARTIALLY_REFUNDED;
 
     await tx.sale.update({
       where: { id: saleId },
-      data: { status: nextStatus },
+      data: {
+        status: nextStatus,
+        totalRefunded: refundedTotal,
+        // Only set the initial snapshot once (first avoir).
+        ...(sale.totalInitialTtc == null && { totalInitialTtc: sale.total }),
+        totalCurrentTtc: currentTtc,
+      },
     });
   }
 

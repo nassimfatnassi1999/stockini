@@ -2,11 +2,11 @@
 
 ## Présentation
 
-**`security-politic.sh`** est un script interactif tout-en-un qui regroupe toutes les configurations de sécurité pour votre VPS CRM Geodetection :
+**`security-politic.sh`** est un script interactif tout-en-un qui regroupe toutes les configurations de sécurité pour votre VPS Stockini :
 
 - 🔥 **Firewall (UFW)** — Ports 22/80/443 + mode Cloudflare
 - 🔑 **SSH Hardening** — Désactivation root, auth par clé uniquement
-- 🛡️ **Fail2ban** — Protection contre brute-force (SSH, Nginx, CRM)
+- 🛡️ **Fail2ban** — Protection contre brute-force (SSH, Nginx, Stockini)
 - 📊 **Logging & Monitoring** — Rotation des logs + alertes sécurité
 
 ## 🚀 Lancement rapide
@@ -22,7 +22,7 @@ Le script affiche un menu élégant avec 7 options :
 
 ```
 ╔═══════════════════════════════════════════════════════════════╗
-║        🛡️  CRM Geodetection — Security Policy Manager  🛡️        ║
+║        🛡️  Stockini — Security Policy Manager  🛡️        ║
 ║             Complete VPS Hardening & Protection              ║
 ╚═══════════════════════════════════════════════════════════════╝
 
@@ -83,7 +83,7 @@ Installe et configure 6 jails Fail2ban :
 | `nginx-botsearch` | Scanners nginx | 10 hits | 10min |
 | `nginx-badbots` | User-agents malveillants | 2 hits | 24h |
 | `nginx-http-auth` | HTTP auth failures | 5 échecs | 1h |
-| `crm-login` | Brute force CRM | 5 échecs | 30min |
+| `stockini-login` | Brute force Stockini | 5 échecs | 30min |
 
 **Aucune question posée** — configuration automatique.
 
@@ -91,7 +91,7 @@ Installe et configure 6 jails Fail2ban :
 
 - Rotation des logs nginx (30 jours)
 - Script de monitoring sécurité (toutes les 15 minutes via cron)
-- Détection automatique : SSH brute force, scans nginx, tentatives login CRM
+- Détection automatique : SSH brute force, scans nginx, tentatives login Stockini
 - **Bonus** : Alertes email (via msmtp + SMTP)
 
 **Questions posées :**
@@ -99,12 +99,12 @@ Installe et configure 6 jails Fail2ban :
 - Si oui : SMTP host, port, user, password, from email, alert email
 
 **Fichiers créés :**
-- `/usr/local/bin/crm-security-monitor.sh` — Script de monitoring
-- `/var/log/crm-geodetection/security-alerts.log` — Log des alertes
+- `/usr/local/bin/stockini-security-monitor.sh` — Script de monitoring
+- `/var/log/stockini/security-alerts.log` — Log des alertes
 
 **Vérifier les alertes :**
 ```bash
-tail -f /var/log/crm-geodetection/security-alerts.log
+tail -f /var/log/stockini/security-alerts.log
 ```
 
 ### Option 5 : ⚡ COMPLETE HARDENING (All-in-One)
@@ -139,7 +139,7 @@ Affiche le statut actuel de toutes les configurations de sécurité :
    • Max 3 auth attempts
 
 ✅ Fail2ban: ACTIVE
-   Jails: sshd sshd-aggressive nginx-botsearch nginx-badbots crm-login
+   Jails: sshd sshd-aggressive nginx-botsearch nginx-badbots stockini-login
 
 ✅ Security Monitoring: ACTIVE
    • Log rotation configured
@@ -176,7 +176,7 @@ sudo fail2ban-client status
 
 # Statut d'un jail spécifique
 sudo fail2ban-client status sshd
-sudo fail2ban-client status crm-login
+sudo fail2ban-client status stockini-login
 
 # Débannir une IP
 sudo fail2ban-client set sshd unbanip 1.2.3.4
@@ -200,14 +200,14 @@ sudo grep "Accepted publickey" /var/log/auth.log | tail -20
 ### Monitoring
 ```bash
 # Voir les alertes en temps réel
-tail -f /var/log/crm-geodetection/security-alerts.log
+tail -f /var/log/stockini/security-alerts.log
 
 # Voir les logs nginx
 tail -f /var/log/nginx/access.log
 tail -f /var/log/nginx/error.log
 
 # Exécuter manuellement le script de monitoring
-sudo /usr/local/bin/crm-security-monitor.sh
+sudo /usr/local/bin/stockini-security-monitor.sh
 ```
 
 ## 🐛 Troubleshooting
@@ -229,7 +229,7 @@ ssh-copy-id votre_user@VPS_IP
 ```bash
 # Restaurer la backup SSH
 sudo mv /etc/ssh/sshd_config.bak.* /etc/ssh/sshd_config
-sudo rm /etc/ssh/sshd_config.d/99-crm-hardening.conf
+sudo rm /etc/ssh/sshd_config.d/99-stockini-hardening.conf
 sudo systemctl restart sshd
 ```
 
@@ -258,7 +258,7 @@ done
 | `/var/log/auth.log` | Tentatives SSH, sudo |
 | `/var/log/nginx/access.log` | Requêtes HTTP/HTTPS |
 | `/var/log/nginx/error.log` | Erreurs nginx |
-| `/var/log/crm-geodetection/security-alerts.log` | Alertes sécurité CRM |
+| `/var/log/stockini/security-alerts.log` | Alertes sécurité Stockini |
 | `/var/log/fail2ban.log` | Actions Fail2ban |
 | `/var/log/ufw.log` | Connexions bloquées par firewall |
 
@@ -288,7 +288,7 @@ sudo bash deploy/scripts/security-politic.sh
 
 - **Mode Cloudflare :** Activez-le uniquement si votre domaine est proxied (icône orange) sur Cloudflare
 - **SSH par IP :** Utilisez-le uniquement si vous avez une IP fixe (4G/5G = IP changeante !)
-- **Email alerts :** Brevo offre 300 emails/jour gratuits (suffisant pour les alertes)
+- **Email alerts :** Gmail offre 300 emails/jour gratuits (suffisant pour les alertes)
 - **Test Fail2ban :** `sudo fail2ban-client ping` doit retourner "pong"
 
 ## 🆘 Support

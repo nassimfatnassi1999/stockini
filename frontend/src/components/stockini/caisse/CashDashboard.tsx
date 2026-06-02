@@ -1,15 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { BarChart3, List, RefreshCw } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { BarChart3, List, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cleanPaginationParams } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
+import { usePermissions } from '@/lib/hooks/usePermissions';
+import { stockiniApi } from '@/lib/stockini/api';
+import { toast } from '@/lib/toast';
 import { CashSummaryCards, type CashSummary } from './CashSummaryCards';
 import { CashFilters, type CashFilterState, type CashPeriod } from './CashFilters';
 import { CashTransactionsTable, type CashTransaction, type CashPagination } from './CashTransactionsTable';
 import { CashAnalyticsCharts, type CashAnalytics } from './CashAnalyticsCharts';
+import { CashResetModal } from './CashResetModal';
+import { ClearHistoryModal } from '../shared/ClearHistoryModal';
 
 type Tab = 'transactions' | 'analytics';
 
@@ -18,6 +23,7 @@ function todayStr() {
 }
 
 export function CashDashboard() {
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('transactions');
   const [filters, setFilters] = useState<CashFilterState>({
     period:    'today',
@@ -25,6 +31,20 @@ export function CashDashboard() {
     endDate:   todayStr(),
   });
   const [page, setPage] = useState(1);
+  const [showReset, setShowReset] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const { can } = usePermissions();
+  const canClearHistory = can('finance.history.clear');
+
+  const clearCaisseMutation = useMutation({
+    mutationFn: () => stockiniApi.clearCaisseHistory(),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
+      setShowClearModal(false);
+      toast.success(`Historique caisse vidé (${res.count} entrées masquées)`);
+    },
+    onError: () => toast.error('Erreur lors du vidage de l\'historique caisse'),
+  });
 
   // Summary query
   const summaryParams = buildPeriodParams(filters);
@@ -66,21 +86,46 @@ export function CashDashboard() {
 
   return (
     <div className="space-y-4">
+      {showReset && <CashResetModal onClose={() => setShowReset(false)} />}
+
+      <ClearHistoryModal
+        open={showClearModal}
+        onClose={() => setShowClearModal(false)}
+        onConfirm={() => clearCaisseMutation.mutate()}
+        isPending={clearCaisseMutation.isPending}
+        moduleName="Transactions caisse"
+      />
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CashFilters value={filters} onChange={handleFilterChange} />
-        <button
-          type="button"
-          onClick={handleRefresh}
-          disabled={summaryQuery.isFetching}
-          className={cn(
-            'flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[12px] font-medium text-text-secondary',
-            'transition-colors hover:bg-surface hover:text-text-primary disabled:opacity-50',
+        <div className="flex items-center gap-2">
+          {can('cash.reset_balance') && (
+            <button
+              type="button"
+              onClick={() => setShowReset(true)}
+              className={cn(
+                'flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-[12px] font-medium text-red-600',
+                'transition-colors hover:bg-red-100 hover:border-red-300',
+              )}
+            >
+              <RotateCcw size={13} />
+              Remise à zéro
+            </button>
           )}
-        >
-          <RefreshCw size={13} className={summaryQuery.isFetching ? 'animate-spin' : ''} />
-          Actualiser
-        </button>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={summaryQuery.isFetching}
+            className={cn(
+              'flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[12px] font-medium text-text-secondary',
+              'transition-colors hover:bg-surface hover:text-text-primary disabled:opacity-50',
+            )}
+          >
+            <RefreshCw size={13} className={summaryQuery.isFetching ? 'animate-spin' : ''} />
+            Actualiser
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -111,12 +156,29 @@ export function CashDashboard() {
 
       {/* Content */}
       {tab === 'transactions' && (
-        <CashTransactionsTable
-          data={txQuery.data?.data ?? []}
-          pagination={txQuery.data?.pagination}
-          isLoading={txQuery.isLoading}
-          onPageChange={setPage}
-        />
+        <>
+          {canClearHistory && (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(true)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600',
+                  'transition-colors hover:bg-red-100 hover:border-red-300',
+                )}
+              >
+                <Trash2 size={13} />
+                Vider l&apos;historique
+              </button>
+            </div>
+          )}
+          <CashTransactionsTable
+            data={txQuery.data?.data ?? []}
+            pagination={txQuery.data?.pagination}
+            isLoading={txQuery.isLoading}
+            onPageChange={setPage}
+          />
+        </>
       )}
 
       {tab === 'analytics' && (

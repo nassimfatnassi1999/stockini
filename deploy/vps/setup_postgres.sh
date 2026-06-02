@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — PostgreSQL Setup (VPS)
+# Stockini — PostgreSQL Setup (VPS)
 # =============================================================
 # Usage: sudo bash deploy/vps/setup_postgres.sh
 #
@@ -52,7 +52,7 @@ DB_NAME="${DB_NAME:?DB_NAME is required in .env}"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — PostgreSQL Setup"
+echo "  Stockini — PostgreSQL Setup"
 echo "========================================="
 echo ""
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================
-# CRM Geodetection — Clean & Restart Backend
+# Stockini — Clean & Restart Backend
 # =============================================================
 # Usage: bash deploy/vps/clean_backend.sh
 #
@@ -20,7 +20,7 @@ log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 log_err()  { echo -e "${RED}[✗]${NC} $1"; }
 
-APP_NAME="crm-backend"
+APP_NAME="stockini-backend"
 
 # ── Resolve project root ────────────────────────────────────
 resolve_project_root() {
@@ -63,7 +63,7 @@ ECOSYSTEM="$PROJECT_ROOT/ecosystem.config.js"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Clean & Restart Backend"
+echo "  Stockini — Clean & Restart Backend"
 echo "========================================="
 echo ""
 

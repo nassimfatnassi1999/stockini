@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================
-# CRM Geodetection — Logging & Alerting (Step 7)
+# Stockini — Logging & Alerting (Step 7)
 # =============================================================
 # Run on VPS:  sudo bash deploy/scripts/7_setup_logging.sh
 #
@@ -17,17 +17,17 @@ require_root
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Logging & Alerting"
+echo "  Stockini — Logging & Alerting"
 echo "========================================="
 echo ""
 
 # ── 1. Create log directories ──────────────────────────────
 mkdir -p /var/log/nginx
-mkdir -p /var/log/crm-geodetection
+mkdir -p /var/log/stockini
 log_ok "Log directories created"
 
 # ── 2. Nginx log rotation ──────────────────────────────────
-LOGROTATE_CONF="/etc/logrotate.d/crm-nginx"
+LOGROTATE_CONF="/etc/logrotate.d/stockini-nginx"
 cat > "$LOGROTATE_CONF" << 'EOF'
 /var/log/nginx/*.log {
     daily
@@ -45,14 +45,14 @@ EOF
 log_ok "Nginx log rotation configured (30 days)"
 
 # ── 3. Security monitoring script ──────────────────────────
-MONITOR_SCRIPT="/usr/local/bin/crm-security-monitor.sh"
+MONITOR_SCRIPT="/usr/local/bin/stockini-security-monitor.sh"
 cat > "$MONITOR_SCRIPT" << 'MONITOR'
 #!/bin/bash
 # =============================================================
-# CRM Apprensur — Security Monitor (cron every 15min)
+# Stockini — Security Monitor (cron every 15min)
 # =============================================================
 
-LOG_DIR="/var/log/crm-geodetection"
+LOG_DIR="/var/log/stockini"
 ALERT_LOG="$LOG_DIR/security-alerts.log"
 NGINX_LOG="/var/log/nginx/access.log"
 AUTH_LOG="/var/log/auth.log"
@@ -87,12 +87,12 @@ if [ -f "$NGINX_LOG" ]; then
     echo "[$TIMESTAMP] ALERT: IP $TOP_ADDR made $TOP_COUNT requests (possible scan)" >> "$ALERT_LOG"
   fi
 
-  # ── CRM login failures ────────────────────────────────────
+  # ── Stockini login failures ────────────────────────────────────
   LOGIN_FAILS=$(tail -2000 "$NGINX_LOG" 2>/dev/null | \
     grep "POST /api/auth/login" | awk '{print $9}' | grep -c "401" || true)
 
   if [ "$LOGIN_FAILS" -gt 20 ]; then
-    echo "[$TIMESTAMP] ALERT: $LOGIN_FAILS failed CRM login attempts in recent logs" >> "$ALERT_LOG"
+    echo "[$TIMESTAMP] ALERT: $LOGIN_FAILS failed Stockini login attempts in recent logs" >> "$ALERT_LOG"
   fi
 fi
 
@@ -127,7 +127,7 @@ log_ok "Security monitoring script created at $MONITOR_SCRIPT"
 
 # ── 4. Install cron job (every 15 minutes) ──────────────────
 CRON_LINE="*/15 * * * * $MONITOR_SCRIPT"
-if crontab -l 2>/dev/null | grep -q "crm-security-monitor"; then
+if crontab -l 2>/dev/null | grep -q "stockini-security-monitor"; then
   log_ok "Cron job already exists"
 else
   (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
@@ -144,7 +144,7 @@ if [[ "$SETUP_EMAIL" =~ ^[yY]$ ]]; then
     apt-get install -y msmtp msmtp-mta
   fi
 
-  read -p "SMTP host (e.g. smtp-relay.brevo.com): " SMTP_HOST
+  read -p "SMTP host (e.g. smtp.gmail.com): " SMTP_HOST
   read -p "SMTP port (e.g. 587): " SMTP_PORT
   read -p "SMTP user: " SMTP_USER
   read -sp "SMTP password: " SMTP_PASS; echo
@@ -175,7 +175,7 @@ MSMTP
 # ── Send alert email if new alerts ───────────────────────────
 LAST_ALERT=\$(tail -1 "$LOG_DIR/security-alerts.log" 2>/dev/null | grep "ALERT" || true)
 if [ -n "\$LAST_ALERT" ]; then
-  echo -e "Subject: [CRM Security Alert] \$(hostname)\\n\\n\$LAST_ALERT" | \
+  echo -e "Subject: [Stockini Security Alert] \$(hostname)\\n\\n\$LAST_ALERT" | \
     msmtp "$ALERT_EMAIL" 2>/dev/null || true
 fi
 EMAILBLOCK
@@ -193,11 +193,11 @@ echo ""
 echo "  Configured:"
 echo "    ✅ Nginx log rotation (30 days)"
 echo "    ✅ Security monitor (every 15min)"
-echo "    ✅ Alert log: /var/log/crm-geodetection/security-alerts.log"
+echo "    ✅ Alert log: /var/log/stockini/security-alerts.log"
 if [[ "$SETUP_EMAIL" =~ ^[yY]$ ]]; then
 echo "    ✅ Email alerts to $ALERT_EMAIL"
 fi
 echo ""
 echo "  View alerts:"
-echo "    tail -f /var/log/crm-geodetection/security-alerts.log"
+echo "    tail -f /var/log/stockini/security-alerts.log"
 echo ""

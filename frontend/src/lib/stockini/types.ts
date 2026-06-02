@@ -85,16 +85,34 @@ export interface Supplier {
   address?: string | null;
   taxNumber?: string | null;
   paymentTerms?: string | null;
+  /** « Notre dette » : somme des restes à payer pour ce fournisseur (string Decimal). */
+  totalDebt?: number | string | null;
   deletedAt?: string | null;
   deletedBy?: string | null;
+}
+
+export interface PayablePurchasesResponse {
+  data: Purchase[];
+  count: number;
+  totalRemaining: string;
+}
+
+export interface PayablePurchasesQueryParams {
+  search?: string;
+  supplierId?: string;
+  paymentStatus?: string;
 }
 
 export interface Sale {
   id: Id;
   invoiceNumber: string;
   total: number | string;
+  totalInitialTtc?: number | string | null;
+  totalCurrentTtc?: number | string | null;
   paidAmount: number | string;
   remainingAmount: number | string;
+  totalRefunded: number | string;
+  creditNotesCount?: number;
   paymentStatus: string | null;
   status: string;
   documentType: SalesDocumentType;
@@ -319,6 +337,19 @@ export interface TrashItem {
   documentType?: string | null;
   minioObjectKey?: string | null;
   minioBucket?: string | null;
+}
+
+export interface DeleteImpactResult {
+  canDelete: boolean;
+  requiresCascadeConfirmation: boolean;
+  mainEntity: string;
+  entityType: string;
+  entityStatus?: string | null;
+  blockingRelations: string[];
+  cascadeWouldDelete: string[];
+  willKeep: string[];
+  riskLevel: "LOW" | "MEDIUM" | "HIGH";
+  warning?: string | null;
 }
 
 export interface Alert {

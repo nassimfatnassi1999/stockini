@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -122,4 +123,24 @@ export class CaisseOperationDto {
 export class CaisseConfigUpdateDto {
   @IsOptional()
   allowNegative?: boolean;
+}
+
+export class CashResetDto {
+  @IsString()
+  @IsNotEmpty()
+  motif!: string;
+}
+
+export class ClearCaisseHistoryDto {
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsEnum(CaisseMovementType)
+  type?: CaisseMovementType;
 }

@@ -75,6 +75,24 @@ export class UpdatePurchaseDto {
   status?: PurchaseStatus;
 }
 
+/**
+ * Filtres pour la liste des factures fournisseurs « à payer ».
+ * L'agrégation (reste à payer, exclusion des annulées/payées) se fait côté backend.
+ */
+export class PayablePurchaseQueryDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  paymentStatus?: PaymentStatus;
+}
+
 export class PurchasePaginationDto {
   @IsOptional()
   @Type(() => Number)

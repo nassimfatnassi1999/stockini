@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================
-# CRM Geodetection — Automated DB Backup (Every 3 Days)
+# Stockini — Automated DB Backup (Every 3 Days)
 # =============================================================
 # Usage:
 #   To run the backup manually: bash deploy/cron-backup-db.sh
@@ -57,7 +57,7 @@ fi
 # Load variables safely
 set -a; source "$ENV_FILE" 2>/dev/null; set +a
 
-DB_NAME_VAL="${DB_NAME:-geodetection_crm}"
+DB_NAME_VAL="${DB_NAME:-stockpro}"
 
 # Overwrite the latest backup (only one backup is stored, naming it backup.sql)
 if sudo -u postgres pg_dump -Fc "$DB_NAME_VAL" > "$BACKUP_FILE" 2>/dev/null; then

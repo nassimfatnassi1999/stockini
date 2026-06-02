@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================
-# CRM Geodetection — Prisma Migration Recovery (P3009)
+# Stockini — Prisma Migration Recovery (P3009)
 # =============================================================
 # Usage: bash deploy/vps/fix-migration.sh
 #
@@ -57,7 +57,7 @@ ENV_FILE="$PROJECT_ROOT/.env"
 
 echo ""
 echo "============================================="
-echo "  CRM Geodetection — Migration Recovery"
+echo "  Stockini — Migration Recovery"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================="
 echo ""

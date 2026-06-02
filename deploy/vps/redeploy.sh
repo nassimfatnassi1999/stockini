@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================
-# CRM Geodetection — Full Redeploy Script (VPS)
+# Stockini — Full Redeploy Script (VPS)
 # =============================================================
 # Usage: bash deploy/vps/redeploy.sh [--with-system-patch]
 #
@@ -62,7 +62,7 @@ if [ -z "$PROJECT_ROOT" ]; then
 fi
 # Hardcoded fallback for VPS deployment path
 if [ -z "$PROJECT_ROOT" ]; then
-  [ -d "/home/ubuntu/CRM-geoDetectionreseaux" ] && PROJECT_ROOT="/home/ubuntu/CRM-geoDetectionreseaux"
+  [ -d "/home/ubuntu/stockini" ] && PROJECT_ROOT="/home/ubuntu/stockini"
 fi
 if [ -z "$PROJECT_ROOT" ]; then
   log_err "Cannot detect project root."
@@ -75,7 +75,7 @@ ENV_FILE="$PROJECT_ROOT/.env"
 
 echo ""
 echo "============================================="
-echo "  CRM Geodetection — Full Redeploy"
+echo "  Stockini — Full Redeploy"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================="
 echo ""
@@ -307,8 +307,8 @@ if [ ! -f "$BACKEND_ECOSYSTEM" ]; then
 module.exports = {
   apps: [
     {
-      name: "crm-backend",
-      cwd: "/home/ubuntu/CRM-geoDetectionreseaux/backend",
+      name: "stockini-backend",
+      cwd: "/home/ubuntu/stockini/backend",
       script: "dist/main.js",
       instances: 1,
       exec_mode: "fork",
@@ -330,8 +330,8 @@ fi
 # Snapshot running state before we touch PM2 (needed by rollback)
 _BACKEND_WAS_RUNNING=false
 _FRONTEND_WAS_RUNNING=false
-pm2 list 2>/dev/null | grep -q "crm-backend"  && _BACKEND_WAS_RUNNING=true  || true
-pm2 list 2>/dev/null | grep -q "crm-frontend" && _FRONTEND_WAS_RUNNING=true || true
+pm2 list 2>/dev/null | grep -q "stockini-backend"  && _BACKEND_WAS_RUNNING=true  || true
+pm2 list 2>/dev/null | grep -q "stockini-frontend" && _FRONTEND_WAS_RUNNING=true || true
 
 # Rollback: invoked automatically on ERR — tries to restore services
 rollback_pm2() {
@@ -339,19 +339,19 @@ rollback_pm2() {
   if $_BACKEND_WAS_RUNNING && [ -f "$BACKEND_ECOSYSTEM" ]; then
     pm2 startOrReload "$BACKEND_ECOSYSTEM" --update-env 2>/dev/null \
       || pm2 start "$BACKEND_ECOSYSTEM" --update-env 2>/dev/null \
-      || log_err "  Rollback FAILED for crm-backend — manual restart required"
+      || log_err "  Rollback FAILED for stockini-backend — manual restart required"
   fi
   if $_FRONTEND_WAS_RUNNING && [ -f "$FRONTEND_ECOSYSTEM" ]; then
     pm2 startOrReload "$FRONTEND_ECOSYSTEM" --update-env 2>/dev/null \
       || pm2 start "$FRONTEND_ECOSYSTEM" --update-env 2>/dev/null \
-      || log_err "  Rollback FAILED for crm-frontend — manual restart required"
+      || log_err "  Rollback FAILED for stockini-frontend — manual restart required"
   fi
   pm2 save 2>/dev/null || true
 }
 trap rollback_pm2 ERR
 
 # Stop PM2 backend FIRST so autorestart does not re-bind the port immediately
-pm2 stop crm-backend 2>/dev/null || true
+pm2 stop stockini-backend 2>/dev/null || true
 sleep 1
 
 # Kill any remaining stray processes on the backend port (orphans, old Node instances)
@@ -374,9 +374,9 @@ if lsof -ti :"$BACKEND_PORT" &>/dev/null; then
 fi
 
 # Restart backend
-log_info "Reloading crm-backend from $BACKEND_ECOSYSTEM..."
-if pm2 describe crm-backend >/dev/null 2>&1; then
-    pm2 reload "$BACKEND_ECOSYSTEM" --only crm-backend
+log_info "Reloading stockini-backend from $BACKEND_ECOSYSTEM..."
+if pm2 describe stockini-backend >/dev/null 2>&1; then
+    pm2 reload "$BACKEND_ECOSYSTEM" --only stockini-backend
 else
     pm2 start "$BACKEND_ECOSYSTEM"
 fi
@@ -390,8 +390,8 @@ if [ ! -f "$FRONTEND_ECOSYSTEM" ]; then
 module.exports = {
   apps: [
     {
-      name: "crm-frontend",
-      cwd: "/home/ubuntu/CRM-geoDetectionreseaux/frontend",
+      name: "stockini-frontend",
+      cwd: "/home/ubuntu/stockini/frontend",
       script: "node_modules/next/dist/bin/next",
       args: "start -p 3000",
       instances: 1,
@@ -411,9 +411,9 @@ EOF
 fi
 
 # Restart frontend
-log_info "Reloading crm-frontend from $FRONTEND_ECOSYSTEM..."
-if pm2 describe crm-frontend >/dev/null 2>&1; then
-    pm2 reload "$FRONTEND_ECOSYSTEM" --only crm-frontend
+log_info "Reloading stockini-frontend from $FRONTEND_ECOSYSTEM..."
+if pm2 describe stockini-frontend >/dev/null 2>&1; then
+    pm2 reload "$FRONTEND_ECOSYSTEM" --only stockini-frontend
 else
     pm2 start "$FRONTEND_ECOSYSTEM"
 fi
@@ -461,7 +461,7 @@ done
 if [ "$FRONTEND_HEALTH_OK" -eq 0 ]; then
   log_warn "Frontend ne répond pas sur port $FRONTEND_PORT"
   log_warn "Logs frontend:"
-  pm2 logs crm-frontend --lines 20 --nostream 2>/dev/null || true
+  pm2 logs stockini-frontend --lines 20 --nostream 2>/dev/null || true
 fi
 
 if [ "$HEALTH_OK" -eq 0 ]; then
@@ -476,7 +476,7 @@ if [ "$HEALTH_OK" -eq 0 ]; then
   pm2 status 2>/dev/null || true
   echo ""
   log_info "PM2 logs (last 50 lines):"
-  pm2 logs crm-backend --lines 50 --nostream 2>/dev/null || true
+  pm2 logs stockini-backend --lines 50 --nostream 2>/dev/null || true
   echo ""
   log_info "Port $BACKEND_PORT:"
   ss -tlnp 2>/dev/null | grep ":$BACKEND_PORT" || echo "  (not in use)"
@@ -523,7 +523,7 @@ pm2 status
 echo ""
 echo "  Backend:  http://127.0.0.1:$BACKEND_PORT/health"
 echo "  Frontend: http://127.0.0.1:$FRONTEND_PORT"
-echo "  Logs:     pm2 logs crm-backend"
+echo "  Logs:     pm2 logs stockini-backend"
 echo ""
 echo "─── Vérifications ──────────────────────────"
 echo ""

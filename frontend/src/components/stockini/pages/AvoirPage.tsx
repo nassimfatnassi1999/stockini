@@ -407,6 +407,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ["stockini-customers"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-caisse"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-payments"] });
+      queryClient.invalidateQueries({ queryKey: ["sale-credit-notes"] });
       queryClient.invalidateQueries({
         queryKey: ["returnable-items", selectedSaleId],
       });

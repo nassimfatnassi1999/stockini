@@ -120,7 +120,7 @@ deploy/
         ├── security-politic.sh      ← menu interactif tout-en-un sécurité
         ├── setup_firewall.sh        ← UFW : ports 22/80/443 + mode Cloudflare
         ├── secure_ssh.sh            ← SSH hardening (désactive root + password auth)
-        ├── setup_fail2ban.sh        ← Fail2ban : 6 jails (SSH, Nginx, CRM)
+        ├── setup_fail2ban.sh        ← Fail2ban : 6 jails (SSH, Nginx, Stockini)
         ├── setup_logging.sh         ← rotation logs + monitoring cron 15min
         ├── _common.sh               ← fonctions partagées entre scripts sécurité
         └── SECURITY_GUIDE.md        ← documentation complète sécurité
@@ -146,8 +146,8 @@ sudo apt-get update && sudo apt-get upgrade -y
 ```bash
 # Répertoire de déploiement par convention
 cd /home/ubuntu
-git clone <URL_DU_REPO> CRM-geoDetectionreseaux
-cd CRM-geoDetectionreseaux
+git clone <URL_DU_REPO> stockini
+cd stockini
 ```
 
 ### 4.3 Configurer le fichier .env
@@ -176,9 +176,9 @@ REDIS_PASSWORD="..."
 MINIO_ACCESS_KEY="cle_acces_minio"
 MINIO_SECRET_KEY="cle_secrete_minio"
 
-# SMTP (email, optionnel mais recommandé)
-SMTP_USER="..."
-SMTP_PASS="..."
+# SMTP (email, optionnel mais recommandé) — Gmail
+SMTP_USER="moumnaspareparts@gmail.com"
+SMTP_PASS="app_password_gmail_16_caracteres"
 ```
 
 Le domaine et les URLs sont déjà pré-configurés :
@@ -190,7 +190,7 @@ FRONTEND_URL=https://stockini-msp.tn
 NEXT_PUBLIC_APP_URL=https://stockini-msp.tn
 NEXT_PUBLIC_SITE_URL=https://stockini-msp.tn
 MINIO_PUBLIC_ENDPOINT=https://stockini-msp.tn/storage
-FROM_EMAIL="noreply@stockini-msp.tn"
+SMTP_FROM="moumnaspareparts@gmail.com"
 ```
 
 > **Note :** Le setup valide `.env` avant de commencer et bloque si des `CHANGE_ME` critiques sont détectés.
@@ -218,7 +218,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 
 #### Étape 2/8 — PostgreSQL (`setup_postgres.sh`, sudo)
 - Installe PostgreSQL 16 si absent
-- Crée l'utilisateur `geodetection` et la base `geodetection_crm`
+- Crée l'utilisateur `stockpro` et la base `stockpro`
 - Met à jour `DATABASE_URL` dans `.env` avec le mot de passe URL-encodé
 - Vérifie la connexion
 
@@ -234,7 +234,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Télécharge et installe le binaire MinIO
 - Crée l'utilisateur système `minio-user`
 - Configure et démarre le service systemd
-- Crée le bucket `crm-documents` (ou la valeur de `MINIO_BUCKET` dans `.env`)
+- Crée le bucket `generated-documents` (ou la valeur de `MINIO_BUCKET` dans `.env`)
 
 #### Étape 5/8 — Backend NestJS (`setup_backend.sh`, user)
 - Installe nvm + Node 20 pour l'utilisateur courant
@@ -242,7 +242,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Génère le client Prisma
 - Exécute les migrations Prisma (`prisma migrate deploy`)
 - Build NestJS (`npm run build`)
-- Configure et démarre PM2 (`crm-backend`, port 3001)
+- Configure et démarre PM2 (`stockini-backend`, port 3001)
 
 > **Seed de données :** Le seed (`npm run prisma:seed`) n'est **jamais** lancé automatiquement. Exécutez-le manuellement si nécessaire :
 > ```bash
@@ -253,7 +253,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Installe les dépendances npm
 - Build Next.js en mode standalone
 - Copie les assets statiques dans `.next/standalone`
-- Configure et démarre PM2 (`crm-frontend`, port 3000)
+- Configure et démarre PM2 (`stockini-frontend`, port 3000)
 
 #### Étape 7/8 — Nginx (`setup_nginx.sh`, sudo)
 - Copie `nginx-stockini-msp.conf` vers `/etc/nginx/sites-available/stockini-msp.tn`
@@ -309,7 +309,7 @@ sudo bash deploy/vps/security/setup_firewall.sh
 # ⚠️ Assurez-vous d'avoir votre clé SSH AVANT d'exécuter !
 sudo bash deploy/vps/security/secure_ssh.sh
 
-# Fail2ban (protection brute-force SSH, Nginx, CRM)
+# Fail2ban (protection brute-force SSH, Nginx, Stockini)
 sudo bash deploy/vps/security/setup_fail2ban.sh
 
 # Rotation des logs + monitoring cron
@@ -346,7 +346,7 @@ bash deploy/vps/redeploy.sh
 
 Le redeploy crée automatiquement un backup PostgreSQL dans `backups/pg_<date>.sql.gz` avant chaque migration. En cas de problème, restaurer avec :
 ```bash
-gunzip -c backups/pg_<date>.sql.gz | psql -h localhost -U geodetection geodetection_crm
+gunzip -c backups/pg_<date>.sql.gz | psql -h localhost -U stockpro stockpro
 ```
 
 ### Option `--with-system-patch`
@@ -409,7 +409,7 @@ BACKUP_GPG_RECIPIENT=votre.email@example.com
 ls -lh /home/ubuntu/backup-automatique-db/
 
 # Restaurer
-sudo -u postgres pg_restore -d geodetection_crm /home/ubuntu/backup-automatique-db/backup.sql
+sudo -u postgres pg_restore -d stockpro /home/ubuntu/backup-automatique-db/backup.sql
 ```
 
 ---
@@ -447,12 +447,12 @@ Menu avec 13 options :
 pm2 status
 
 # Logs en temps réel
-pm2 logs crm-backend
-pm2 logs crm-frontend
+pm2 logs stockini-backend
+pm2 logs stockini-frontend
 
 # Redémarrer un service
-pm2 restart crm-backend
-pm2 restart crm-frontend
+pm2 restart stockini-backend
+pm2 restart stockini-frontend
 
 # Statut Nginx
 sudo systemctl status nginx
@@ -528,7 +528,7 @@ echo | openssl s_client -servername stockini-msp.tn -connect stockini-msp.tn:443
 **Rôle :** Build NestJS + démarrage PM2 backend.  
 **Exécution :** `bash deploy/vps/setup_backend.sh` (pas sudo)  
 **Ce qu'il fait :** installe nvm/Node, `npm ci`, `prisma generate`, `prisma migrate deploy`, `npm run build`, configure PM2.  
-**PM2 name :** `crm-backend` (port 3001)
+**PM2 name :** `stockini-backend` (port 3001)
 
 ---
 
@@ -536,7 +536,7 @@ echo | openssl s_client -servername stockini-msp.tn -connect stockini-msp.tn:443
 **Rôle :** Build Next.js + démarrage PM2 frontend.  
 **Exécution :** `bash deploy/vps/setup_frontend.sh` (pas sudo)  
 **Ce qu'il fait :** `npm ci`, `npm run build`, copie des assets statiques, configure PM2.  
-**PM2 name :** `crm-frontend` (port 3000)
+**PM2 name :** `stockini-frontend` (port 3000)
 
 ---
 
@@ -618,39 +618,46 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `PORT` | `3001` | Port backend NestJS |
 | `BACKEND_PORT` | `3001` | Port backend (redondant, utilisé par les scripts) |
 | `FRONTEND_PORT` | `3000` | Port frontend Next.js |
-| `DB_USER` | `geodetection` | Utilisateur PostgreSQL |
+| `DB_USER` | `stockpro` | Utilisateur PostgreSQL |
 | `DB_PASSWORD` | `...` | Mot de passe PostgreSQL |
-| `DB_NAME` | `geodetection_crm` | Nom de la base PostgreSQL |
+| `DB_NAME` | `stockpro` | Nom de la base PostgreSQL |
 | `DATABASE_URL` | `postgresql://...` | URL complète PostgreSQL (auto-générée par setup_postgres.sh) |
 | `USE_REDIS` | `true` | Activer Redis |
 | `REDIS_PASSWORD` | `...` | Mot de passe Redis (auto-généré si absent) |
 | `REDIS_URL` | `redis://:pass@localhost:6379` | URL Redis (auto-générée) |
 | `JWT_SECRET` | `openssl rand -base64 64` | Clé signature tokens JWT |
 | `JWT_REFRESH_SECRET` | `openssl rand -base64 64` | Clé refresh tokens JWT |
-| `JWT_EXPIRATION` | `15m` | Durée token d'accès |
-| `JWT_REFRESH_EXPIRATION` | `7d` | Durée token de rafraîchissement |
+| `JWT_EXPIRES_IN` | `15m` | Durée token d'accès |
+| `JWT_REFRESH_EXPIRES_IN` | `7d` | Durée token de rafraîchissement |
 | `CORS_ORIGIN` | `https://stockini-msp.tn` | Origines CORS autorisées |
 | `FRONTEND_URL` | `https://stockini-msp.tn` | URL frontend (pour les liens dans les emails) |
 | `NEXT_PUBLIC_API_URL` | `/api` | Chemin API côté browser |
 | `INTERNAL_API_URL` | `http://127.0.0.1:3001/api` | URL API interne (SSR Next.js) |
 | `NEXT_PUBLIC_APP_URL` | `https://stockini-msp.tn` | URL publique de l'app |
 | `NEXT_PUBLIC_SITE_URL` | `https://stockini-msp.tn` | URL du site (Next.js metadata) |
-| `NEXT_PUBLIC_APP_NAME` | `CRM Geotech Réseaux` | Nom affiché de l'application |
+| `NEXT_PUBLIC_APP_NAME` | `Stockini` | Nom affiché de l'application |
 | `MINIO_ENDPOINT` | `127.0.0.1` | Adresse MinIO |
 | `MINIO_PORT` | `9000` | Port MinIO API |
 | `MINIO_USE_SSL` | `false` | SSL MinIO (false = connexion locale) |
-| `MINIO_BUCKET` | `crm-documents` | Nom du bucket |
+| `MINIO_BUCKET` | `generated-documents` | Nom du bucket |
 | `MINIO_ACCESS_KEY` | `...` | Clé d'accès MinIO |
 | `MINIO_SECRET_KEY` | `...` | Clé secrète MinIO |
 | `MINIO_PUBLIC_ENDPOINT` | `https://stockini-msp.tn/storage` | URL publique MinIO (liens de téléchargement) |
-| `UPLOAD_DIR` | `/home/ubuntu/.../uploads` | Répertoire uploads local |
-| `PUPPETEER_EXECUTABLE_PATH` | `/usr/bin/chromium-browser` | Chemin Chromium pour génération PDF |
-| `SMTP_HOST` | `smtp-relay.brevo.com` | Hôte SMTP |
+| `UPLOAD_DIR` | `/home/ubuntu/stockini/uploads` | Répertoire uploads local |
+| `SMTP_HOST` | `smtp.gmail.com` | Hôte SMTP |
 | `SMTP_PORT` | `587` | Port SMTP |
+| `SMTP_SECURE` | `false` | TLS implicite — `false` pour le port 587 (STARTTLS), `true` pour 465 |
+| `SMTP_REQUIRE_TLS` | `true` | Force STARTTLS sur le port 587 |
+| `SMTP_FORCE_IPV4` | `true` | Force IPv4 (évite `ENETUNREACH` sur VPS sans IPv6) |
 | `SMTP_USER` | `...` | Utilisateur SMTP |
-| `SMTP_PASS` | `...` | Mot de passe SMTP |
-| `FROM_EMAIL` | `noreply@stockini-msp.tn` | Expéditeur des emails |
-| `MAPTILER_API_KEY` | `...` | Clé API MapTiler (cartes PDF) |
+| `SMTP_PASS` | `...` | Mot de passe SMTP (App Password Gmail) |
+| `SMTP_FROM` | `moumnaspareparts@gmail.com` | Expéditeur des emails |
+| `COMPANY_NAME` | `Moumna spare part` | Nom société (en-tête PDF) |
+| `COMPANY_ADDRESS` | `...` | Adresse société (PDF) |
+| `COMPANY_PHONE` | `...` | Téléphone société (PDF) |
+| `COMPANY_EMAIL` | `...` | Email société (PDF) |
+| `COMPANY_TAX_ID` | `...` | Matricule fiscal (PDF) |
+| `COMPANY_LOGO_URL` | `...` | URL logo société (PDF) |
 | `BACKUP_GPG_RECIPIENT` | `admin@example.com` | Email GPG pour chiffrement backup (optionnel) |
 | `ADMIN_EMAIL` | `admin@stockini-msp.tn` | Email contact Let's Encrypt |
 
@@ -662,7 +669,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 
 ```bash
 # Voir les logs PM2
-pm2 logs crm-backend --lines 100
+pm2 logs stockini-backend --lines 100
 
 # Vérifier le port 3001
 ss -tlnp | grep 3001
@@ -672,8 +679,8 @@ lsof -i :3001
 kill -9 $(lsof -ti :3001)
 
 # Redémarrer
-pm2 restart crm-backend
-pm2 logs crm-backend
+pm2 restart stockini-backend
+pm2 logs stockini-backend
 ```
 
 ### Erreur de migration Prisma (P3009)
@@ -806,7 +813,7 @@ Tout autre port est bloqué.
 | `nginx-botsearch` | Scanners | 10 hits | 10min |
 | `nginx-badbots` | User-agents malveillants | 2 hits | 24h |
 | `nginx-http-auth` | Auth HTTP | 5 échecs | 1h |
-| `crm-login` | Login CRM | 5 échecs | 30min |
+| `stockini-login` | Login Stockini | 5 échecs | 30min |
 
 ```bash
 # Voir les IPs bannies
@@ -825,7 +832,7 @@ sudo fail2ban-client set sshd unbanip <IP>
 | `/var/log/auth.log` | Tentatives SSH, sudo |
 | `/var/log/fail2ban.log` | IPs bannies |
 | `/var/log/ufw.log` | Connexions bloquées par firewall |
-| `/var/log/crm-geodetection/security-alerts.log` | Alertes sécurité CRM |
+| `/var/log/stockini/security-alerts.log` | Alertes sécurité Stockini |
 | `/home/ubuntu/backup-automatique-db/backup.log` | Logs des backups |
 
 ---

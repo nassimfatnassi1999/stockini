@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================
-# CRM Geodetection — Add Admin User
+# Stockini — Add Admin User
 # =============================================================
 # Usage: bash deploy/vps/add_user.sh
 # =============================================================
@@ -26,7 +26,7 @@ export NVM_DIR="$HOME/.nvm"
 
 echo ""
 echo "========================================="
-echo "  CRM Geodetection — Add Admin User"
+echo "  Stockini — Add Admin User"
 echo "========================================="
 echo ""
 
@@ -67,7 +67,7 @@ SAFE_EMAIL=$(printf '%s' "$EMAIL" | sed "s/'/''/g")
 SAFE_HASH=$(printf '%s' "$HASH" | sed "s/'/''/g")
 PGPASSWORD="$DB_PASSWORD" psql -h localhost -U "$DB_USER" -d "$DB_NAME" -c "
   INSERT INTO users (id, email, password, \"firstName\", \"lastName\", role, active, \"failedLoginAttempts\", \"createdAt\", \"updatedAt\")
-  VALUES ('$UUID', '$SAFE_EMAIL', '$SAFE_HASH', 'Admin', 'CRM', 'ADMIN', true, 0, NOW(), NOW());
+  VALUES ('$UUID', '$SAFE_EMAIL', '$SAFE_HASH', 'Admin', 'Stockini', 'ADMIN', true, 0, NOW(), NOW());
 " 2>&1
 
 echo ""

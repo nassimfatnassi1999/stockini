@@ -479,28 +479,29 @@ export class SalesService {
     }
 
     if (query?.payableOnly) {
-      // Seuls FACTURE et BON_LIVRAISON non transformé sont des dettes réelles.
-      // Un BL dont transformedToId != null a été converti en FACTURE : la FACTURE
-      // est le document final payable, le BL ne doit plus apparaître.
-      // Les FACTURE ont un paymentStatus non-null ; les BL ont paymentStatus = null
-      // mais remainingAmount > 0 tant qu'elles ne sont pas payées.
-      andConditions.push({
+      // Source de vérité : remainingAmount > 0 (calculé et stocké à chaque paiement).
+      // On évite de se fier uniquement à paymentStatus qui pourrait être désynchronisé.
+      // Un BL transformé en FACTURE ne doit plus apparaître ici (transformedToId != null).
+      const payableCondition: Prisma.SaleWhereInput = {
         status: { not: SaleStatus.CANCELLED },
+        remainingAmount: { gt: 0 },
         OR: [
-          { documentType: DocumentType.FACTURE, paymentStatus: { not: PaymentStatus.PAID } },
-          {
-            documentType: DocumentType.BON_LIVRAISON,
-            transformedToId: null,
-            paymentStatus: { not: PaymentStatus.PAID },
-          },
+          { documentType: DocumentType.FACTURE },
+          { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
         ],
-      });
+      };
+      // Sous-filtre paymentStatus au sein des payables (UNPAID ou PARTIAL uniquement, PAID exclu)
+      if (query.paymentStatus && query.paymentStatus !== PaymentStatus.PAID) {
+        payableCondition.paymentStatus = query.paymentStatus;
+      }
+      andConditions.push(payableCondition);
     }
 
     const where: Prisma.SaleWhereInput = {
       deletedAt: null,
       // Ces filtres sont ignorés quand payableOnly est actif pour éviter des
       // contradictions (ex: documentType=DEVIS AND payableOnly=true → 0 résultat).
+      // Le paymentStatus est géré dans la payableCondition quand payableOnly=true.
       ...(!query?.payableOnly && query?.status && { status: query.status }),
       ...(!query?.payableOnly && query?.documentType && { documentType: query.documentType }),
       ...(!query?.payableOnly && query?.paymentStatus && { paymentStatus: query.paymentStatus }),
@@ -536,7 +537,12 @@ export class SalesService {
     const [data, total] = await Promise.all([
       this.prisma.sale.findMany({
         where,
-        include: { customer: true, items: true, payments: true },
+        include: {
+          customer: true,
+          items: true,
+          payments: true,
+          _count: { select: { creditNotes: true } },
+        },
         orderBy,
         skip,
         take: limit,
@@ -544,7 +550,13 @@ export class SalesService {
       this.prisma.sale.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    // Flatten _count into creditNotesCount for simpler frontend consumption
+    const enriched = data.map(({ _count, ...sale }) => ({
+      ...sale,
+      creditNotesCount: _count.creditNotes,
+    }));
+
+    return { data: enriched, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   findOne(id: string, user?: AuthUser) {
