@@ -70,7 +70,7 @@ export function CashTransactionsTable({ data, pagination, isLoading, onPageChang
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[700px] text-[12px]">
+        <table className="w-full min-w-[860px] text-[12px]">
           <thead>
             <tr className="border-b border-border bg-surface">
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Date</th>
@@ -78,6 +78,7 @@ export function CashTransactionsTable({ data, pagination, isLoading, onPageChang
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Sens</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Référence</th>
               <th className="px-4 py-3 text-right font-semibold text-text-secondary">Montant</th>
+              <th className="px-4 py-3 text-right font-semibold text-text-secondary">Solde avant</th>
               <th className="px-4 py-3 text-right font-semibold text-text-secondary">Solde après</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Utilisateur</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Note</th>
@@ -86,7 +87,7 @@ export function CashTransactionsTable({ data, pagination, isLoading, onPageChang
           <tbody>
             {data.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-text-secondary">
+                <td colSpan={9} className="py-12 text-center text-text-secondary">
                   Aucune transaction pour cette période
                 </td>
               </tr>
@@ -123,6 +124,9 @@ export function CashTransactionsTable({ data, pagination, isLoading, onPageChang
                     row.direction === 'IN' ? 'text-emerald-600' : 'text-red-500',
                   )}>
                     {row.direction === 'IN' ? '+' : '−'}{fmt(row.montant)} DT
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-text-secondary">
+                    {fmt(row.ancienSolde)} DT
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-text-primary">
                     {fmt(row.nouveauSolde)} DT

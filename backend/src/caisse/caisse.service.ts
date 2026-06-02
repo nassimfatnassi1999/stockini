@@ -143,72 +143,64 @@ export class CaisseService {
       query.endDate,
     );
 
-    const [
-      balance,
-      entreesTotal,
-      sortiesAchatsTotal,
-      sortiesDepensesTotal,
-      totalClientDebt,
-    ] = await Promise.all([
-      this.prisma.caisseConfig.findFirst(),
+    // IN types: ventes encaissées, dépôts manuels, reversals d'achat
+    const IN_TYPES = [
+      CaisseMovementType.ENCAISSEMENT_VENTE,
+      CaisseMovementType.DEPOT_MANUEL,
+      CaisseMovementType.ANNULATION_ACHAT,
+    ];
+    // OUT types: paiements fournisseurs, retraits manuels, reversals de vente (remboursements)
+    const OUT_TYPES = [
+      CaisseMovementType.DECAISSEMENT_ACHAT,
+      CaisseMovementType.RETRAIT_MANUEL,
+      CaisseMovementType.ANNULATION_VENTE,
+    ];
 
-      // Entrées : encaissements ventes (date du paiement, pas de la vente)
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: range },
-      }),
-
-      // Sorties : décaissements fournisseurs
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: range },
-      }),
-
-      // Sorties : retraits manuels
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.RETRAIT_MANUEL, createdAt: range },
-      }),
-
-      // KPI dettes clients : somme des restes à payer sur FACTURE non soldées
-      this.customers.getTotalClientDebt(),
-    ]);
+    const [balance, entreesTotal, sortiesTotal, totalClientDebt] =
+      await Promise.all([
+        this.prisma.caisseConfig.findFirst(),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: IN_TYPES }, createdAt: range },
+        }),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: OUT_TYPES }, createdAt: range },
+        }),
+        this.customers.getTotalClientDebt(),
+      ]);
 
     const soldeGlobal = Number(balance?.solde ?? 0);
     const entrees = Number(entreesTotal._sum.montant ?? 0);
-    const sortiesAchats = Number(sortiesAchatsTotal._sum.montant ?? 0);
-    const sortiesDepenses = Number(sortiesDepensesTotal._sum.montant ?? 0);
-    const sorties = sortiesAchats + sortiesDepenses;
+    const sorties = Number(sortiesTotal._sum.montant ?? 0);
 
-    const [
-      weekIn, monthIn, yearIn,
-      weekOut, monthOut, yearOut,
-    ] = await Promise.all([
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: resolveCashDateRange('week', undefined, undefined) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: resolveCashDateRange('month', undefined, undefined) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: resolveCashDateRange('year', undefined, undefined) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: resolveCashDateRange('week', undefined, undefined) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: resolveCashDateRange('month', undefined, undefined) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: resolveCashDateRange('year', undefined, undefined) },
-      }),
-    ]);
+    const [weekIn, monthIn, yearIn, weekOut, monthOut, yearOut] =
+      await Promise.all([
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined) },
+        }),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined) },
+        }),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined) },
+        }),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined) },
+        }),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined) },
+        }),
+        this.prisma.caisseMovement.aggregate({
+          _sum: { montant: true },
+          where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined) },
+        }),
+      ]);
 
     return {
       soldeGlobal,
@@ -293,7 +285,7 @@ export class CaisseService {
       direction:
         m.type === CaisseMovementType.CASH_RESET
           ? Number(m.ancienSolde) < 0 ? 'IN' : 'OUT'
-          : ['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL'].includes(m.type)
+          : (['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL', 'ANNULATION_ACHAT'] as string[]).includes(m.type)
             ? 'IN'
             : 'OUT',
       reference: m.referenceDoc ?? null,
@@ -394,11 +386,25 @@ export class CaisseService {
         const [inMvt, outMvt] = await Promise.all([
           this.prisma.caisseMovement.aggregate({
             _sum: { montant: true },
-            where: { type: CaisseMovementType.ENCAISSEMENT_VENTE, createdAt: range },
+            where: {
+              type: { in: [
+                CaisseMovementType.ENCAISSEMENT_VENTE,
+                CaisseMovementType.DEPOT_MANUEL,
+                CaisseMovementType.ANNULATION_ACHAT,
+              ]},
+              createdAt: range,
+            },
           }),
           this.prisma.caisseMovement.aggregate({
             _sum: { montant: true },
-            where: { type: CaisseMovementType.DECAISSEMENT_ACHAT, createdAt: range },
+            where: {
+              type: { in: [
+                CaisseMovementType.DECAISSEMENT_ACHAT,
+                CaisseMovementType.RETRAIT_MANUEL,
+                CaisseMovementType.ANNULATION_VENTE,
+              ]},
+              createdAt: range,
+            },
           }),
         ]);
 
