@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { CustomerOrigin, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -135,14 +135,16 @@ export class CustomersService {
       }
     }
 
-    return customers.map((c) => {
-      const debt = debtMap.get(c.id);
-      return {
-        ...c,
-        debtAmount: debt ? debt.debtAmount.toNumber() : 0,
-        unpaidInvoicesCount: debt ? debt.unpaidInvoicesCount : 0,
-      };
-    });
+    return customers
+      .map((c) => {
+        const debt = debtMap.get(c.id);
+        return {
+          ...c,
+          debtAmount: debt ? debt.debtAmount.toNumber() : 0,
+          unpaidInvoicesCount: debt ? debt.unpaidInvoicesCount : 0,
+        };
+      })
+      .filter((c) => c.origin === CustomerOrigin.MANUAL || c.debtAmount > 0);
   }
 
   async findOne(id: string) {

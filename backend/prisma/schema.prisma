@@ -12,6 +12,11 @@ enum CustomerType {
   COMPANY
 }
 
+enum CustomerOrigin {
+  MANUAL
+  SALE_COUNTER
+}
+
 enum StockMovementType {
   ENTRY
   EXIT
@@ -244,6 +249,7 @@ model Customer {
   email                 String?
   address               String?
   type                  CustomerType          @default(INDIVIDUAL)
+  origin                CustomerOrigin        @default(MANUAL)
   taxNumber             String?
   creditBalance         Decimal               @default(0) @db.Decimal(12, 3)
   createdAt             DateTime              @default(now())

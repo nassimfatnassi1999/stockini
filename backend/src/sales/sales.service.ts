@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   CaisseMovementType,
+  CustomerOrigin,
   DocumentType,
   PaymentStatus,
   PaymentType,
@@ -115,6 +116,7 @@ export class SalesService {
               phone: dto.counterClientPhone?.trim() || undefined,
               address: dto.counterClientAddress?.trim() || undefined,
               type: 'INDIVIDUAL',
+              origin: CustomerOrigin.SALE_COUNTER,
             },
           });
         });
