@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownCircle, ArrowUpCircle, Check, Trash2 } from 'lucide-react';
+import { Check, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -89,13 +89,6 @@ function usePaymentMethodOptions() {
   return opts.length > 0 ? opts : FALLBACK_PAYMENT_METHODS;
 }
 
-type CaisseOp = 'retrait' | 'depot';
-
-interface CaisseOpForm {
-  montant: string;
-  motif: string;
-}
-
 export function DepensesPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
@@ -105,8 +98,6 @@ export function DepensesPage() {
   const [showClearSupplierModal, setShowClearSupplierModal] = useState(false);
   const [showClearCaisseModal, setShowClearCaisseModal] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', method: 'CASH', note: '' });
-  const [caisseOp, setCaisseOp] = useState<CaisseOp | null>(null);
-  const [caisseForm, setCaisseForm] = useState<CaisseOpForm>({ montant: '', motif: '' });
   const [caisseTypeFilter, setCaisseTypeFilter] = useState<CaisseMovementType | ''>('');
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceSupplierFilter, setInvoiceSupplierFilter] = useState('');
@@ -160,36 +151,6 @@ export function DepensesPage() {
     },
   });
 
-  const caisseRetraitMutation = useMutation({
-    mutationFn: () => stockiniApi.caisseRetrait({ montant: Number(caisseForm.montant), motif: caisseForm.motif || undefined }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
-      setCaisseOp(null);
-      setCaisseForm({ montant: '', motif: '' });
-      toast.success('Retrait effectué avec succès');
-    },
-    onError: (error: unknown) => {
-      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Solde insuffisant ou erreur serveur');
-    },
-  });
-
-  const caisseDepotMutation = useMutation({
-    mutationFn: () => stockiniApi.caisseDepot({ montant: Number(caisseForm.montant), motif: caisseForm.motif || undefined }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
-      setCaisseOp(null);
-      setCaisseForm({ montant: '', motif: '' });
-      toast.success('Dépôt effectué avec succès');
-    },
-    onError: (error: unknown) => {
-      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors du dépôt');
-    },
-  });
-
   const clearSupplierMutation = useMutation({
     mutationFn: () => stockiniApi.clearSupplierPaymentsHistory(),
     onSuccess: (res) => {
@@ -233,14 +194,6 @@ export function DepensesPage() {
                 {money(solde)}
               </span>
             </div>
-            <Button type="button" size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => { setCaisseOp('depot'); setCaisseForm({ montant: '', motif: '' }); }}>
-              <ArrowUpCircle size={14} />
-              Ajouter à la caisse
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-50" onClick={() => { setCaisseOp('retrait'); setCaisseForm({ montant: '', motif: '' }); }}>
-              <ArrowDownCircle size={14} />
-              Retirer de la caisse
-            </Button>
           </div>
         }
       />
@@ -512,74 +465,6 @@ export function DepensesPage() {
               <div className="space-y-1.5">
                 <Label htmlFor="pay-note">Note (optionnel)</Label>
                 <Input id="pay-note" type="text" value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="Référence chèque, virement..." />
-              </div>
-            </form>
-          </div>
-        )}
-      </SlideOver>
-
-      {/* Modal opération caisse */}
-      <SlideOver
-        title={caisseOp === 'retrait' ? 'Retirer de la caisse' : 'Ajouter à la caisse'}
-        open={!!caisseOp}
-        onClose={() => setCaisseOp(null)}
-        width={440}
-        footer={
-          <>
-            <Button type="button" variant="outline" size="sm" onClick={() => setCaisseOp(null)}>Annuler</Button>
-            <Button
-              type="submit"
-              form="depenses-caisse-form"
-              size="sm"
-              disabled={caisseRetraitMutation.isPending || caisseDepotMutation.isPending || !caisseForm.montant}
-              className={caisseOp === 'retrait' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
-            >
-              <Check size={14} />
-              {caisseOp === 'retrait' ? 'Confirmer le retrait' : 'Confirmer le dépôt'}
-            </Button>
-          </>
-        }
-      >
-        {caisseOp && (
-          <div className="space-y-4">
-            <div className="rounded-lg bg-muted/50 p-3 text-sm flex justify-between">
-              <span className="text-text-muted">Solde actuel</span>
-              <span className={`font-mono font-bold ${solde >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{money(solde)}</span>
-            </div>
-            <form
-              id="depenses-caisse-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (caisseOp === 'retrait') caisseRetraitMutation.mutate();
-                else caisseDepotMutation.mutate();
-              }}
-              className="space-y-4"
-            >
-              <div className="space-y-1.5">
-                <Label htmlFor="caisse-montant">Montant *</Label>
-                <div className="relative">
-                  <Input
-                    id="caisse-montant"
-                    type="number"
-                    min="0.001"
-                    step="0.001"
-                    placeholder="0,000"
-                    value={caisseForm.montant}
-                    onChange={(e) => setCaisseForm((f) => ({ ...f, montant: e.target.value }))}
-                    required
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-text-muted">DT</span>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="caisse-motif">Motif</Label>
-                <Input
-                  id="caisse-motif"
-                  type="text"
-                  value={caisseForm.motif}
-                  onChange={(e) => setCaisseForm((f) => ({ ...f, motif: e.target.value }))}
-                  placeholder={caisseOp === 'retrait' ? 'Ex: Achats divers, frais de transport...' : 'Ex: Apport de fonds, recette...'}
-                />
               </div>
             </form>
           </div>

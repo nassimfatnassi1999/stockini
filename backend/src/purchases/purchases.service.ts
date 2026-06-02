@@ -283,7 +283,8 @@ export class PurchasesService {
         }
       }
 
-      // Reverse caisse per payment and soft-delete each payment
+      // Reverse caisse per payment and soft-delete each payment.
+      // Pass the original payment method so the reversal goes to the correct account.
       for (const payment of purchase.payments) {
         if (payment.cashImpactDone) {
           await this.caisseService.recordMovement(tx, {
@@ -292,6 +293,7 @@ export class PurchasesService {
             motif: `Annulation achat ${purchase.orderNumber} — paiement ${payment.reference}`,
             referenceDoc: purchase.orderNumber,
             userId,
+            paymentMethod: payment.method as string,
           });
         }
         await tx.payment.update({

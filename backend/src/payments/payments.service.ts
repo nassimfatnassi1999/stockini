@@ -106,7 +106,7 @@ export class PaymentsService {
         },
       });
 
-      // Reverse caisse if this payment actually hit the caisse
+      // Reverse caisse if this payment actually hit the caisse — use same account as original payment
       if (payment.cashImpactDone) {
         if (payment.type === PaymentType.CUSTOMER_PAYMENT) {
           await this.caisseService.recordMovement(tx, {
@@ -115,6 +115,7 @@ export class PaymentsService {
             motif: `Annulation paiement ${payment.reference}`,
             referenceDoc: payment.reference,
             userId,
+            paymentMethod: payment.method,
           });
         } else if (payment.type === PaymentType.SUPPLIER_PAYMENT) {
           await this.caisseService.recordMovement(tx, {
@@ -123,6 +124,7 @@ export class PaymentsService {
             motif: `Annulation paiement ${payment.reference}`,
             referenceDoc: payment.reference,
             userId,
+            paymentMethod: payment.method,
           });
         }
       }
@@ -176,6 +178,13 @@ export class PaymentsService {
 
   async paySale(saleId: string, dto: PaySaleDto, userId?: string) {
     return this.prisma.$transaction(async (tx) => {
+      // CREDIT cannot be used as a later payment method — no treasury event.
+      if (dto.method === 'CREDIT') {
+        throw new BadRequestException(
+          'Le mode CREDIT ne peut pas être utilisé pour un paiement ultérieur. Utilisez CASH, CHEQUE, BANK_TRANSFER ou CARD.',
+        );
+      }
+
       const sale = await tx.sale.findFirstOrThrow({
         where: { id: saleId, deletedAt: null },
       });
@@ -241,6 +250,7 @@ export class PaymentsService {
         motif: `Encaissement vente ${payment.sale?.invoiceNumber ?? saleId}`,
         referenceDoc: payRef,
         userId,
+        paymentMethod: dto.method as string,
       });
 
       return payment;
@@ -249,6 +259,13 @@ export class PaymentsService {
 
   async payPurchase(purchaseId: string, dto: PayPurchaseDto, userId?: string) {
     return this.prisma.$transaction(async (tx) => {
+      // CREDIT cannot be used for supplier payments — no treasury event.
+      if (dto.method === 'CREDIT') {
+        throw new BadRequestException(
+          'Le mode CREDIT ne peut pas être utilisé pour un paiement fournisseur. Utilisez CASH, CHEQUE, BANK_TRANSFER ou CARD.',
+        );
+      }
+
       const purchase = await tx.purchase.findFirstOrThrow({
         where: { id: purchaseId, deletedAt: null },
       });
@@ -301,6 +318,7 @@ export class PaymentsService {
         motif: `Paiement fournisseur ${payment.purchase?.supplier?.name ?? purchaseId}`,
         referenceDoc: payRef,
         userId,
+        paymentMethod: dto.method as string,
       });
 
       return payment;

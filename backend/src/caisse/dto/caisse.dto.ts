@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsIn,
@@ -17,6 +18,7 @@ import {
   CaisseMovementType,
   CashDirection,
   PaymentMethod,
+  TreasuryAccount,
 } from '@prisma/client';
 
 export type CashPeriod =
@@ -52,6 +54,10 @@ export class CashQueryDto {
   @ValidateIf((o: CashQueryDto) => o.period === 'custom')
   @IsDateString()
   endDate?: string;
+
+  @IsOptional()
+  @IsEnum(TreasuryAccount)
+  account?: TreasuryAccount;
 }
 
 // ─── Per-endpoint DTOs ─────────────────────────────────────────────────────────
@@ -118,17 +124,33 @@ export class CaisseOperationDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   method?: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(TreasuryAccount)
+  account?: TreasuryAccount;
 }
 
 export class CaisseConfigUpdateDto {
   @IsOptional()
   allowNegative?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allowNegativeBanque?: boolean;
+
+  @IsOptional()
+  @IsEnum(TreasuryAccount)
+  account?: TreasuryAccount;
 }
 
 export class CashResetDto {
   @IsString()
   @IsNotEmpty()
   motif!: string;
+
+  @IsOptional()
+  @IsEnum(TreasuryAccount)
+  account?: TreasuryAccount;
 }
 
 export class ClearCaisseHistoryDto {
@@ -143,4 +165,8 @@ export class ClearCaisseHistoryDto {
   @IsOptional()
   @IsEnum(CaisseMovementType)
   type?: CaisseMovementType;
+
+  @IsOptional()
+  @IsEnum(TreasuryAccount)
+  account?: TreasuryAccount;
 }

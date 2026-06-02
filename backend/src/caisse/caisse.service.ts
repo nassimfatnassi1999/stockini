@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { CaisseMovementType, PaymentType, Prisma } from '@prisma/client';
+import { CaisseMovementType, PaymentType, Prisma, TreasuryAccount } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { CustomersService } from '../customers/customers.service';
@@ -18,6 +18,22 @@ type DbClient = PrismaService | Prisma.TransactionClient;
 // Africa/Tunis is permanently UTC+1 (no DST)
 const TZ_OFFSET_MS = 60 * 60_000;
 
+// ─── Account routing ──────────────────────────────────────────────────────────
+
+/** Derive the treasury account from the payment method string.
+ *  CREDIT must never reach this function — callers must guard upstream. */
+export function resolveAccount(
+  paymentMethod?: string | null,
+  explicit?: TreasuryAccount,
+): TreasuryAccount {
+  if (explicit) return explicit;
+  if (!paymentMethod || paymentMethod === 'CASH') return TreasuryAccount.PHYSICAL_CASH;
+  // CREDIT is not a treasury event; treat as PHYSICAL_CASH fallback.
+  // The central guard in recordMovement() prevents this path in practice.
+  if (paymentMethod === 'CREDIT') return TreasuryAccount.PHYSICAL_CASH;
+  return TreasuryAccount.BANK_TREASURY;
+}
+
 // ─── Centralized date-range resolver ──────────────────────────────────────────
 
 export function resolveCashDateRange(
@@ -26,15 +42,12 @@ export function resolveCashDateRange(
   endDate: string | undefined,
 ): { gte: Date; lte: Date } {
   const now = new Date();
-  // Shift now into Tunisia local time so we can extract the correct calendar date
   const localNow = new Date(now.getTime() + TZ_OFFSET_MS);
-  // Start of today in Tunisia time, expressed as a UTC timestamp
   const today = new Date(
     Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - TZ_OFFSET_MS,
   );
 
   if (period === 'custom' && startDate && endDate) {
-    // YYYY-MM-DD parsed by new Date() is UTC midnight; shift left by offset to get local midnight as UTC
     const start = new Date(new Date(startDate).getTime() - TZ_OFFSET_MS);
     const end   = new Date(new Date(endDate).getTime() - TZ_OFFSET_MS + 86_400_000 - 1);
     return { gte: start, lte: end };
@@ -68,6 +81,19 @@ export function resolveCashDateRange(
   }
 }
 
+// ─── Shared IN/OUT type lists ─────────────────────────────────────────────────
+
+const IN_TYPES = [
+  CaisseMovementType.ENCAISSEMENT_VENTE,
+  CaisseMovementType.DEPOT_MANUEL,
+  CaisseMovementType.ANNULATION_ACHAT,
+];
+const OUT_TYPES = [
+  CaisseMovementType.DECAISSEMENT_ACHAT,
+  CaisseMovementType.RETRAIT_MANUEL,
+  CaisseMovementType.ANNULATION_VENTE,
+];
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
@@ -86,49 +112,59 @@ export class CaisseService {
   async getBalance() {
     const config = await this.prisma.caisseConfig.findFirst();
     return {
-      solde: Number(config?.solde ?? 0),
+      soldeCaisse: Number(config?.solde ?? 0),
+      soldeBanque: Number(config?.soldeBanque ?? 0),
+      soldeGlobal: Number(config?.solde ?? 0) + Number(config?.soldeBanque ?? 0),
       allowNegative: config?.allowNegative ?? false,
+      allowNegativeBanque: config?.allowNegativeBanque ?? false,
     };
   }
 
-  async setAllowNegative(allow: boolean) {
+  async setAllowNegative(allow: boolean, account?: TreasuryAccount) {
     const config = await this.prisma.caisseConfig.findFirst();
+    const field = account === TreasuryAccount.BANK_TREASURY ? 'allowNegativeBanque' : 'allowNegative';
     if (config) {
       return this.prisma.caisseConfig.update({
         where: { id: config.id },
-        data: { allowNegative: allow },
+        data: { [field]: allow },
       });
     }
-    return this.prisma.caisseConfig.create({ data: { allowNegative: allow } });
+    return this.prisma.caisseConfig.create({ data: { [field]: allow } });
   }
 
   // ─── Manual operations ────────────────────────────────────────────────────────
 
-  async retrait(montant: number, motif?: string, userId?: string) {
+  async retrait(montant: number, motif?: string, userId?: string, account?: TreasuryAccount) {
     return this.prisma.$transaction((tx) =>
       this.recordMovement(tx, {
         type: CaisseMovementType.RETRAIT_MANUEL,
         montant: -montant,
         motif,
         userId,
+        treasuryAccount: account ?? TreasuryAccount.PHYSICAL_CASH,
       }),
     );
   }
 
-  async depot(montant: number, motif?: string, userId?: string) {
+  async depot(montant: number, motif?: string, userId?: string, account?: TreasuryAccount) {
     return this.prisma.$transaction((tx) =>
       this.recordMovement(tx, {
         type: CaisseMovementType.DEPOT_MANUEL,
         montant,
         motif,
         userId,
+        treasuryAccount: account ?? TreasuryAccount.PHYSICAL_CASH,
       }),
     );
   }
 
-  historique(type?: CaisseMovementType) {
+  historique(type?: CaisseMovementType, account?: TreasuryAccount) {
     return this.prisma.caisseMovement.findMany({
-      where: { clearedAt: null, ...(type ? { type } : {}) },
+      where: {
+        clearedAt: null,
+        ...(type ? { type } : {}),
+        ...(account ? { treasuryAccount: account } : {}),
+      },
       include: { user: { select: { id: true, fullName: true, email: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -143,78 +179,103 @@ export class CaisseService {
       query.endDate,
     );
 
-    // IN types: ventes encaissées, dépôts manuels, reversals d'achat
-    const IN_TYPES = [
-      CaisseMovementType.ENCAISSEMENT_VENTE,
-      CaisseMovementType.DEPOT_MANUEL,
-      CaisseMovementType.ANNULATION_ACHAT,
-    ];
-    // OUT types: paiements fournisseurs, retraits manuels, reversals de vente (remboursements)
-    const OUT_TYPES = [
-      CaisseMovementType.DECAISSEMENT_ACHAT,
-      CaisseMovementType.RETRAIT_MANUEL,
-      CaisseMovementType.ANNULATION_VENTE,
-    ];
+    const buildFilter = (account?: TreasuryAccount) => ({
+      ...(account ? { treasuryAccount: account } : {}),
+    });
 
-    const [balance, entreesTotal, sortiesTotal, totalClientDebt] =
-      await Promise.all([
-        this.prisma.caisseConfig.findFirst(),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: IN_TYPES }, createdAt: range },
-        }),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: OUT_TYPES }, createdAt: range },
-        }),
-        this.customers.getTotalClientDebt(),
-      ]);
+    const [config, totalClientDebt] = await Promise.all([
+      this.prisma.caisseConfig.findFirst(),
+      this.customers.getTotalClientDebt(),
+    ]);
 
-    const soldeGlobal = Number(balance?.solde ?? 0);
-    const entrees = Number(entreesTotal._sum.montant ?? 0);
-    const sorties = Number(sortiesTotal._sum.montant ?? 0);
+    const soldeCaisse = Number(config?.solde ?? 0);
+    const soldeBanque = Number(config?.soldeBanque ?? 0);
 
-    const [weekIn, monthIn, yearIn, weekOut, monthOut, yearOut] =
-      await Promise.all([
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined) },
-        }),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined) },
-        }),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined) },
-        }),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined) },
-        }),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined) },
-        }),
-        this.prisma.caisseMovement.aggregate({
-          _sum: { montant: true },
-          where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined) },
-        }),
-      ]);
+    // Per-account + global aggregations for the selected period
+    const [
+      cashIn, cashOut,
+      bankIn, bankOut,
+    ] = await Promise.all([
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: { in: IN_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.PHYSICAL_CASH) },
+      }),
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: { in: OUT_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.PHYSICAL_CASH) },
+      }),
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: { in: IN_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.BANK_TREASURY) },
+      }),
+      this.prisma.caisseMovement.aggregate({
+        _sum: { montant: true },
+        where: { type: { in: OUT_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.BANK_TREASURY) },
+      }),
+    ]);
+
+    const entreesCaisse = Number(cashIn._sum.montant ?? 0);
+    const sortiesCaisse = Number(cashOut._sum.montant ?? 0);
+    const entreesBanque = Number(bankIn._sum.montant ?? 0);
+    const sortiesBanque = Number(bankOut._sum.montant ?? 0);
+    const entrees = entreesCaisse + entreesBanque;
+    const sorties = sortiesCaisse + sortiesBanque;
+
+    // Weekly/monthly/yearly aggregations (cash only — used for profit cards)
+    const [
+      weekCashIn, weekCashOut, weekBankIn, weekBankOut,
+      monthCashIn, monthCashOut, monthBankIn, monthBankOut,
+      yearCashIn, yearCashOut, yearBankIn, yearBankOut,
+    ] = await Promise.all([
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+    ]);
+
+    const n = (a: { _sum: { montant: any } }) => Number(a._sum.montant ?? 0);
 
     return {
-      soldeGlobal,
+      // Backward-compat flat fields
+      soldeGlobal: soldeCaisse + soldeBanque,
       entrees,
       sorties,
       totalClientDebt,
       profitPeriode: entrees - sorties,
-      profitSemaine:
-        Number(weekIn._sum.montant ?? 0) - Number(weekOut._sum.montant ?? 0),
-      profitMois:
-        Number(monthIn._sum.montant ?? 0) - Number(monthOut._sum.montant ?? 0),
-      profitAnnee:
-        Number(yearIn._sum.montant ?? 0) - Number(yearOut._sum.montant ?? 0),
+      profitSemaine: (n(weekCashIn) + n(weekBankIn)) - (n(weekCashOut) + n(weekBankOut)),
+      profitMois:    (n(monthCashIn) + n(monthBankIn)) - (n(monthCashOut) + n(monthBankOut)),
+      profitAnnee:   (n(yearCashIn) + n(yearBankIn)) - (n(yearCashOut) + n(yearBankOut)),
       period: query.period ?? 'today',
+
+      // Per-account detail
+      soldeCaisse,
+      soldeBanque,
+      caisse: {
+        solde: soldeCaisse,
+        entrees: entreesCaisse,
+        sorties: sortiesCaisse,
+        profit: entreesCaisse - sortiesCaisse,
+        profitSemaine: n(weekCashIn) - n(weekCashOut),
+        profitMois:    n(monthCashIn) - n(monthCashOut),
+        profitAnnee:   n(yearCashIn) - n(yearCashOut),
+      },
+      banque: {
+        solde: soldeBanque,
+        entrees: entreesBanque,
+        sorties: sortiesBanque,
+        profit: entreesBanque - sortiesBanque,
+        profitSemaine: n(weekBankIn) - n(weekBankOut),
+        profitMois:    n(monthBankIn) - n(monthBankOut),
+        profitAnnee:   n(yearBankIn) - n(yearBankOut),
+      },
     };
   }
 
@@ -225,7 +286,6 @@ export class CaisseService {
     const limit = Math.min(100, Math.max(1, query.limit ?? 20));
     const skip = (page - 1) * limit;
 
-    // Only apply a date range filter when at least one param is present
     const hasDateFilter =
       query.period ||
       (query.startDate && query.endDate) ||
@@ -242,6 +302,7 @@ export class CaisseService {
       clearedAt: null,
       ...(range ? { createdAt: range } : {}),
       ...(query.type && { type: query.type }),
+      ...(query.account && { treasuryAccount: query.account }),
       ...(query.search && {
         OR: [
           { referenceDoc: { contains: query.search, mode: 'insensitive' } },
@@ -254,13 +315,14 @@ export class CaisseService {
 
     const sortOrder = query.sortOrder ?? 'desc';
     const allowedSortFields: Record<string, Prisma.CaisseMovementOrderByWithRelationInput> = {
-      createdAt: { createdAt: sortOrder },
-      date: { createdAt: sortOrder },
-      totalTtc: { montant: sortOrder },
-      amount: { montant: sortOrder },
-      montant: { montant: sortOrder },
-      reference: { referenceDoc: sortOrder },
-      status: { type: sortOrder },
+      createdAt:   { createdAt: sortOrder },
+      date:        { createdAt: sortOrder },
+      totalTtc:    { montant: sortOrder },
+      amount:      { montant: sortOrder },
+      montant:     { montant: sortOrder },
+      reference:   { referenceDoc: sortOrder },
+      status:      { type: sortOrder },
+      account:     { treasuryAccount: sortOrder },
     };
     const orderBy: Prisma.CaisseMovementOrderByWithRelationInput =
       (query.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
@@ -282,6 +344,7 @@ export class CaisseService {
       id: m.id,
       date: m.createdAt,
       type: m.type,
+      account: m.treasuryAccount,
       direction:
         m.type === CaisseMovementType.CASH_RESET
           ? Number(m.ancienSolde) < 0 ? 'IN' : 'OUT'
@@ -305,9 +368,9 @@ export class CaisseService {
   // ─── Analytics ────────────────────────────────────────────────────────────────
 
   async getAnalytics(query: CashAnalyticsQueryDto) {
+    const account: TreasuryAccount | undefined = query.account;
     const period = query.period ?? 'month';
     const now = new Date();
-    // Tunisia-aware start of today (UTC timestamp)
     const localNow = new Date(now.getTime() + TZ_OFFSET_MS);
     const todayStart = new Date(
       Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - TZ_OFFSET_MS,
@@ -315,7 +378,6 @@ export class CaisseService {
     const days: Date[] = [];
 
     if (period === 'today') {
-      // 6 four-hour buckets for today (in Tunisia local time)
       for (let h = 0; h < 24; h += 4) {
         days.push(new Date(todayStart.getTime() + h * 3_600_000));
       }
@@ -362,6 +424,8 @@ export class CaisseService {
     const isHourly = period === 'today' || period === 'yesterday';
     const isCustom = period === 'custom';
 
+    const accountFilter = account ? { treasuryAccount: account } : {};
+
     const chartData = await Promise.all(
       days.map(async (bucketStart) => {
         let bucketEnd: Date;
@@ -369,11 +433,7 @@ export class CaisseService {
           bucketEnd = new Date(
             bucketStart.getFullYear(),
             bucketStart.getMonth() + 1,
-            0,
-            23,
-            59,
-            59,
-            999,
+            0, 23, 59, 59, 999,
           );
         } else if (isHourly) {
           bucketEnd = new Date(bucketStart.getTime() + 4 * 3_600_000 - 1);
@@ -386,25 +446,11 @@ export class CaisseService {
         const [inMvt, outMvt] = await Promise.all([
           this.prisma.caisseMovement.aggregate({
             _sum: { montant: true },
-            where: {
-              type: { in: [
-                CaisseMovementType.ENCAISSEMENT_VENTE,
-                CaisseMovementType.DEPOT_MANUEL,
-                CaisseMovementType.ANNULATION_ACHAT,
-              ]},
-              createdAt: range,
-            },
+            where: { type: { in: IN_TYPES }, createdAt: range, ...accountFilter },
           }),
           this.prisma.caisseMovement.aggregate({
             _sum: { montant: true },
-            where: {
-              type: { in: [
-                CaisseMovementType.DECAISSEMENT_ACHAT,
-                CaisseMovementType.RETRAIT_MANUEL,
-                CaisseMovementType.ANNULATION_VENTE,
-              ]},
-              createdAt: range,
-            },
+            where: { type: { in: OUT_TYPES }, createdAt: range, ...accountFilter },
           }),
         ]);
 
@@ -413,34 +459,18 @@ export class CaisseService {
 
         let label: string;
         if (isYearly) {
-          label = bucketStart.toLocaleDateString('fr-FR', {
-            month: 'short',
-            year: '2-digit',
-          });
+          label = bucketStart.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
         } else if (isHourly) {
           label = `${String(bucketStart.getHours()).padStart(2, '0')}h`;
-        } else if (isCustom) {
-          label = bucketStart.toLocaleDateString('fr-FR', {
-            day: '2-digit',
-            month: 'short',
-          });
         } else {
-          label = bucketStart.toLocaleDateString('fr-FR', {
-            day: '2-digit',
-            month: 'short',
-          });
+          label = bucketStart.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
         }
 
         return { label, entrees, sorties, profit: entrees - sorties };
       }),
     );
 
-    // Top clients + fournisseurs — use payment date (not sale/purchase creation date)
-    const analyticsRange = resolveCashDateRange(
-      query.period,
-      query.startDate,
-      query.endDate,
-    );
+    const analyticsRange = resolveCashDateRange(query.period, query.startDate, query.endDate);
 
     const topClients = await this.prisma.payment.groupBy({
       by: ['customerId'],
@@ -451,14 +481,15 @@ export class CaisseService {
         cashImpactDone: true,
         customerId: { not: null },
         createdAt: analyticsRange,
+        ...(account === TreasuryAccount.PHYSICAL_CASH ? { method: 'CASH' } : {}),
+        // CREDIT excluded: it is not a real cash/bank receipt
+        ...(account === TreasuryAccount.BANK_TREASURY ? { method: { notIn: ['CASH', 'CREDIT'] } } : {}),
       },
       orderBy: { _sum: { amount: 'desc' } },
       take: 5,
     });
 
-    const clientIds = topClients
-      .map((c) => c.customerId)
-      .filter(Boolean) as string[];
+    const clientIds = topClients.map((c) => c.customerId).filter(Boolean) as string[];
     const clients = await this.prisma.customer.findMany({
       where: { id: { in: clientIds } },
       select: { id: true, name: true },
@@ -474,14 +505,15 @@ export class CaisseService {
         cashImpactDone: true,
         supplierId: { not: null },
         createdAt: analyticsRange,
+        ...(account === TreasuryAccount.PHYSICAL_CASH ? { method: 'CASH' } : {}),
+        // CREDIT excluded: it is not a real cash/bank payment
+        ...(account === TreasuryAccount.BANK_TREASURY ? { method: { notIn: ['CASH', 'CREDIT'] } } : {}),
       },
       orderBy: { _sum: { amount: 'desc' } },
       take: 5,
     });
 
-    const supplierIds = topSuppliers
-      .map((s) => s.supplierId)
-      .filter(Boolean) as string[];
+    const supplierIds = topSuppliers.map((s) => s.supplierId).filter(Boolean) as string[];
     const suppliers = await this.prisma.supplier.findMany({
       where: { id: { in: supplierIds } },
       select: { id: true, name: true },
@@ -503,43 +535,49 @@ export class CaisseService {
 
   // ─── Reset balance ────────────────────────────────────────────────────────────
 
-  async resetBalance(motif: string, userId?: string) {
+  async resetBalance(motif: string, userId?: string, account?: TreasuryAccount) {
     return this.prisma.$transaction(async (tx) => {
       const config = await tx.caisseConfig.findFirst();
-      const currentBalance = Number(config?.solde ?? 0);
+
+      const isCash = !account || account === TreasuryAccount.PHYSICAL_CASH;
+      const isBank = account === TreasuryAccount.BANK_TREASURY;
+
+      const currentCash = Number(config?.solde ?? 0);
+      const currentBank = Number(config?.soldeBanque ?? 0);
+      const currentBalance = isCash ? currentCash : currentBank;
 
       if (currentBalance === 0) {
-        throw new BadRequestException('La caisse est déjà à zéro.');
+        const label = isBank ? 'trésorerie bancaire' : 'caisse physique';
+        throw new BadRequestException(`Le solde de la ${label} est déjà à zéro.`);
       }
 
-      // Generate RESET-YYYYMMDD-XXXX reference
       const dateStr = new Date().toISOString().split('T')[0]!.replace(/-/g, '');
-      const counterPrefix = `RESET-${dateStr}`;
+      const prefix = `RESET-${dateStr}`;
       const counter = await tx.referenceCounter.upsert({
-        where: { prefix_year: { prefix: counterPrefix, year: 0 } },
+        where: { prefix_year: { prefix, year: 0 } },
         update: { sequence: { increment: 1 } },
-        create: { prefix: counterPrefix, year: 0, sequence: 1 },
+        create: { prefix, year: 0, sequence: 1 },
       });
-      const reference = `${counterPrefix}-${String(counter.sequence).padStart(4, '0')}`;
+      const reference = `${prefix}-${String(counter.sequence).padStart(4, '0')}`;
 
-      // montant = -currentBalance so that ancienSolde + montant = 0
       const adjustment = -currentBalance;
-
-      const configId = config?.id;
       const nouveauSolde = 0;
 
+      const configId = config?.id;
+      const updateData = isCash
+        ? { solde: nouveauSolde }
+        : { soldeBanque: nouveauSolde };
+
       if (configId) {
-        await tx.caisseConfig.update({
-          where: { id: configId },
-          data: { solde: nouveauSolde },
-        });
+        await tx.caisseConfig.update({ where: { id: configId }, data: updateData });
       } else {
-        await tx.caisseConfig.create({ data: { solde: nouveauSolde } });
+        await tx.caisseConfig.create({ data: updateData });
       }
 
       const movement = await tx.caisseMovement.create({
         data: {
           type: CaisseMovementType.CASH_RESET,
+          treasuryAccount: account ?? TreasuryAccount.PHYSICAL_CASH,
           montant: Math.abs(adjustment),
           ancienSolde: currentBalance,
           nouveauSolde,
@@ -555,6 +593,7 @@ export class CaisseService {
         entity: 'CaisseMovement',
         entityId: movement.id,
         metadata: {
+          account: account ?? TreasuryAccount.PHYSICAL_CASH,
           ancienSolde: currentBalance,
           nouveauSolde: 0,
           motif,
@@ -562,11 +601,11 @@ export class CaisseService {
         },
       });
 
-      return { movement, reference, ancienSolde: currentBalance, nouveauSolde: 0 };
+      return { movement, reference, ancienSolde: currentBalance, nouveauSolde: 0, account: account ?? TreasuryAccount.PHYSICAL_CASH };
     });
   }
 
-  // ─── Clear history (soft-clear, display only) ─────────────────────────────────
+  // ─── Clear history ────────────────────────────────────────────────────────────
 
   async clearHistory(dto: ClearCaisseHistoryDto, userId: string) {
     const where: Prisma.CaisseMovementWhereInput = {
@@ -578,6 +617,7 @@ export class CaisseService {
         },
       }),
       ...(dto.type && { type: dto.type }),
+      ...(dto.account && { treasuryAccount: dto.account }),
     };
 
     const count = await this.prisma.caisseMovement.count({ where });
@@ -593,7 +633,7 @@ export class CaisseService {
         module: 'caisse_movements',
         userId,
         count,
-        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, type: dto.type } as Prisma.InputJsonValue,
+        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, type: dto.type, account: dto.account } as Prisma.InputJsonValue,
       },
     });
 
@@ -604,20 +644,21 @@ export class CaisseService {
   // ─── Backfill ─────────────────────────────────────────────────────────────────
 
   async backfillPayments() {
-    // Find all active customer payments that have cashImpactDone=true
     const payments = await this.prisma.payment.findMany({
       where: { deletedAt: null, cashImpactDone: true },
-      select: { id: true, reference: true, amount: true, type: true, createdAt: true, note: true, saleId: true, sale: { select: { invoiceNumber: true } } },
+      select: { id: true, reference: true, amount: true, type: true, method: true, createdAt: true, note: true, saleId: true, sale: { select: { invoiceNumber: true } } },
     });
 
-    // Index existing CaisseMovements by referenceDoc to avoid duplicates
     const existing = await this.prisma.caisseMovement.findMany({
       where: { referenceDoc: { in: payments.map((p) => p.reference) } },
       select: { referenceDoc: true },
     });
     const existingRefs = new Set(existing.map((m) => m.referenceDoc));
 
-    const missing = payments.filter((p) => !existingRefs.has(p.reference));
+    // CREDIT payments never create CaisseMovements — skip them.
+    const missing = payments.filter(
+      (p) => !existingRefs.has(p.reference) && p.method !== 'CREDIT',
+    );
     if (missing.length === 0) return { created: 0, message: 'No missing CaisseMovements.' };
 
     let created = 0;
@@ -638,6 +679,7 @@ export class CaisseService {
           montant: payment.type === 'CUSTOMER_PAYMENT' ? montant : -montant,
           motif,
           referenceDoc: payment.reference,
+          paymentMethod: payment.method,
         }),
       );
       created++;
@@ -656,31 +698,54 @@ export class CaisseService {
       motif?: string;
       referenceDoc?: string;
       userId?: string;
+      paymentMethod?: string | null;
+      treasuryAccount?: TreasuryAccount;
     },
   ) {
-    const config = await client.caisseConfig.findFirst();
-    const ancienSolde = Number(config?.solde ?? 0);
-    const nouveauSolde = ancienSolde + input.montant;
-
-    const allowNegative = config?.allowNegative ?? false;
-    if (nouveauSolde < 0 && !allowNegative) {
+    // Central protection: CREDIT is never a cash/bank event.
+    if (input.paymentMethod === 'CREDIT') {
       throw new BadRequestException(
-        `Solde caisse insuffisant. Solde actuel : ${ancienSolde.toFixed(3)} DT`,
+        'Le mode de paiement CREDIT ne génère aucun mouvement de trésorerie.',
       );
     }
+
+    const account = resolveAccount(input.paymentMethod, input.treasuryAccount);
+    const isCash = account === TreasuryAccount.PHYSICAL_CASH;
+
+    const config = await client.caisseConfig.findFirst();
+    const ancienSolde = isCash
+      ? Number(config?.solde ?? 0)
+      : Number(config?.soldeBanque ?? 0);
+    const nouveauSolde = ancienSolde + input.montant;
+
+    const allowNegative = isCash
+      ? (config?.allowNegative ?? false)
+      : (config?.allowNegativeBanque ?? false);
+
+    if (nouveauSolde < 0 && !allowNegative) {
+      const label = isCash ? 'caisse physique' : 'trésorerie bancaire';
+      throw new BadRequestException(
+        `Solde ${label} insuffisant. Solde actuel : ${ancienSolde.toFixed(3)} DT`,
+      );
+    }
+
+    const updateData = isCash
+      ? { solde: nouveauSolde }
+      : { soldeBanque: nouveauSolde };
 
     if (config) {
       await client.caisseConfig.update({
         where: { id: config.id },
-        data: { solde: nouveauSolde },
+        data: updateData,
       });
     } else {
-      await client.caisseConfig.create({ data: { solde: nouveauSolde } });
+      await client.caisseConfig.create({ data: updateData });
     }
 
     return client.caisseMovement.create({
       data: {
         type: input.type,
+        treasuryAccount: account,
         montant: Math.abs(input.montant),
         ancienSolde,
         nouveauSolde,

@@ -296,6 +296,68 @@ describe('PaymentsService.paySale', () => {
       service.paySale('sale-1', { amount: 30, method: 'CASH' as any }),
     ).rejects.toThrow('Solde insuffisant');
   });
+
+  it('CREDIT → lève BadRequestException, aucun mouvement caisse créé', async () => {
+    const { service, caisseService } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+
+    await expect(
+      service.paySale('sale-1', { amount: 100, method: 'CREDIT' as any }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(caisseService.recordMovement).not.toHaveBeenCalled();
+  });
+
+  it('CREDIT → paidAmount et remainingAmount ne changent pas', async () => {
+    const { service, tx } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+
+    await expect(
+      service.paySale('sale-1', { amount: 100, method: 'CREDIT' as any }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(tx.sale.update).not.toHaveBeenCalled();
+  });
+
+  it('paiement CASH ultérieur → mouvement PHYSICAL_CASH avec bon paymentMethod', async () => {
+    const { service, caisseService } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+
+    await service.paySale('sale-1', { amount: 100, method: 'CASH' as any });
+
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: CaisseMovementType.ENCAISSEMENT_VENTE,
+        montant: 100,
+        paymentMethod: 'CASH',
+      }),
+    );
+  });
+
+  it('paiement BANK_TRANSFER ultérieur → paymentMethod transmis à recordMovement', async () => {
+    const { service, caisseService } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+
+    await service.paySale('sale-1', { amount: 60, method: 'BANK_TRANSFER' as any });
+
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ paymentMethod: 'BANK_TRANSFER' }),
+    );
+  });
 });
 
 // ─── Tests payPurchase ────────────────────────────────────────────────────────
@@ -476,5 +538,34 @@ describe('PaymentsService.payPurchase', () => {
     await expect(
       service.payPurchase('purchase-1', { amount: 30, method: 'CASH' as any }),
     ).rejects.toThrow('Solde insuffisant');
+  });
+
+  it('CREDIT → lève BadRequestException, aucun mouvement caisse créé', async () => {
+    const { service, caisseService } = buildService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+
+    await expect(
+      service.payPurchase('purchase-1', { amount: 100, method: 'CREDIT' as any }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(caisseService.recordMovement).not.toHaveBeenCalled();
+  });
+
+  it('paiement CHECK fournisseur → paymentMethod transmis à recordMovement', async () => {
+    const { service, caisseService } = buildService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+
+    await service.payPurchase('purchase-1', { amount: 50, method: 'CHECK' as any });
+
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ paymentMethod: 'CHECK' }),
+    );
   });
 });

@@ -252,7 +252,9 @@ export class SalesService {
       );
       const total = this.round3(subtotal + tax);
 
-      const paidAmount = acceptsPayment ? this.round3(dto.paidAmount ?? 0) : 0;
+      const rawPaidAmount = acceptsPayment ? this.round3(dto.paidAmount ?? 0) : 0;
+      // CREDIT = vente à crédit, aucun encaissement immédiat — paidAmount reste 0.
+      const paidAmount = dto.paymentMethod === 'CREDIT' ? 0 : rawPaidAmount;
 
       // Guard: paidAmount cannot exceed total
       if (paidAmount > total + 0.001) {
@@ -362,6 +364,7 @@ export class SalesService {
           motif: `Encaissement vente ${invoiceNumber}`,
           referenceDoc: payRef,
           userId: sellerId,
+          paymentMethod: dto.paymentMethod as string | undefined,
         });
       }
 
@@ -610,7 +613,8 @@ export class SalesService {
         }
       }
 
-      // Reverse caisse per payment and soft-delete each payment
+      // Reverse caisse per payment and soft-delete each payment.
+      // Pass the original payment method so the reversal goes to the correct account.
       for (const payment of sale.payments) {
         if (payment.cashImpactDone) {
           await this.caisseService.recordMovement(tx, {
@@ -619,6 +623,7 @@ export class SalesService {
             motif: `Annulation ${sale.documentType} ${sale.invoiceNumber} — paiement ${payment.reference}`,
             referenceDoc: sale.invoiceNumber,
             userId,
+            paymentMethod: payment.method as string,
           });
         }
         await tx.payment.update({

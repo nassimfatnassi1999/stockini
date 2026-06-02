@@ -329,6 +329,11 @@ export class AvoirsService {
 
         if (refundMethod !== 'NONE' && montantRembourse > 0) {
           const paymentMethod = this.paymentMethodForRefund(refundMethod);
+          // Real-money refund methods that impact a treasury account.
+          const isRealMoneyRefund = (
+            ['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK'] as RefundMethod[]
+          ).includes(refundMethod);
+
           const payment = await tx.payment.create({
             data: {
               reference: await this.references.generate(
@@ -339,7 +344,8 @@ export class AvoirsService {
               type: PaymentType.CREDIT_NOTE_REFUND,
               method: paymentMethod,
               amount: montantRembourse,
-              cashImpactDone: refundMethod === 'CASH',
+              // cashImpactDone = true for all real-money methods, not just CASH.
+              cashImpactDone: isRealMoneyRefund,
               saleId: dto.saleId,
               customerId: effectiveCustomerId,
               creditNoteId: avoir.id,
@@ -347,13 +353,15 @@ export class AvoirsService {
             },
           });
 
-          if (refundMethod === 'CASH') {
+          if (isRealMoneyRefund) {
+            // CASH → PHYSICAL_CASH, CARD/BANK_TRANSFER/CHECK → BANK_TREASURY
             await this.caisseService.recordMovement(tx, {
               type: CaisseMovementType.ANNULATION_VENTE,
               montant: -montantRembourse,
-              motif: `Remboursement espèces avoir ${numero}`,
+              motif: `Remboursement avoir ${numero}`,
               referenceDoc: payment.reference,
               userId: user?.id,
+              paymentMethod: refundMethod as string,
             });
           }
           if (refundMethod === 'CUSTOMER_CREDIT' && effectiveCustomerId) {

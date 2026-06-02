@@ -44,6 +44,11 @@ enum CashDirection {
   OUT
 }
 
+enum TreasuryAccount {
+  PHYSICAL_CASH
+  BANK_TREASURY
+}
+
 enum CashTransactionType {
   SALE
   PURCHASE
@@ -655,30 +660,35 @@ model CreditNoteItem {
 }
 
 model CaisseMovement {
-  id           String             @id @default(cuid())
-  type         CaisseMovementType
-  montant      Decimal            @db.Decimal(12, 3)
-  ancienSolde  Decimal            @db.Decimal(12, 3)
-  nouveauSolde Decimal            @db.Decimal(12, 3)
-  motif        String?
-  referenceDoc String?
-  userId       String?
-  createdAt    DateTime           @default(now())
-  clearedAt    DateTime?
-  clearedBy    String?
-  user         User?              @relation(fields: [userId], references: [id])
+  id              String             @id @default(cuid())
+  type            CaisseMovementType
+  treasuryAccount TreasuryAccount    @default(PHYSICAL_CASH)
+  montant         Decimal            @db.Decimal(12, 3)
+  ancienSolde     Decimal            @db.Decimal(12, 3)
+  nouveauSolde    Decimal            @db.Decimal(12, 3)
+  motif           String?
+  referenceDoc    String?
+  userId          String?
+  createdAt       DateTime           @default(now())
+  clearedAt       DateTime?
+  clearedBy       String?
+  user            User?              @relation(fields: [userId], references: [id])
 
   @@index([type])
+  @@index([treasuryAccount])
   @@index([createdAt])
   @@index([userId])
   @@index([type, createdAt])
+  @@index([treasuryAccount, createdAt])
 }
 
 model CaisseConfig {
-  id            String   @id @default(cuid())
-  solde         Decimal  @default(0) @db.Decimal(12, 3)
-  allowNegative Boolean  @default(false)
-  updatedAt     DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  solde               Decimal  @default(0) @db.Decimal(12, 3)
+  soldeBanque         Decimal  @default(0) @db.Decimal(12, 3)
+  allowNegative       Boolean  @default(false)
+  allowNegativeBanque Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
 }
 
 model HistoryClearLog {

@@ -2,21 +2,40 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, List, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
+import {
+  BarChart3,
+  Banknote,
+  Building2,
+  Globe,
+  List,
+  Plus,
+  Minus,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { cleanPaginationParams } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
-import { CashSummaryCards, type CashSummary } from './CashSummaryCards';
-import { CashFilters, type CashFilterState, type CashPeriod } from './CashFilters';
+import { CashSummaryCards, type CashSummary, type AccountView } from './CashSummaryCards';
+import { CashFilters, type CashFilterState } from './CashFilters';
 import { CashTransactionsTable, type CashTransaction, type CashPagination } from './CashTransactionsTable';
 import { CashAnalyticsCharts, type CashAnalytics } from './CashAnalyticsCharts';
 import { CashResetModal } from './CashResetModal';
+import { CashManualOpModal } from './CashManualOpModal';
 import { ClearHistoryModal } from '../shared/ClearHistoryModal';
 
-type Tab = 'transactions' | 'analytics';
+type ContentTab = 'transactions' | 'analytics';
+type AccountTab = 'global' | 'cash' | 'bank';
+
+const ACCOUNT_TABS: { id: AccountTab; label: string; icon: React.ElementType; account?: string }[] = [
+  { id: 'cash',   label: 'Caisse physique',        icon: Banknote,   account: 'PHYSICAL_CASH' },
+  { id: 'bank',   label: 'Banque / Chèques',        icon: Building2,  account: 'BANK_TREASURY' },
+  { id: 'global', label: 'Vue globale',             icon: Globe,      account: undefined },
+];
 
 function todayStr() {
   return new Date().toISOString().split('T')[0];
@@ -24,7 +43,8 @@ function todayStr() {
 
 export function CashDashboard() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>('transactions');
+  const [accountTab, setAccountTab] = useState<AccountTab>('cash');
+  const [contentTab, setContentTab] = useState<ContentTab>('transactions');
   const [filters, setFilters] = useState<CashFilterState>({
     period:    'today',
     startDate: todayStr(),
@@ -32,9 +52,15 @@ export function CashDashboard() {
   });
   const [page, setPage] = useState(1);
   const [showReset, setShowReset] = useState(false);
+  const [showDepot, setShowDepot] = useState(false);
+  const [showRetrait, setShowRetrait] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
   const { can } = usePermissions();
   const canClearHistory = can('finance.history.clear');
+  const canOperate = can('caisse.operate');
+
+  const currentAccountMeta = ACCOUNT_TABS.find((t) => t.id === accountTab)!;
+  const accountParam = currentAccountMeta.account;
 
   const clearCaisseMutation = useMutation({
     mutationFn: () => stockiniApi.clearCaisseHistory(),
@@ -46,31 +72,39 @@ export function CashDashboard() {
     onError: () => toast.error('Erreur lors du vidage de l\'historique caisse'),
   });
 
-  // Summary query
-  const summaryParams = buildPeriodParams(filters);
-  const summaryQuery  = useQuery<CashSummary>({
+  // Build period params (+ optional account filter for transactions/analytics)
+  function buildParams(withAccount: boolean): Record<string, string> {
+    const base: Record<string, string> =
+      filters.period === 'custom' && filters.startDate && filters.endDate
+        ? { startDate: filters.startDate, endDate: filters.endDate }
+        : { period: filters.period };
+    if (withAccount && accountParam) base.account = accountParam;
+    return base;
+  }
+
+  // Summary always global (returns both breakdowns)
+  const summaryParams = buildParams(false);
+  const summaryQuery = useQuery<CashSummary>({
     queryKey: ['caisse-summary', summaryParams],
     queryFn:  () => api.get('/caisse/summary', { params: summaryParams }).then((r) => r.data),
     staleTime: 30_000,
   });
 
-  // Transactions query
-  const txParams = buildPeriodParams(filters);
-  const txQuery  = useQuery<{ data: CashTransaction[]; pagination: CashPagination }>({
+  const txParams = buildParams(true);
+  const txQuery = useQuery<{ data: CashTransaction[]; pagination: CashPagination }>({
     queryKey: ['caisse-transactions', txParams, page],
     queryFn:  () =>
       api.get('/caisse/transactions', { params: cleanPaginationParams({ ...txParams, page, limit: 50 }) }).then((r) => r.data),
     staleTime: 30_000,
   });
 
-  // Analytics query — same params as summary/transactions
-  const analyticsParams = buildPeriodParams(filters);
+  const analyticsParams = buildParams(true);
   const analyticsQuery = useQuery<CashAnalytics>({
     queryKey: ['caisse-analytics', analyticsParams],
     queryFn:  () =>
       api.get('/caisse/analytics', { params: analyticsParams }).then((r) => r.data),
     staleTime: 60_000,
-    enabled: tab === 'analytics',
+    enabled: contentTab === 'analytics',
   });
 
   function handleFilterChange(f: CashFilterState) {
@@ -81,12 +115,39 @@ export function CashDashboard() {
   function handleRefresh() {
     summaryQuery.refetch();
     txQuery.refetch();
-    if (tab === 'analytics') analyticsQuery.refetch();
+    if (contentTab === 'analytics') analyticsQuery.refetch();
   }
+
+  function handleAccountTabChange(id: AccountTab) {
+    setAccountTab(id);
+    setPage(1);
+  }
+
+  const viewMap: Record<AccountTab, AccountView> = { cash: 'cash', bank: 'bank', global: 'global' };
 
   return (
     <div className="space-y-4">
-      {showReset && <CashResetModal onClose={() => setShowReset(false)} />}
+      {/* Modals */}
+      {showReset && (
+        <CashResetModal
+          defaultAccount={accountTab === 'bank' ? 'BANK_TREASURY' : 'PHYSICAL_CASH'}
+          onClose={() => setShowReset(false)}
+        />
+      )}
+      {showDepot && (
+        <CashManualOpModal
+          type="depot"
+          defaultAccount={accountTab === 'bank' ? 'BANK_TREASURY' : 'PHYSICAL_CASH'}
+          onClose={() => setShowDepot(false)}
+        />
+      )}
+      {showRetrait && (
+        <CashManualOpModal
+          type="retrait"
+          defaultAccount={accountTab === 'bank' ? 'BANK_TREASURY' : 'PHYSICAL_CASH'}
+          onClose={() => setShowRetrait(false)}
+        />
+      )}
 
       <ClearHistoryModal
         open={showClearModal}
@@ -96,10 +157,56 @@ export function CashDashboard() {
         moduleName="Transactions caisse"
       />
 
+      {/* Account sub-tabs */}
+      <div className="flex gap-1 rounded-xl border border-border bg-surface p-1">
+        {ACCOUNT_TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => handleAccountTabChange(id)}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors',
+              accountTab === id
+                ? 'bg-card text-text-primary shadow-sm'
+                : 'text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CashFilters value={filters} onChange={handleFilterChange} />
         <div className="flex items-center gap-2">
+          {canOperate && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowDepot(true)}
+                className={cn(
+                  'flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-[12px] font-medium text-emerald-700',
+                  'transition-colors hover:bg-emerald-100',
+                )}
+              >
+                <Plus size={13} />
+                Dépôt
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRetrait(true)}
+                className={cn(
+                  'flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-[12px] font-medium text-red-600',
+                  'transition-colors hover:bg-red-100',
+                )}
+              >
+                <Minus size={13} />
+                Retrait
+              </button>
+            </>
+          )}
           {can('cash.reset_balance') && (
             <button
               type="button"
@@ -128,22 +235,26 @@ export function CashDashboard() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <CashSummaryCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
+      {/* KPI Cards (filtered by account tab) */}
+      <CashSummaryCards
+        summary={summaryQuery.data}
+        isLoading={summaryQuery.isLoading}
+        view={viewMap[accountTab]}
+      />
 
-      {/* Tab switch */}
+      {/* Content tabs */}
       <div className="flex gap-1 border-b border-border">
         {[
-          { id: 'transactions' as Tab, label: 'Transactions',  icon: List },
-          { id: 'analytics'    as Tab, label: 'Analytiques',   icon: BarChart3 },
+          { id: 'transactions' as ContentTab, label: 'Transactions', icon: List },
+          { id: 'analytics'    as ContentTab, label: 'Analytiques',  icon: BarChart3 },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => setContentTab(id)}
             className={cn(
               'flex items-center gap-1.5 border-b-2 px-4 pb-2.5 pt-2 text-[12px] font-medium transition-colors',
-              tab === id
+              contentTab === id
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary',
             )}
@@ -155,7 +266,7 @@ export function CashDashboard() {
       </div>
 
       {/* Content */}
-      {tab === 'transactions' && (
+      {contentTab === 'transactions' && (
         <>
           {canClearHistory && (
             <div className="mb-3 flex justify-end">
@@ -177,20 +288,14 @@ export function CashDashboard() {
             pagination={txQuery.data?.pagination}
             isLoading={txQuery.isLoading}
             onPageChange={setPage}
+            showAccount={accountTab === 'global'}
           />
         </>
       )}
 
-      {tab === 'analytics' && (
+      {contentTab === 'analytics' && (
         <CashAnalyticsCharts analytics={analyticsQuery.data} isLoading={analyticsQuery.isLoading} />
       )}
     </div>
   );
-}
-
-function buildPeriodParams(f: CashFilterState): Record<string, string> {
-  if (f.period === 'custom' && f.startDate && f.endDate) {
-    return { startDate: f.startDate, endDate: f.endDate };
-  }
-  return { period: f.period };
 }

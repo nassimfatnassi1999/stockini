@@ -173,6 +173,7 @@ describe('AvoirsService', () => {
       expect.objectContaining({
         type: CaisseMovementType.ANNULATION_VENTE,
         montant: -119,
+        paymentMethod: 'CASH',
       }),
     );
     expect(tx.sale.update).toHaveBeenCalledWith(
@@ -265,6 +266,117 @@ describe('AvoirsService', () => {
     expect(tx.payment.create).not.toHaveBeenCalled();
     expect(caisseService.recordMovement).not.toHaveBeenCalled();
     expect(tx.customer.update).not.toHaveBeenCalled();
+  });
+
+  // ── Bank/card refunds → BANK_TREASURY ─────────────────────────────────────────
+
+  it('BANK_TRANSFER refund: cashImpactDone=true and paymentMethod BANK_TRANSFER transmis', async () => {
+    const { service, tx, caisseService } = buildService();
+
+    await service.create({
+      saleId: sale.id,
+      customerId: sale.customerId,
+      refundMethod: 'BANK_TRANSFER',
+      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
+    });
+
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          method: PaymentMethod.BANK_TRANSFER,
+          cashImpactDone: true,
+        }),
+      }),
+    );
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: CaisseMovementType.ANNULATION_VENTE,
+        montant: -119,
+        paymentMethod: 'BANK_TRANSFER',
+      }),
+    );
+  });
+
+  it('CHECK refund: cashImpactDone=true and paymentMethod CHECK transmis', async () => {
+    const { service, tx, caisseService } = buildService();
+
+    await service.create({
+      saleId: sale.id,
+      customerId: sale.customerId,
+      refundMethod: 'CHECK',
+      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
+    });
+
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          method: PaymentMethod.CHECK,
+          cashImpactDone: true,
+        }),
+      }),
+    );
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: CaisseMovementType.ANNULATION_VENTE,
+        montant: -119,
+        paymentMethod: 'CHECK',
+      }),
+    );
+  });
+
+  it('CARD refund: cashImpactDone=true and paymentMethod CARD transmis', async () => {
+    const { service, tx, caisseService } = buildService();
+
+    await service.create({
+      saleId: sale.id,
+      customerId: sale.customerId,
+      refundMethod: 'CARD',
+      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
+    });
+
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          method: PaymentMethod.CARD,
+          cashImpactDone: true,
+        }),
+      }),
+    );
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: CaisseMovementType.ANNULATION_VENTE,
+        montant: -119,
+        paymentMethod: 'CARD',
+      }),
+    );
+  });
+
+  it('CUSTOMER_CREDIT: cashImpactDone=false, aucun mouvement, creditBalance incrémenté', async () => {
+    const { service, tx, caisseService } = buildService();
+
+    await service.create({
+      saleId: sale.id,
+      customerId: sale.customerId,
+      refundMethod: 'CUSTOMER_CREDIT',
+      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
+    });
+
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          method: PaymentMethod.CREDIT,
+          cashImpactDone: false,
+        }),
+      }),
+    );
+    expect(caisseService.recordMovement).not.toHaveBeenCalled();
+    expect(tx.customer.update).toHaveBeenCalledWith({
+      where: { id: sale.customerId },
+      data: { creditBalance: { increment: 119 } },
+    });
   });
 
   // ── Quantity over-return blocked ──────────────────────────────────────────────

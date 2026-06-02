@@ -8,7 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { CaisseMovementType } from '@prisma/client';
+import { CaisseMovementType, TreasuryAccount } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
@@ -66,8 +66,11 @@ export class CaisseController {
 
   @RequirePermissions('caisse.view')
   @Get('historique')
-  historique(@Query('type') type?: CaisseMovementType) {
-    return this.caisseService.historique(type);
+  historique(
+    @Query('type') type?: CaisseMovementType,
+    @Query('account') account?: TreasuryAccount,
+  ) {
+    return this.caisseService.historique(type, account);
   }
 
   // ─── Manual operations ────────────────────────────────────────────────────────
@@ -75,19 +78,22 @@ export class CaisseController {
   @RequirePermissions('caisse.operate')
   @Post('retrait')
   retrait(@Body() dto: CaisseOperationDto, @CurrentUser() user?: AuthUser) {
-    return this.caisseService.retrait(dto.montant, dto.motif, user?.id);
+    return this.caisseService.retrait(dto.montant, dto.motif, user?.id, dto.account);
   }
 
   @RequirePermissions('caisse.operate')
   @Post('depot')
   depot(@Body() dto: CaisseOperationDto, @CurrentUser() user?: AuthUser) {
-    return this.caisseService.depot(dto.montant, dto.motif, user?.id);
+    return this.caisseService.depot(dto.montant, dto.motif, user?.id, dto.account);
   }
 
   @RequirePermissions('caisse.admin')
   @Patch('config')
   updateConfig(@Body() dto: CaisseConfigUpdateDto) {
-    return this.caisseService.setAllowNegative(dto.allowNegative ?? false);
+    return this.caisseService.setAllowNegative(
+      dto.account === 'BANK_TREASURY' ? (dto.allowNegativeBanque ?? false) : (dto.allowNegative ?? false),
+      dto.account,
+    );
   }
 
   // ─── Reset balance ────────────────────────────────────────────────────────────
@@ -96,10 +102,10 @@ export class CaisseController {
   @Post('reset')
   @HttpCode(200)
   resetBalance(@Body() dto: CashResetDto, @CurrentUser() user?: AuthUser) {
-    return this.caisseService.resetBalance(dto.motif, user?.id);
+    return this.caisseService.resetBalance(dto.motif, user?.id, dto.account);
   }
 
-  // ─── Clear history (soft-clear, display only) ─────────────────────────────────
+  // ─── Clear history ─────────────────────────────────────────────────────────────
 
   @RequirePermissions('finance.history.clear')
   @Post('history/clear')
