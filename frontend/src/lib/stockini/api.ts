@@ -16,6 +16,8 @@ import type {
   SalesDocumentType,
   ShareLinkResponse,
   DashboardReport,
+  ReportOverview,
+  ReportOverviewQuery,
   PaginatedResponse,
   PayablePurchasesResponse,
   PayablePurchasesQueryParams,
@@ -43,6 +45,19 @@ type ProductUpdatePayload = Omit<Partial<Product>, "quantity"> & {
   brandId?: string;
   supplierId?: string;
 };
+
+export interface ProductsQueryParams {
+  search?: string;
+  categoryId?: string;
+  brandId?: string;
+  supplierId?: string;
+  status?: "active" | "inactive";
+  stockStatus?: "low" | "out" | "available";
+  purchasePriceMin?: number;
+  purchasePriceMax?: number;
+  salePriceMin?: number;
+  salePriceMax?: number;
+}
 
 function normalizeTrashItem(item: TrashItem): TrashItem {
   const entity = item.entity ?? item.entityType ?? item.entity_type;
@@ -81,6 +96,12 @@ export function cleanQueryParams<T extends object>(
 }
 
 export const stockiniApi = {
+  reportsOverview: (query?: ReportOverviewQuery) =>
+    api
+      .get<ReportOverview>("/reports/overview", {
+        params: cleanQueryParams(query),
+      })
+      .then((r) => r.data),
   dashboard: () =>
     api.get<DashboardReport>("/reports/dashboard").then((r) => r.data),
   stockValue: () =>
@@ -88,9 +109,9 @@ export const stockiniApi = {
       .get<{ purchaseValue: number; saleValue: number }>("/reports/stock-value")
       .then((r) => r.data),
   topSelling: () => api.get("/reports/top-selling").then((r) => r.data),
-  products: (search?: string) =>
+  products: (params?: ProductsQueryParams) =>
     api
-      .get<Product[]>("/products", { params: search ? { search } : undefined })
+      .get<Product[]>("/products", { params: cleanQueryParams(params) })
       .then((r) => r.data),
   product: (id: string) =>
     api.get<Product>(`/products/${id}`).then((r) => r.data),

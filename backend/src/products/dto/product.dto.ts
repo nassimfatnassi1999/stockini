@@ -179,5 +179,40 @@ export class ProductQueryDto {
 
   @IsOptional()
   @IsString()
+  supplierId?: string;
+
+  /** Filtre sur isActive : 'active' | 'inactive' */
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'inactive'])
+  status?: 'active' | 'inactive';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['low', 'out', 'available'])
   stockStatus?: 'low' | 'out' | 'available';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  purchasePriceMin?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  purchasePriceMax?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  salePriceMin?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  salePriceMax?: number;
 }

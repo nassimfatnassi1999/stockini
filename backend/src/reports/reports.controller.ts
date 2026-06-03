@@ -3,12 +3,24 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { ReportsService } from './reports.service';
+import { ReportOverviewQueryDto } from './dto/report-overview.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermissions('reports.view')
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
+
+  /**
+   * GET /reports/overview
+   * Comprehensive financial and operational KPIs for the reporting page.
+   * Requires: reports.view + reports.financial.view
+   */
+  @RequirePermissions('reports.view', 'reports.financial.view')
+  @Get('overview')
+  getOverview(@Query() query: ReportOverviewQueryDto) {
+    return this.reportsService.getOverview(query);
+  }
 
   @Get('dashboard')
   dashboard() {

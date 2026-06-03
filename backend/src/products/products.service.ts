@@ -42,12 +42,24 @@ export class ProductsService {
   }
 
   async findAll(query: ProductQueryDto) {
+    const purchasePriceFilter: Prisma.DecimalFilter<'Product'> = {};
+    if (query.purchasePriceMin !== undefined)
+      purchasePriceFilter.gte = query.purchasePriceMin;
+    if (query.purchasePriceMax !== undefined)
+      purchasePriceFilter.lte = query.purchasePriceMax;
+
+    const salePriceFilter: Prisma.DecimalFilter<'Product'> = {};
+    if (query.salePriceMin !== undefined)
+      salePriceFilter.gte = query.salePriceMin;
+    if (query.salePriceMax !== undefined)
+      salePriceFilter.lte = query.salePriceMax;
+
     const where: Prisma.ProductWhereInput = {
       deletedAt: null,
+      ...(query.status === 'active' ? { isActive: true } : {}),
+      ...(query.status === 'inactive' ? { isActive: false } : {}),
       ...(query.search
-        ? {
-            OR: this.buildSearchOR(query.search, query.searchMode),
-          }
+        ? { OR: this.buildSearchOR(query.search, query.searchMode) }
         : {}),
       ...(query.sku
         ? { sku: { contains: query.sku, mode: 'insensitive' } }
@@ -60,6 +72,13 @@ export class ProductsService {
         : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.brandId ? { brandId: query.brandId } : {}),
+      ...(query.supplierId ? { supplierId: query.supplierId } : {}),
+      ...(Object.keys(purchasePriceFilter).length > 0
+        ? { purchasePrice: purchasePriceFilter }
+        : {}),
+      ...(Object.keys(salePriceFilter).length > 0
+        ? { salePrice: salePriceFilter }
+        : {}),
     };
 
     if (query.stockStatus === 'out') {
@@ -68,6 +87,7 @@ export class ProductsService {
     if (query.stockStatus === 'available') {
       where.quantity = { gt: 0 };
     }
+
     const products = await this.prisma.product.findMany({
       where,
       include: this.includeRelations(),
@@ -76,8 +96,7 @@ export class ProductsService {
 
     if (query.stockStatus === 'low') {
       return products.filter(
-        (product) =>
-          product.quantity > 0 && product.quantity <= product.minStock,
+        (p) => p.quantity > 0 && p.quantity <= p.minStock,
       );
     }
 

@@ -480,6 +480,134 @@ export interface DashboardReport {
   unpaidSales: number;
 }
 
+export type ReportPeriod = 'today' | 'week' | 'month' | 'year' | 'custom';
+
+export interface ReportOverviewQuery {
+  period?: ReportPeriod;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface ReportTimeSeries {
+  label: string;
+  ca: number;
+  achats: number;
+  encaissements: number;
+  depenses: number;
+  benefice: number;
+}
+
+export interface ReportCriticalProduct {
+  id: string;
+  name: string;
+  reference: string;
+  sku: string;
+  quantity: number;
+  minStock: number;
+  category: string | null;
+  brand: string | null;
+  statut: 'rupture' | 'faible';
+}
+
+export interface ReportStockCategory {
+  name: string;
+  purchaseValue: number;
+  saleValue: number;
+  count: number;
+}
+
+export interface ReportTopProduct {
+  product: {
+    id: string;
+    name: string;
+    reference: string;
+    category: { name: string } | null;
+  } | null;
+  quantitySold: number;
+  revenue: number;
+}
+
+export interface ReportTopClient {
+  customer: {
+    id: string;
+    name: string;
+    reference: string;
+  } | null;
+  ca: number;
+  impaye: number;
+}
+
+export interface ReportTopSupplier {
+  supplier: {
+    id: string;
+    name: string;
+  } | null;
+  totalAchats: number;
+  impaye: number;
+}
+
+export interface ReportOverview {
+  period: ReportPeriod;
+  range: { from: string; to: string };
+
+  financier: {
+    caNet: number;
+    caGross: number;
+    caTrend: number | null;
+    encaissementsClients: number;
+    impayesClients: number;
+    totalAchats: number;
+    achatsTrend: number | null;
+    paiementsFournisseurs: number;
+    impayesFournisseurs: number;
+    depenses: number;
+    beneficeEstime: number;
+    margePercent: number;
+    soldeCaisse: number;
+    soldeBanque: number;
+    soldeGlobal: number;
+  };
+
+  ventes: {
+    count: number;
+    prevCount: number;
+    countTrend: number | null;
+    panierMoyen: number;
+    devisCount: number;
+    bonCommandeCount: number;
+    blCount: number;
+    factureCount: number;
+    cancelledCount: number;
+    parStatutPaiement: { paye: number; partiel: number; impaye: number };
+    avoirs: { count: number; total: number; montantRembourse: number };
+  };
+
+  achats: {
+    count: number;
+    prevCount: number;
+    countTrend: number | null;
+  };
+
+  stock: {
+    valeurAchat: number;
+    valeurVente: number;
+    totalProduits: number;
+    ruptureCount: number;
+    lowStockCount: number;
+    totalQuantite: number;
+    mouvements: { entries: number; exits: number; total: number };
+    produitsCritiques: ReportCriticalProduct[];
+    parCategorie: ReportStockCategory[];
+  };
+
+  clients: { total: number };
+
+  topProduits: ReportTopProduct[];
+  topClients: ReportTopClient[];
+  topFournisseurs: ReportTopSupplier[];
+  series: ReportTimeSeries[];
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;
