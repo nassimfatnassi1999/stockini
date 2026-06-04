@@ -3,9 +3,11 @@ import {
   CaisseMovementType,
   PaymentStatus,
   Prisma,
+  PurchaseDocumentType,
   PurchaseStatus,
   StockMovementType,
 } from '@prisma/client';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
@@ -16,6 +18,7 @@ import {
   PayablePurchaseQueryDto,
   PurchasePaginationDto,
   ReceivePurchaseDto,
+  TransformPurchaseDto,
   UpdatePurchaseDto,
 } from './dto/purchase.dto';
 
@@ -29,6 +32,7 @@ export class PurchasesService {
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async create(dto: CreatePurchaseDto, createdById?: string) {
@@ -48,8 +52,8 @@ export class PurchasesService {
     const total = subtotal - discount + tax;
 
     // All purchases start UNPAID — payments go through /payments/purchases/:id/pay
-    return this.prisma.$transaction(async (tx) =>
-      tx.purchase.create({
+    return this.prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.create({
         data: {
           orderNumber: await this.references.generate('ACH', 'purchase', tx),
           supplierId: dto.supplierId,
@@ -61,12 +65,36 @@ export class PurchasesService {
           remainingAmount: total,
           paymentStatus: PaymentStatus.UNPAID,
           status: PurchaseStatus.ORDERED,
+          documentType: PurchaseDocumentType.BON_COMMANDE,
           createdById,
           items: { create: items },
         },
         include: { supplier: true, items: true },
-      }),
-    );
+      });
+
+      await this.auditLogs.audit({
+        action: 'purchase.created',
+        entity: 'Purchase',
+        entityId: purchase.id,
+        userId: createdById,
+        newValue: {
+          id: purchase.id,
+          orderNumber: purchase.orderNumber,
+          status: purchase.status,
+          total: Number(purchase.total),
+          supplierId: purchase.supplierId,
+        },
+        metadata: {
+          orderNumber: purchase.orderNumber,
+          supplierId: purchase.supplierId,
+          supplierName: purchase.supplier?.name ?? null,
+          total: Number(purchase.total),
+          itemCount: purchase.items.length,
+        },
+      }, tx);
+
+      return purchase;
+    });
   }
 
   async findAll(query?: PurchasePaginationDto) {
@@ -129,16 +157,16 @@ export class PurchasesService {
   }
 
   /**
-   * Factures fournisseurs « à payer » : toute facture achat avec un reste à payer > 0.
-   * Inclut les factures NON PAYÉES et PARTIELLEMENT PAYÉES, exclut les factures
-   * totalement payées (remainingAmount = 0) et les achats annulés.
-   * L'agrégation du total des dettes est calculée côté backend avec Decimal.
+   * Factures fournisseurs « à payer » : uniquement BON_RECEPTION et FACTURE_FOURNISSEUR
+   * avec un reste à payer > 0. Les BON_COMMANDE sont exclus : ils ne créent pas de dette.
    */
   async findPayable(query?: PayablePurchaseQueryDto) {
     const where: Prisma.PurchaseWhereInput = {
       deletedAt: null,
       status: { not: PurchaseStatus.CANCELLED },
       remainingAmount: { gt: 0 },
+      // Règle métier : un BC ne crée pas de dette — exclure explicitement
+      documentType: { not: PurchaseDocumentType.BON_COMMANDE },
       ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
       ...(query?.supplierId && { supplierId: query.supplierId }),
       ...(query?.search && {
@@ -241,18 +269,57 @@ export class PurchasesService {
       );
 
       // Stock is updated above; caisse is NOT touched here.
-      // The purchase stays UNPAID — payment happens via POST /payments/purchases/:id/pay.
-      return tx.purchase.update({
+      // Payment happens via POST /payments/purchases/:id/pay.
+      const newStatus = allReceived
+        ? PurchaseStatus.RECEIVED
+        : someReceived
+          ? PurchaseStatus.PARTIALLY_RECEIVED
+          : PurchaseStatus.ORDERED;
+
+      // Règle métier : dès qu'un article est réceptionné sur un BC,
+      // le document devient un BR (dette fournisseur activée).
+      // On ne touche pas au documentType si c'est déjà un BR ou FACTURE.
+      const docActivation =
+        someReceived && purchase.documentType === PurchaseDocumentType.BON_COMMANDE
+          ? {
+              documentType: PurchaseDocumentType.BON_RECEPTION,
+              paymentStatus: PaymentStatus.UNPAID,
+              paidAmount: 0,
+              remainingAmount: purchase.total,
+            }
+          : {};
+
+      const updated = await tx.purchase.update({
         where: { id },
-        data: {
-          status: allReceived
-            ? PurchaseStatus.RECEIVED
-            : someReceived
-              ? PurchaseStatus.PARTIALLY_RECEIVED
-              : PurchaseStatus.ORDERED,
-        },
+        data: { status: newStatus, ...docActivation },
         include: { supplier: true, items: { include: { product: true } } },
       });
+
+      await this.auditLogs.audit({
+        action: 'purchase.received',
+        entity: 'Purchase',
+        entityId: id,
+        userId,
+        oldValue: { documentType: purchase.documentType, status: purchase.status },
+        newValue: {
+          documentType: updated.documentType,
+          status: newStatus,
+          ...(Object.keys(docActivation).length > 0 && { paymentStatus: PaymentStatus.UNPAID }),
+        },
+        metadata: {
+          orderNumber: purchase.orderNumber,
+          purchaseId: id,
+          totalTtc: Number(purchase.total),
+          paymentStatus: updated.paymentStatus,
+          documentTypeChanged: purchase.documentType !== updated.documentType,
+          receivedItems: dto.items.map((i) => ({
+            purchaseItemId: i.purchaseItemId,
+            quantity: i.quantity,
+          })),
+        },
+      }, tx);
+
+      return updated;
     });
   }
 
@@ -302,7 +369,7 @@ export class PurchasesService {
         });
       }
 
-      return tx.purchase.update({
+      const cancelled = await tx.purchase.update({
         where: { id },
         data: {
           status: PurchaseStatus.CANCELLED,
@@ -316,6 +383,26 @@ export class PurchasesService {
           payments: true,
         },
       });
+
+      await this.auditLogs.audit({
+        action: 'purchase.cancelled',
+        entity: 'Purchase',
+        entityId: id,
+        userId,
+        oldValue: {
+          status: purchase.status,
+          paidAmount: Number(purchase.paidAmount),
+          remainingAmount: Number(purchase.remainingAmount),
+        },
+        newValue: {
+          status: PurchaseStatus.CANCELLED,
+          paidAmount: 0,
+          remainingAmount: Number(purchase.total),
+        },
+        metadata: { orderNumber: purchase.orderNumber },
+      }, tx);
+
+      return cancelled;
     });
   }
 
@@ -337,12 +424,169 @@ export class PurchasesService {
 
   async remove(id: string, userId?: string) {
     this.logger.log(`DELETE /purchases/${id} called by ${userId ?? 'unknown'}`);
+
+    const purchase = await this.prisma.purchase.findFirstOrThrow({
+      where: { id, deletedAt: null },
+      select: { id: true, orderNumber: true, status: true, total: true, supplierId: true },
+    });
+
     await this.prisma.purchase.update({
       where: { id },
       data: { deletedAt: new Date(), deletedBy: userId ?? null },
     });
+
+    await this.auditLogs.audit({
+      action: 'purchase.deleted',
+      entity: 'Purchase',
+      entityId: purchase.id,
+      userId,
+      oldValue: {
+        id: purchase.id,
+        orderNumber: purchase.orderNumber,
+        status: purchase.status,
+        total: Number(purchase.total),
+        supplierId: purchase.supplierId,
+        deletedAt: null,
+      },
+      newValue: { deletedAt: new Date().toISOString(), deletedBy: userId ?? null },
+      metadata: { orderNumber: purchase.orderNumber },
+    });
+
     this.logger.log(`Purchase ${id} moved to trash by ${userId ?? 'unknown'}`);
     return { id };
+  }
+
+  /**
+   * Transforme un Bon de commande en Bon de réception ou Facture fournisseur.
+   * C'est à ce moment que la dette fournisseur est « activée » (document devient payable).
+   * Pour BON_RECEPTION, le stock est mis à jour pour tous les articles.
+   */
+  async transform(id: string, dto: TransformPurchaseDto, userId?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findFirstOrThrow({
+        where: { id, deletedAt: null },
+        include: { supplier: true, items: true },
+      });
+
+      if (purchase.documentType !== PurchaseDocumentType.BON_COMMANDE) {
+        throw new BadRequestException(
+          `Ce document est déjà un ${purchase.documentType === PurchaseDocumentType.BON_RECEPTION ? 'Bon de réception' : 'Facture fournisseur'} et ne peut plus être transformé.`,
+        );
+      }
+
+      if (purchase.status === PurchaseStatus.CANCELLED) {
+        throw new BadRequestException('Un achat annulé ne peut pas être transformé.');
+      }
+
+      const targetType =
+        dto.targetType === 'BON_RECEPTION'
+          ? PurchaseDocumentType.BON_RECEPTION
+          : PurchaseDocumentType.FACTURE_FOURNISSEUR;
+
+      // Pour un Bon de réception, mettre à jour le stock
+      if (targetType === PurchaseDocumentType.BON_RECEPTION) {
+        for (const item of purchase.items) {
+          const qty = item.quantity - item.receivedQuantity;
+          if (qty > 0) {
+            await tx.purchaseItem.update({
+              where: { id: item.id },
+              data: { receivedQuantity: item.quantity },
+            });
+            await this.stockService.applyMovement(tx, {
+              productId: item.productId,
+              type: StockMovementType.PURCHASE_RECEPTION,
+              quantity: qty,
+              reason: `Transformation BC→BR ${purchase.orderNumber}`,
+              userId,
+            });
+          }
+        }
+      }
+
+      const newStatus =
+        targetType === PurchaseDocumentType.BON_RECEPTION
+          ? PurchaseStatus.RECEIVED
+          : purchase.status;
+
+      // Activation de la dette fournisseur : le document devient payable.
+      // On réasserte explicitement les champs financiers même s'ils étaient déjà
+      // corrects depuis la création, pour éviter toute ambiguïté en cas de
+      // données historiques ou de future évolution de la logique de création.
+      const updated = await tx.purchase.update({
+        where: { id },
+        data: {
+          documentType: targetType,
+          status: newStatus,
+          paymentStatus: PaymentStatus.UNPAID,
+          paidAmount: 0,
+          remainingAmount: purchase.total,
+        },
+        include: { supplier: true, items: { include: { product: true } } },
+      });
+
+      await this.auditLogs.audit({
+        action: 'purchase.transformed',
+        entity: 'Purchase',
+        entityId: id,
+        userId,
+        oldValue: { documentType: PurchaseDocumentType.BON_COMMANDE, status: purchase.status },
+        newValue: { documentType: targetType, status: newStatus, paymentStatus: PaymentStatus.UNPAID },
+        metadata: {
+          fromType: PurchaseDocumentType.BON_COMMANDE,
+          toType: targetType,
+          purchaseId: id,
+          purchaseNumber: purchase.orderNumber,
+          totalTtc: Number(purchase.total),
+          paymentStatus: PaymentStatus.UNPAID,
+          supplierId: purchase.supplierId,
+          supplierName: purchase.supplier?.name ?? null,
+        },
+      }, tx);
+
+      return updated;
+    });
+  }
+
+  /**
+   * Rapport d'intégrité : détecte les Bons de commande qui auraient des paiements liés.
+   * Doit être consulté avant toute migration de données.
+   */
+  async integrityCheck() {
+    const bcWithPayments = await this.prisma.purchase.findMany({
+      where: {
+        deletedAt: null,
+        documentType: PurchaseDocumentType.BON_COMMANDE,
+        payments: { some: { deletedAt: null } },
+      },
+      include: {
+        supplier: true,
+        payments: { where: { deletedAt: null } },
+      },
+    });
+
+    return {
+      count: bcWithPayments.length,
+      anomalies: bcWithPayments.map((p) => ({
+        id: p.id,
+        orderNumber: p.orderNumber,
+        supplier: p.supplier?.name,
+        total: Number(p.total),
+        paidAmount: Number(p.paidAmount),
+        remainingAmount: Number(p.remainingAmount),
+        paymentsCount: p.payments.length,
+        payments: p.payments.map((pay) => ({
+          id: pay.id,
+          reference: pay.reference,
+          amount: Number(pay.amount),
+          method: pay.method,
+          createdAt: pay.createdAt,
+        })),
+      })),
+      message:
+        bcWithPayments.length === 0
+          ? 'Aucune anomalie : aucun Bon de commande ne possède de paiement lié.'
+          : `ANOMALIE : ${bcWithPayments.length} Bon(s) de commande possède(nt) des paiements. À corriger manuellement.`,
+    };
   }
 
   private paymentStatus(total: number, paidAmount: number) {

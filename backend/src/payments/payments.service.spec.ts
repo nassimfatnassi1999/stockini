@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { CaisseMovementType, DocumentType, PaymentStatus, PaymentType, SaleStatus } from '@prisma/client';
+import { CaisseMovementType, DocumentType, PaymentStatus, PaymentType, PurchaseDocumentType, SaleStatus } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 
 // ─── Helpers pour clearHistory ────────────────────────────────────────────────
@@ -18,7 +18,8 @@ function buildClearService(countResult = 3) {
   const references = {} as any;
   const settings = {} as any;
   const caisseService = {} as any;
-  const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any);
+  const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
+  const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any, auditLogs);
   return { service, prisma };
 }
 
@@ -164,7 +165,8 @@ describe('PaymentsService.paySale', () => {
       ),
     } as any;
 
-    const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any);
+    const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
+  const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any, auditLogs);
     return { service, tx, caisseService };
   }
 
@@ -379,6 +381,7 @@ describe('PaymentsService.payPurchase', () => {
       id: 'purchase-1',
       supplierId: 'supplier-1',
       orderNumber: 'ACH-001',
+      documentType: PurchaseDocumentType.BON_RECEPTION,
       ...purchase,
     };
 
@@ -416,12 +419,14 @@ describe('PaymentsService.payPurchase', () => {
       ),
     } as any;
 
+    const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
     const service = new PaymentsService(
       prisma,
       references,
       settings,
       caisseService,
       { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any,
+      auditLogs,
     );
     return { service, tx, caisseService };
   }
@@ -553,6 +558,36 @@ describe('PaymentsService.payPurchase', () => {
     ).rejects.toThrow(BadRequestException);
 
     expect(caisseService.recordMovement).not.toHaveBeenCalled();
+  });
+
+  it('BON_COMMANDE → lève BadRequestException avec message explicite', async () => {
+    const purchaseRow = {
+      id: 'purchase-1',
+      supplierId: 'supplier-1',
+      orderNumber: 'ACH-001',
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+      documentType: PurchaseDocumentType.BON_COMMANDE,
+    };
+    const tx: any = {
+      purchase: { findFirstOrThrow: jest.fn().mockResolvedValue(purchaseRow) },
+      payment: { create: jest.fn() },
+    };
+    const prisma = {
+      $transaction: jest.fn((cb: (tx: any) => any) => cb(tx)),
+    } as any;
+    const references = { generate: jest.fn().mockResolvedValue('EXP-001') } as any;
+    const caisseService = { recordMovement: jest.fn() } as any;
+    const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
+    const service = new PaymentsService(prisma, references, {} as any, caisseService, {} as any, auditLogs);
+
+    await expect(
+      service.payPurchase('purchase-1', { amount: 50, method: 'CASH' as any }),
+    ).rejects.toThrow('Un bon de commande ne peut pas être payé');
+
+    expect(caisseService.recordMovement).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
   it('paiement CHECK fournisseur → paymentMethod transmis à recordMovement', async () => {

@@ -93,10 +93,12 @@ export const PERMISSIONS = {
   CASH_RESET_BALANCE: 'cash.reset_balance',
 
   // ── Dépenses / paiements fournisseurs ─────────────────────────────────────────
+  EXPENSES_READ: 'expenses.read',
   EXPENSES_VIEW: 'expenses.view',
   EXPENSES_CREATE: 'expenses.create',
   EXPENSES_UPDATE: 'expenses.update',
   EXPENSES_DELETE: 'expenses.delete',
+  EXPENSES_CANCEL: 'expenses.cancel',
   EXPENSES_PAY_SUPPLIER: 'expenses.pay_supplier',
   EXPENSES_EXPORT: 'expenses.export',
 
@@ -123,6 +125,7 @@ export const PERMISSIONS = {
   // ── Audit logs ────────────────────────────────────────────────────────────────
   AUDIT_LOGS_VIEW: 'audit_logs.view',
   AUDIT_LOGS_EXPORT: 'audit_logs.export',
+  AUDIT_LOGS_ARCHIVE: 'audit_logs.archive',
 
   // ── Permissions ───────────────────────────────────────────────────────────────
   PERMISSIONS_VIEW: 'permissions.view',
@@ -265,10 +268,12 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'cash.reset_balance', module: 'caisse', action: 'reset_balance', label: 'Remise à zéro de la caisse', description: 'Autorise la remise à zéro du solde de caisse.' },
 
   // ── Dépenses / paiements fournisseurs ─────────────────────────────────────────
+  { code: 'expenses.read', module: 'expenses', action: 'read', label: 'Lire', description: 'Lire les dépenses générales' },
   { code: 'expenses.view', module: 'expenses', action: 'view', label: 'Consulter', description: 'Consulter les dépenses' },
   { code: 'expenses.create', module: 'expenses', action: 'create', label: 'Créer', description: 'Créer une dépense' },
   { code: 'expenses.update', module: 'expenses', action: 'update', label: 'Modifier', description: 'Modifier une dépense' },
   { code: 'expenses.delete', module: 'expenses', action: 'delete', label: 'Supprimer', description: 'Supprimer une dépense' },
+  { code: 'expenses.cancel', module: 'expenses', action: 'cancel', label: 'Annuler', description: 'Annuler une dépense sans suppression définitive' },
   { code: 'expenses.pay_supplier', module: 'expenses', action: 'pay_supplier', label: 'Payer fournisseur', description: 'Enregistrer un paiement fournisseur' },
   { code: 'expenses.export', module: 'expenses', action: 'export', label: 'Exporter', description: 'Exporter les dépenses' },
 
@@ -295,6 +300,7 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   // ── Audit logs ────────────────────────────────────────────────────────────────
   { code: 'audit_logs.view', module: 'audit_logs', action: 'view', label: 'Consulter', description: "Voir les journaux d'audit" },
   { code: 'audit_logs.export', module: 'audit_logs', action: 'export', label: 'Exporter', description: "Exporter les journaux d'audit" },
+  { code: 'audit_logs.archive', module: 'audit_logs', action: 'archive', label: 'Archiver', description: "Lancer l'archivage des logs anciens vers MinIO (action irréversible, réservée admin)" },
 
   // ── Permissions ───────────────────────────────────────────────────────────────
   { code: 'permissions.view', module: 'permissions', action: 'view', label: 'Consulter', description: 'Consulter les permissions des rôles' },

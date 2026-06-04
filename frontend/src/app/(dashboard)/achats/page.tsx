@@ -22,7 +22,7 @@ import {
   recalculateLine,
   type RegisterLine,
 } from '@/lib/stockini/register-utils';
-import { money } from '@/lib/stockini/format';
+import { isPurchaseOrder, money } from '@/lib/stockini/format';
 import type { DropdownOption, PaginatedResponse, Purchase, PurchasesQueryParams, Supplier } from '@/lib/stockini/types';
 import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
 
@@ -364,18 +364,13 @@ export default function AchatsPage() {
 
       const purchase = await stockiniApi.createPurchase(payload);
 
+      // Transformer immédiatement en BR ou FACTURE_FOURNISSEUR selon le type choisi.
+      // createPurchase crée toujours un BON_COMMANDE ; transform() règle documentType,
+      // paymentStatus=UNPAID et met à jour le stock pour les BR.
       if (docType === 'BON_RECEPTION') {
-        const receiveItems =
-          (
-            purchase as Purchase & { items: Array<{ id: string; quantity: number }> }
-          ).items?.map((item) => ({
-            purchaseItemId: item.id,
-            quantity: item.quantity,
-          })) ?? [];
-
-        if (receiveItems.length > 0) {
-          await stockiniApi.receivePurchase(purchase.id, receiveItems);
-        }
+        await stockiniApi.transformPurchase(purchase.id, 'BON_RECEPTION');
+      } else if (docType === 'FACTURE') {
+        await stockiniApi.transformPurchase(purchase.id, 'FACTURE_FOURNISSEUR');
       }
 
       return purchase;
@@ -386,6 +381,7 @@ export default function AchatsPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-movements'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-caisse'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-payable-purchases'] });
       if (selectedCommandeId) {
         queryClient.invalidateQueries({ queryKey: ['stockini-purchase', selectedCommandeId] });
       }
@@ -779,11 +775,15 @@ export default function AchatsPage() {
                         {money(purchase.total)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`app-status-badge ${PAYMENT_COLORS[purchase.paymentStatus] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
-                        >
-                          {PAYMENT_LABELS[purchase.paymentStatus] ?? purchase.paymentStatus}
-                        </span>
+                        {isPurchaseOrder(purchase.documentType) ? (
+                          <span className="text-gray-400" aria-label="Non payable">—</span>
+                        ) : (
+                          <span
+                            className={`app-status-badge ${PAYMENT_COLORS[purchase.paymentStatus] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                          >
+                            {PAYMENT_LABELS[purchase.paymentStatus] ?? purchase.paymentStatus}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -804,7 +804,7 @@ export default function AchatsPage() {
                               label: 'Payer',
                               icon: <CreditCard size={14} />,
                               onClick: () => setPayTarget(purchase),
-                              hidden: purchase.paymentStatus === 'PAID' || (purchase.status !== 'RECEIVED' && purchase.status !== 'PARTIALLY_RECEIVED'),
+                              hidden: isPurchaseOrder(purchase.documentType) || purchase.paymentStatus === 'PAID' || (purchase.status !== 'RECEIVED' && purchase.status !== 'PARTIALLY_RECEIVED'),
                             },
                             {
                               label: 'Supprimer',

@@ -27,7 +27,7 @@ export class MinioService implements OnModuleInit {
     await this.ensureBucket(this.bucket);
   }
 
-  private async ensureBucket(bucket: string) {
+  async ensureBucket(bucket: string): Promise<void> {
     try {
       const exists = await this.client.bucketExists(bucket);
       if (!exists) {

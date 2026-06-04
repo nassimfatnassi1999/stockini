@@ -302,7 +302,11 @@ export class ReportsService {
         _sum: { amount: true },
       }),
       this.prisma.caisseMovement.aggregate({
-        where: { type: CaisseMovementType.RETRAIT_MANUEL, clearedAt: null, createdAt: range },
+        where: {
+          type: { in: [CaisseMovementType.RETRAIT_MANUEL, CaisseMovementType.DEPENSE_GENERALE] },
+          clearedAt: null,
+          createdAt: range,
+        },
         _sum: { montant: true },
       }),
       this.prisma.creditNote.aggregate({
@@ -599,7 +603,11 @@ export class ReportsService {
             _sum: { amount: true },
           }),
           this.prisma.caisseMovement.aggregate({
-            where: { type: CaisseMovementType.RETRAIT_MANUEL, clearedAt: null, createdAt: range },
+            where: {
+              type: { in: [CaisseMovementType.RETRAIT_MANUEL, CaisseMovementType.DEPENSE_GENERALE] },
+              clearedAt: null,
+              createdAt: range,
+            },
             _sum: { montant: true },
           }),
         ]);

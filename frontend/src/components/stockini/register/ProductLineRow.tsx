@@ -60,6 +60,8 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
         defaultMarginPercent: DEFAULT_MARGIN_PERCENT,
         remisePercent: 0,
         quantity: Math.max(line.quantity, 1),
+        // Sync TVA from the product so frontend and backend use the same rate
+        tvaPercent: Number(product.tva ?? 19),
         manualUnitPriceHt: false,
       }),
     );

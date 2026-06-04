@@ -106,9 +106,9 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
 }
 
 /**
- * For sales: remise reduces the margin, not the price.
- * margeFinal = max(defaultMarginPercent - remisePercent, 0)
- * puHt = purchasePriceHt × (1 + margeFinal / 100)
+ * For sales (auto mode): puHt = purchasePriceHt × (1 + defaultMarginPercent / 100) — always
+ * the GROSS unit price (no discount baked in). Remise is applied as a standard line discount
+ * so the payload sent to the backend is unambiguous: unitPrice = gross, discountPercent = remise.
  *
  * When manualUnitPriceHt is true, puHt is frozen (user-set) and only the
  * derived fields (margePercent, margeAmount, netHt, netTtc) are recalculated.
@@ -133,13 +133,17 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
   }
 
   if (line.purchasePriceHt > 0) {
-    // Auto mode: derive puHt from margin formula, then all other fields.
-    const margeFinalePourcent = Math.max(line.defaultMarginPercent - line.remisePercent, 0);
-    const puHt = round3(line.purchasePriceHt * (1 + margeFinalePourcent / 100));
-    const margePercent = Math.round(margeFinalePourcent * 100) / 100;
-    const margeAmount = round3(puHt - line.purchasePriceHt);
-    const netHt = round3(puHt * line.quantity);
+    // Auto mode: puHt is always the GROSS price (full default margin, no discount baked in).
+    // Remise is applied as a standard line discount so the backend receives matching values.
+    const puHt = round3(line.purchasePriceHt * (1 + line.defaultMarginPercent / 100));
+    const grossHt = round3(puHt * line.quantity);
+    const discountAmount = round3(grossHt * line.remisePercent / 100);
+    const netHt = round3(grossHt - discountAmount);
     const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
+    // Margin is based on the net unit price (after discount)
+    const netUnitPriceHt = round3(puHt * (1 - line.remisePercent / 100));
+    const margeAmount = round3(netUnitPriceHt - line.purchasePriceHt);
+    const margePercent = Math.round(((netUnitPriceHt - line.purchasePriceHt) / line.purchasePriceHt) * 10000) / 100;
     return { ...line, puHt, margePercent, margeAmount, netHt, netTtc };
   }
 

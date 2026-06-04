@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Trash2 } from 'lucide-react';
+import { Check, Plus, Trash2, XCircle } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -18,9 +19,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { stockiniApi } from '@/lib/stockini/api';
-import { dateTime, money } from '@/lib/stockini/format';
+import { dateTime, isPurchaseOrder, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
-import type { CaisseMovement, CaisseMovementType, Purchase } from '@/lib/stockini/types';
+import type { CaisseMovement, CaisseMovementType, ExpenseStatus, Purchase, TreasuryAccount } from '@/lib/stockini/types';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { ClearHistoryModal } from './shared/ClearHistoryModal';
 
@@ -57,20 +58,45 @@ function PaymentMethodLabel({ method }: { method: string }) {
 const CAISSE_MOVEMENT_LABELS: Record<CaisseMovementType, string> = {
   ENCAISSEMENT_VENTE: 'Encaissement vente',
   DECAISSEMENT_ACHAT: 'Paiement fournisseur',
+  DEPENSE_GENERALE: 'Dépense générale',
   DEPOT_MANUEL: 'Dépôt manuel',
   RETRAIT_MANUEL: 'Retrait manuel',
   ANNULATION_VENTE: 'Annulation vente',
   ANNULATION_ACHAT: 'Annulation achat',
+  ANNULATION_DEPENSE: 'Annulation dépense',
+  CASH_RESET: 'Remise à zéro',
 };
 
 const CAISSE_MOVEMENT_COLORS: Record<CaisseMovementType, string> = {
   ENCAISSEMENT_VENTE: 'text-emerald-600',
   DECAISSEMENT_ACHAT: 'text-red-600',
+  DEPENSE_GENERALE: 'text-red-600',
   DEPOT_MANUEL: 'text-emerald-600',
   RETRAIT_MANUEL: 'text-red-600',
   ANNULATION_VENTE: 'text-amber-600',
   ANNULATION_ACHAT: 'text-amber-600',
+  ANNULATION_DEPENSE: 'text-emerald-600',
+  CASH_RESET: 'text-amber-600',
 };
+
+const PAYMENT_SOURCE_LABELS: Record<TreasuryAccount, string> = {
+  PHYSICAL_CASH: 'Caisse physique',
+  BANK_TREASURY: 'Banque / trésorerie',
+};
+
+const EXPENSE_STATUS_LABELS: Record<ExpenseStatus, string> = {
+  ACTIVE: 'Active',
+  CANCELLED: 'Annulée',
+};
+
+const FALLBACK_EXPENSE_CATEGORIES = [
+  { value: 'Loyer', label: 'Loyer' },
+  { value: 'Transport', label: 'Transport' },
+  { value: 'Fournitures', label: 'Fournitures' },
+  { value: 'Maintenance', label: 'Maintenance' },
+  { value: 'Charges', label: 'Charges' },
+  { value: 'Autre', label: 'Autre' },
+];
 
 const FALLBACK_PAYMENT_METHODS = [
   { value: 'CASH', label: 'Espèces' },
@@ -89,20 +115,53 @@ function usePaymentMethodOptions() {
   return opts.length > 0 ? opts : FALLBACK_PAYMENT_METHODS;
 }
 
+function useExpenseCategoryOptions() {
+  const query = useQuery({
+    queryKey: ['stockini-dropdown-options', 'expense_categories'],
+    queryFn: () => stockiniApi.dropdownOptionsByCategory('expense_categories'),
+  });
+  const opts = (query.data ?? []).filter((o) => o.active).sort((a, b) => a.sortOrder - b.sortOrder).map((o) => ({ value: o.value, label: o.label }));
+  return opts.length > 0 ? opts : FALLBACK_EXPENSE_CATEGORIES;
+}
+
 export function DepensesPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const canClearHistory = can('finance.history.clear');
-  const [activeTab, setActiveTab] = useState<'invoices' | 'history' | 'caisse'>('invoices');
+  const canCreateExpense = can('expenses.create');
+  const canCancelExpense = can('expenses.cancel');
+  const [activeTab, setActiveTab] = useState<'general' | 'invoices' | 'history' | 'caisse'>('general');
   const [payTarget, setPayTarget] = useState<Purchase | null>(null);
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [cancelExpenseId, setCancelExpenseId] = useState<string | null>(null);
   const [showClearSupplierModal, setShowClearSupplierModal] = useState(false);
   const [showClearCaisseModal, setShowClearCaisseModal] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', method: 'CASH', note: '' });
+  const [expenseForm, setExpenseForm] = useState({
+    amount: '',
+    paymentSource: 'PHYSICAL_CASH' as TreasuryAccount,
+    category: '',
+    date: new Date().toISOString().slice(0, 10),
+    description: '',
+    supplierId: '',
+    purchaseId: '',
+    attachmentUrl: '',
+  });
+  const [expenseFilters, setExpenseFilters] = useState({
+    search: '',
+    category: '',
+    paymentSource: '' as '' | TreasuryAccount,
+    supplierId: '',
+    dateFrom: '',
+    dateTo: '',
+    status: '' as '' | ExpenseStatus,
+  });
   const [caisseTypeFilter, setCaisseTypeFilter] = useState<CaisseMovementType | ''>('');
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceSupplierFilter, setInvoiceSupplierFilter] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'' | 'UNPAID' | 'PARTIAL'>('');
   const paymentMethodOptions = usePaymentMethodOptions();
+  const expenseCategoryOptions = useExpenseCategoryOptions();
 
   const suppliersQuery = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
 
@@ -120,17 +179,43 @@ export function DepensesPage() {
     queryFn: () => stockiniApi.payments({ page: 1, limit: 100, type: 'SUPPLIER_PAYMENT' }),
   });
   const balanceQuery = useQuery({ queryKey: ['caisse-balance'], queryFn: stockiniApi.caisseBalance });
+  const expensesQuery = useQuery({
+    queryKey: ['stockini-expenses', expenseFilters],
+    queryFn: () =>
+      stockiniApi.expenses({
+        page: 1,
+        limit: 100,
+        search: expenseFilters.search || undefined,
+        category: expenseFilters.category || undefined,
+        paymentSource: expenseFilters.paymentSource || undefined,
+        supplierId: expenseFilters.supplierId || undefined,
+        dateFrom: expenseFilters.dateFrom || undefined,
+        dateTo: expenseFilters.dateTo || undefined,
+        status: expenseFilters.status || undefined,
+      }),
+  });
+  const purchaseOptionsQuery = useQuery({
+    queryKey: ['stockini-purchases-options', showExpenseModal],
+    queryFn: () => stockiniApi.purchases({ page: 1, limit: 100 }),
+    enabled: showExpenseModal,
+  });
   const caisseHistoriqueQuery = useQuery({
     queryKey: ['caisse-historique', caisseTypeFilter],
     queryFn: () => stockiniApi.caisseHistorique(caisseTypeFilter || undefined),
   });
 
-  // Le backend ne renvoie déjà que les factures avec reste à payer > 0 (hors annulées).
-  const unpaidPurchases = Array.isArray(purchasesQuery.data?.data) ? purchasesQuery.data.data : [];
-  const totalRemaining = Number(purchasesQuery.data?.totalRemaining ?? 0);
+  // Défense frontend : un bon de commande ne doit jamais être compté comme dette fournisseur.
+  const unpaidPurchases = (Array.isArray(purchasesQuery.data?.data) ? purchasesQuery.data.data : [])
+    .filter((purchase) => !isPurchaseOrder(purchase.documentType));
+  const totalRemaining = unpaidPurchases.reduce(
+    (total, purchase) => total + Number(purchase.remainingAmount ?? 0),
+    0,
+  );
   const suppliers = suppliersQuery.data ?? [];
   const paymentsData = paymentsQuery.data?.data ?? [];
   const supplierPayments = paymentsData.filter((p) => !p.deletedAt);
+  const expenses = expensesQuery.data?.data ?? [];
+  const purchaseOptions = purchaseOptionsQuery.data?.data ?? [];
 
   const payMutation = useMutation({
     mutationFn: () => stockiniApi.payPurchase(payTarget!.id, { amount: Number(payForm.amount), method: payForm.method, note: payForm.note || undefined }),
@@ -148,6 +233,56 @@ export function DepensesPage() {
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg ?? 'Erreur lors de l\'enregistrement du paiement');
+    },
+  });
+
+  const createExpenseMutation = useMutation({
+    mutationFn: () =>
+      stockiniApi.createExpense({
+        amount: Number(expenseForm.amount),
+        paymentSource: expenseForm.paymentSource,
+        category: expenseForm.category,
+        date: expenseForm.date,
+        description: expenseForm.description,
+        supplierId: expenseForm.supplierId || undefined,
+        purchaseId: expenseForm.purchaseId || undefined,
+        attachmentUrl: expenseForm.attachmentUrl || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
+      setShowExpenseModal(false);
+      setExpenseForm({
+        amount: '',
+        paymentSource: 'PHYSICAL_CASH',
+        category: '',
+        date: new Date().toISOString().slice(0, 10),
+        description: '',
+        supplierId: '',
+        purchaseId: '',
+        attachmentUrl: '',
+      });
+      toast.success('Dépense créée avec succès');
+    },
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors de la création de la dépense');
+    },
+  });
+
+  const cancelExpenseMutation = useMutation({
+    mutationFn: (id: string) => stockiniApi.cancelExpense(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
+      setCancelExpenseId(null);
+      toast.success('Dépense annulée');
+    },
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur lors de l\'annulation de la dépense');
     },
   });
 
@@ -174,12 +309,20 @@ export function DepensesPage() {
   const remaining = payTarget ? Number(payTarget.remainingAmount) : 0;
   const amountNum = Number(payForm.amount);
   const amountValid = amountNum > 0 && amountNum <= remaining + 0.001;
-  const solde = balanceQuery.data?.solde ?? 0;
+  const expenseAmount = Number(expenseForm.amount);
+  const expenseValid =
+    expenseAmount > 0 &&
+    !!expenseForm.category &&
+    !!expenseForm.date &&
+    expenseForm.description.trim().length > 0;
+  const soldeCaisse = Number(balanceQuery.data?.soldeCaisse ?? balanceQuery.data?.solde ?? 0);
+  const soldeBanque = Number(balanceQuery.data?.soldeBanque ?? 0);
+  const soldeGlobal = Number(balanceQuery.data?.soldeGlobal ?? soldeCaisse + soldeBanque);
 
   const caisseMovementData = (caisseHistoriqueQuery.data ?? []) as CaisseMovement[];
 
   const caisseIsPositive = (type: CaisseMovementType) =>
-    type === 'ENCAISSEMENT_VENTE' || type === 'DEPOT_MANUEL' || type === 'ANNULATION_ACHAT';
+    type === 'ENCAISSEMENT_VENTE' || type === 'DEPOT_MANUEL' || type === 'ANNULATION_ACHAT' || type === 'ANNULATION_DEPENSE';
 
   return (
     <>
@@ -187,31 +330,123 @@ export function DepensesPage() {
         title="Dépenses fournisseurs"
         subtitle="Gestion des paiements fournisseurs, suivi des dettes et caisse."
         actions={
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg border border-border bg-white px-4 py-2 text-sm">
-              <span className="text-text-muted">Solde caisse : </span>
-              <span className={`font-mono font-bold ${solde >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                {money(solde)}
-              </span>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              ['Caisse physique', soldeCaisse],
+              ['Banque / trésorerie', soldeBanque],
+              ['Total disponible', soldeGlobal],
+            ].map(([label, value]) => (
+              <div key={label as string} className="rounded-lg border border-border bg-white px-3 py-2 text-sm">
+                <span className="text-text-muted">{label as string} : </span>
+                <span className={`font-mono font-bold ${Number(value) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {money(value)}
+                </span>
+              </div>
+            ))}
+            {canCreateExpense && (
+              <Button type="button" size="sm" onClick={() => setShowExpenseModal(true)}>
+                <Plus size={15} /> Nouvelle dépense
+              </Button>
+            )}
           </div>
         }
       />
 
       <div className="mb-4 flex gap-0 border-b border-border">
-        {(['invoices', 'history', 'caisse'] as const).map((tab) => (
+        {(['general', 'invoices', 'history', 'caisse'] as const).map((tab) => (
           <button
             key={tab}
             type="button"
             className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text-primary'}`}
             onClick={() => setActiveTab(tab)}
           >
+            {tab === 'general' && 'Dépenses générales'}
             {tab === 'invoices' && <>Factures à payer{unpaidPurchases.length > 0 && <span className="ml-2 rounded-full bg-red-100 px-1.5 py-0.5 text-xs font-bold text-red-700">{unpaidPurchases.length}</span>}</>}
             {tab === 'history' && 'Paiements fournisseurs'}
             {tab === 'caisse' && 'Historique caisse'}
           </button>
         ))}
       </div>
+
+      {activeTab === 'general' && (
+        <Card className="shadow-card">
+          <CardContent className="p-0">
+            <div className="grid gap-2 border-b border-border px-4 py-3 md:grid-cols-3 lg:grid-cols-6">
+              <Input
+                type="search"
+                placeholder="Rechercher..."
+                value={expenseFilters.search}
+                onChange={(e) => setExpenseFilters((f) => ({ ...f, search: e.target.value }))}
+                className="h-9"
+              />
+              <select value={expenseFilters.category} onChange={(e) => setExpenseFilters((f) => ({ ...f, category: e.target.value }))} className="app-select h-9 text-sm">
+                <option value="">Toutes catégories</option>
+                {expenseCategoryOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+              <select value={expenseFilters.paymentSource} onChange={(e) => setExpenseFilters((f) => ({ ...f, paymentSource: e.target.value as '' | TreasuryAccount }))} className="app-select h-9 text-sm">
+                <option value="">Toutes sources</option>
+                <option value="PHYSICAL_CASH">Caisse physique</option>
+                <option value="BANK_TREASURY">Banque / trésorerie</option>
+              </select>
+              <select value={expenseFilters.supplierId} onChange={(e) => setExpenseFilters((f) => ({ ...f, supplierId: e.target.value }))} className="app-select h-9 text-sm">
+                <option value="">Tous fournisseurs</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <select value={expenseFilters.status} onChange={(e) => setExpenseFilters((f) => ({ ...f, status: e.target.value as '' | ExpenseStatus }))} className="app-select h-9 text-sm">
+                <option value="">Tous statuts</option>
+                <option value="ACTIVE">Active</option>
+                <option value="CANCELLED">Annulée</option>
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <Input type="date" value={expenseFilters.dateFrom} onChange={(e) => setExpenseFilters((f) => ({ ...f, dateFrom: e.target.value }))} className="h-9" />
+                <Input type="date" value={expenseFilters.dateTo} onChange={(e) => setExpenseFilters((f) => ({ ...f, dateTo: e.target.value }))} className="h-9" />
+              </div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Catégorie</TableHead>
+                  <TableHead>Fournisseur</TableHead>
+                  <TableHead className="text-right">Montant</TableHead>
+                  <TableHead>Source paiement</TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead>Utilisateur</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <StateRows loading={expensesQuery.isLoading} error={expensesQuery.error} empty={expenses.length === 0} colSpan={8} />
+                {expenses.map((expense) => (
+                  <TableRow key={expense.id}>
+                    <TableCell className="text-text-secondary">{dateTime(expense.expenseDate)}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{expense.category}</div>
+                      <div className="max-w-[260px] truncate text-xs text-text-muted">{expense.description}</div>
+                    </TableCell>
+                    <TableCell>{expense.supplier?.name ?? '-'}</TableCell>
+                    <TableCell className="text-right font-mono font-semibold text-red-600">{money(expense.amount)}</TableCell>
+                    <TableCell>{PAYMENT_SOURCE_LABELS[expense.paymentSource]}</TableCell>
+                    <TableCell>
+                      <Badge className={expense.status === 'ACTIVE' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}>
+                        {EXPENSE_STATUS_LABELS[expense.status]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-text-secondary">{expense.createdBy?.fullName ?? '-'}</TableCell>
+                    <TableCell className="text-right">
+                      {canCancelExpense && expense.status === 'ACTIVE' ? (
+                        <Button type="button" variant="outline" size="sm" onClick={() => setCancelExpenseId(expense.id)}>
+                          <XCircle size={14} /> Annuler
+                        </Button>
+                      ) : '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {activeTab === 'invoices' && (
         <Card className="shadow-card">
@@ -275,9 +510,13 @@ export function DepensesPage() {
                     <TableCell className="text-right font-mono font-semibold text-red-600">{money(purchase.remainingAmount)}</TableCell>
                     <TableCell><PaymentStatusBadge status={purchase.paymentStatus} /></TableCell>
                     <TableCell className="text-right">
-                      <Button type="button" size="sm" onClick={() => { setPayTarget(purchase); setPayForm({ amount: Number(purchase.remainingAmount).toFixed(3), method: 'CASH', note: '' }); }}>
-                        Payer
-                      </Button>
+                      {!isPurchaseOrder(purchase.documentType) ? (
+                        <Button type="button" size="sm" onClick={() => { setPayTarget(purchase); setPayForm({ amount: Number(purchase.remainingAmount).toFixed(3), method: 'CASH', note: '' }); }}>
+                          Payer
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-text-muted italic">Bon de commande</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -369,6 +608,7 @@ export function DepensesPage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Motif</TableHead>
                   <TableHead>Référence</TableHead>
                   <TableHead className="text-right">Montant</TableHead>
@@ -378,7 +618,7 @@ export function DepensesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <StateRows loading={caisseHistoriqueQuery.isLoading} error={caisseHistoriqueQuery.error} empty={caisseMovementData.length === 0} colSpan={8} />
+                <StateRows loading={caisseHistoriqueQuery.isLoading} error={caisseHistoriqueQuery.error} empty={caisseMovementData.length === 0} colSpan={9} />
                 {caisseMovementData.map((mov) => {
                   const isPos = caisseIsPositive(mov.type);
                   return (
@@ -389,6 +629,7 @@ export function DepensesPage() {
                           {CAISSE_MOVEMENT_LABELS[mov.type]}
                         </Badge>
                       </TableCell>
+                      <TableCell>{mov.treasuryAccount ? PAYMENT_SOURCE_LABELS[mov.treasuryAccount] : '-'}</TableCell>
                       <TableCell className="text-text-secondary">{mov.motif ?? '-'}</TableCell>
                       <TableCell className="font-mono text-text-secondary">{mov.referenceDoc ?? '-'}</TableCell>
                       <TableCell className={`text-right font-mono font-semibold ${CAISSE_MOVEMENT_COLORS[mov.type]}`}>
@@ -424,6 +665,96 @@ export function DepensesPage() {
         isPending={clearCaisseMutation.isPending}
         moduleName="Historique caisse"
       />
+
+      {/* Modal dépense générale */}
+      <SlideOver
+        title="Nouvelle dépense"
+        subtitle="Dépense générale hors paiement fournisseur"
+        open={showExpenseModal}
+        onClose={() => setShowExpenseModal(false)}
+        width={520}
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowExpenseModal(false)}>Annuler</Button>
+            <Button type="submit" form="general-expense-form" size="sm" disabled={createExpenseMutation.isPending || !expenseValid}>
+              <Check size={14} />{createExpenseMutation.isPending ? 'Création...' : 'Créer la dépense'}
+            </Button>
+          </>
+        }
+      >
+        <form id="general-expense-form" onSubmit={(e) => { e.preventDefault(); if (expenseValid) createExpenseMutation.mutate(); }} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="expense-amount">Montant *</Label>
+              <Input id="expense-amount" type="number" min="0.001" step="0.001" value={expenseForm.amount} onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="expense-date">Date *</Label>
+              <Input id="expense-date" type="date" value={expenseForm.date} onChange={(e) => setExpenseForm((f) => ({ ...f, date: e.target.value }))} required />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="expense-source">Type de paiement *</Label>
+            <select id="expense-source" value={expenseForm.paymentSource} onChange={(e) => setExpenseForm((f) => ({ ...f, paymentSource: e.target.value as TreasuryAccount }))} className="app-select" required>
+              <option value="PHYSICAL_CASH">Caisse physique</option>
+              <option value="BANK_TREASURY">Banque / trésorerie</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="expense-category">Catégorie dépense *</Label>
+            <select id="expense-category" value={expenseForm.category} onChange={(e) => setExpenseForm((f) => ({ ...f, category: e.target.value }))} className="app-select" required>
+              <option value="">Sélectionner une catégorie</option>
+              {expenseCategoryOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="expense-description">Description / note *</Label>
+            <Textarea id="expense-description" value={expenseForm.description} onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))} required rows={3} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="expense-supplier">Fournisseur</Label>
+              <select id="expense-supplier" value={expenseForm.supplierId} onChange={(e) => setExpenseForm((f) => ({ ...f, supplierId: e.target.value, purchaseId: '' }))} className="app-select">
+                <option value="">Aucun</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="expense-purchase">Document achat lié</Label>
+              <select id="expense-purchase" value={expenseForm.purchaseId} onChange={(e) => setExpenseForm((f) => ({ ...f, purchaseId: e.target.value }))} className="app-select">
+                <option value="">Aucun</option>
+                {purchaseOptions
+                  .filter((p) => !expenseForm.supplierId || p.supplier?.id === expenseForm.supplierId)
+                  .map((p) => <option key={p.id} value={p.id}>{p.orderNumber}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="expense-attachment">Pièce jointe / justificatif</Label>
+            <Input id="expense-attachment" type="text" value={expenseForm.attachmentUrl} onChange={(e) => setExpenseForm((f) => ({ ...f, attachmentUrl: e.target.value }))} placeholder="URL ou référence du justificatif" />
+          </div>
+        </form>
+      </SlideOver>
+
+      <SlideOver
+        title="Annuler la dépense"
+        subtitle="Un mouvement inverse sera créé"
+        open={!!cancelExpenseId}
+        onClose={() => setCancelExpenseId(null)}
+        width={420}
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCancelExpenseId(null)}>Retour</Button>
+            <Button type="button" size="sm" disabled={cancelExpenseMutation.isPending || !cancelExpenseId} onClick={() => cancelExpenseId && cancelExpenseMutation.mutate(cancelExpenseId)}>
+              <XCircle size={14} />{cancelExpenseMutation.isPending ? 'Annulation...' : 'Confirmer'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text-secondary">
+          La dépense sera conservée avec le statut annulé. Le solde de la source de paiement sera régularisé par un mouvement inverse.
+        </p>
+      </SlideOver>
 
       {/* Modal paiement fournisseur */}
       <SlideOver

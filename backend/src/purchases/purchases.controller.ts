@@ -19,6 +19,7 @@ import {
   PayablePurchaseQueryDto,
   PurchasePaginationDto,
   ReceivePurchaseDto,
+  TransformPurchaseDto,
   UpdatePurchaseDto,
 } from './dto/purchase.dto';
 import { PurchasesService } from './purchases.service';
@@ -40,17 +41,35 @@ export class PurchasesController {
     return this.purchasesService.findAll(query);
   }
 
-  /** Factures fournisseurs à payer (reste à payer > 0). Doit précéder la route ':id'. */
+  /** Factures fournisseurs à payer — exclut les BON_COMMANDE. Doit précéder ':id'. */
   @RequirePermissions('purchases.view')
   @Get('payable')
   findPayable(@Query() query: PayablePurchaseQueryDto) {
     return this.purchasesService.findPayable(query);
   }
 
+  /** Rapport d'intégrité : détecte les BC ayant des paiements liés (anomalie). */
+  @RequirePermissions('purchases.view')
+  @Get('integrity-check')
+  integrityCheck() {
+    return this.purchasesService.integrityCheck();
+  }
+
   @RequirePermissions('purchases.view')
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.purchasesService.findOne(id);
+  }
+
+  /** Transforme un BON_COMMANDE en BON_RECEPTION ou FACTURE_FOURNISSEUR. */
+  @RequirePermissions('purchases.update')
+  @Post(':id/transform')
+  transform(
+    @Param('id') id: string,
+    @Body() dto: TransformPurchaseDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.purchasesService.transform(id, dto, user?.id);
   }
 
   @RequirePermissions('purchases.validate_receipt')

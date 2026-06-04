@@ -87,9 +87,11 @@ const IN_TYPES = [
   CaisseMovementType.ENCAISSEMENT_VENTE,
   CaisseMovementType.DEPOT_MANUEL,
   CaisseMovementType.ANNULATION_ACHAT,
+  CaisseMovementType.ANNULATION_DEPENSE,
 ];
 const OUT_TYPES = [
   CaisseMovementType.DECAISSEMENT_ACHAT,
+  CaisseMovementType.DEPENSE_GENERALE,
   CaisseMovementType.RETRAIT_MANUEL,
   CaisseMovementType.ANNULATION_VENTE,
 ];
@@ -348,7 +350,7 @@ export class CaisseService {
       direction:
         m.type === CaisseMovementType.CASH_RESET
           ? Number(m.ancienSolde) < 0 ? 'IN' : 'OUT'
-          : (['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL', 'ANNULATION_ACHAT'] as string[]).includes(m.type)
+          : (['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL', 'ANNULATION_ACHAT', 'ANNULATION_DEPENSE'] as string[]).includes(m.type)
             ? 'IN'
             : 'OUT',
       reference: m.referenceDoc ?? null,
@@ -587,19 +589,22 @@ export class CaisseService {
         },
       });
 
-      await this.auditLogs.create({
-        userId,
-        action: 'cash.reset',
+      await this.auditLogs.audit({
+        action: 'caisse.reset',
         entity: 'CaisseMovement',
         entityId: movement.id,
+        userId,
+        oldValue: { solde: currentBalance },
+        newValue: { solde: nouveauSolde },
         metadata: {
           account: account ?? TreasuryAccount.PHYSICAL_CASH,
           ancienSolde: currentBalance,
           nouveauSolde: 0,
           motif,
           reference,
+          cashMovementId: movement.id,
         },
-      });
+      }, tx);
 
       return { movement, reference, ancienSolde: currentBalance, nouveauSolde: 0, account: account ?? TreasuryAccount.PHYSICAL_CASH };
     });
@@ -634,6 +639,19 @@ export class CaisseService {
         userId,
         count,
         filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, type: dto.type, account: dto.account } as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.auditLogs.audit({
+      action: 'caisse.history_cleared',
+      entity: 'CaisseMovement',
+      userId,
+      metadata: {
+        count,
+        dateFrom: dto.dateFrom ?? null,
+        dateTo: dto.dateTo ?? null,
+        type: dto.type ?? null,
+        account: dto.account ?? null,
       },
     });
 
@@ -697,6 +715,7 @@ export class CaisseService {
       montant: number;
       motif?: string;
       referenceDoc?: string;
+      expenseId?: string;
       userId?: string;
       paymentMethod?: string | null;
       treasuryAccount?: TreasuryAccount;
@@ -742,7 +761,7 @@ export class CaisseService {
       await client.caisseConfig.create({ data: updateData });
     }
 
-    return client.caisseMovement.create({
+    const movement = await client.caisseMovement.create({
       data: {
         type: input.type,
         treasuryAccount: account,
@@ -751,8 +770,41 @@ export class CaisseService {
         nouveauSolde,
         motif: input.motif,
         referenceDoc: input.referenceDoc,
+        expenseId: input.expenseId,
         userId: input.userId,
       },
     });
+
+    const actionMap: Partial<Record<CaisseMovementType, string>> = {
+      [CaisseMovementType.ENCAISSEMENT_VENTE]: 'caisse.encaissement_vente',
+      [CaisseMovementType.DECAISSEMENT_ACHAT]: 'caisse.decaissement_achat',
+      [CaisseMovementType.DEPENSE_GENERALE]: 'caisse.depense_generale',
+      [CaisseMovementType.DEPOT_MANUEL]: 'caisse.depot',
+      [CaisseMovementType.RETRAIT_MANUEL]: 'caisse.retrait',
+      [CaisseMovementType.ANNULATION_VENTE]: 'caisse.annulation_vente',
+      [CaisseMovementType.ANNULATION_ACHAT]: 'caisse.annulation_achat',
+      [CaisseMovementType.ANNULATION_DEPENSE]: 'caisse.annulation_depense',
+      [CaisseMovementType.CASH_RESET]: 'caisse.reset',
+    };
+
+    await this.auditLogs.audit({
+      action: actionMap[input.type] ?? `caisse.${input.type.toLowerCase()}`,
+      entity: 'CaisseMovement',
+      entityId: movement.id,
+      userId: input.userId ?? null,
+      oldValue: { solde: ancienSolde },
+      newValue: { solde: nouveauSolde },
+      metadata: {
+        cashMovementId: movement.id,
+        type: input.type,
+        account,
+        montant: Math.abs(input.montant),
+        referenceDoc: input.referenceDoc ?? null,
+        expenseId: input.expenseId ?? null,
+        motif: input.motif ?? null,
+      },
+    }, client as Prisma.TransactionClient);
+
+    return movement;
   }
 }

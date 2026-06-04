@@ -5,8 +5,10 @@ import {
   PaymentStatus,
   PaymentType,
   Prisma,
+  PurchaseDocumentType,
   SaleStatus,
 } from '@prisma/client';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CaisseService } from '../caisse/caisse.service';
 import { CustomersService } from '../customers/customers.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +26,7 @@ export class PaymentsService {
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
     private readonly customersService: CustomersService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(query?: PaymentQueryDto) {
@@ -173,6 +176,33 @@ export class PaymentsService {
         });
       }
 
+      await this.auditLogs.audit({
+        action: 'payment.deleted',
+        entity: 'Payment',
+        entityId: payment.id,
+        userId,
+        oldValue: {
+          id: payment.id,
+          reference: payment.reference,
+          amount: Number(payment.amount),
+          method: payment.method,
+          type: payment.type,
+          deletedAt: null,
+        },
+        newValue: { deletedAt: new Date().toISOString(), deletedBy: userId ?? null },
+        metadata: {
+          paymentId: payment.id,
+          reference: payment.reference,
+          amount: Number(payment.amount),
+          method: payment.method,
+          type: payment.type,
+          saleId: payment.saleId ?? null,
+          invoiceNumber: payment.sale?.invoiceNumber ?? null,
+          purchaseId: payment.purchaseId ?? null,
+          orderNumber: payment.purchase?.orderNumber ?? null,
+        },
+      }, tx);
+
       this.logger.log(`Payment ${id} soft-deleted by ${userId ?? 'unknown'}`);
       return { id, customerId: payment.customerId };
     });
@@ -262,6 +292,29 @@ export class PaymentsService {
         paymentMethod: dto.method as string,
       });
 
+      await this.auditLogs.audit({
+        action: 'payment.sale_payment',
+        entity: 'Payment',
+        entityId: payment.id,
+        userId,
+        newValue: {
+          id: payment.id,
+          reference: payRef,
+          amount: dto.amount,
+          method: dto.method,
+          type: PaymentType.CUSTOMER_PAYMENT,
+        },
+        metadata: {
+          paymentId: payment.id,
+          reference: payRef,
+          amount: dto.amount,
+          method: dto.method,
+          saleId,
+          invoiceNumber: payment.sale?.invoiceNumber ?? null,
+          customerId: payment.customerId ?? null,
+        },
+      }, tx);
+
       return payment;
     });
 
@@ -285,6 +338,12 @@ export class PaymentsService {
       const purchase = await tx.purchase.findFirstOrThrow({
         where: { id: purchaseId, deletedAt: null },
       });
+
+      if (purchase.documentType === PurchaseDocumentType.BON_COMMANDE) {
+        throw new BadRequestException(
+          'Un bon de commande ne peut pas être payé. Transformez-le en bon de réception ou facture fournisseur.',
+        );
+      }
 
       const remaining = Number(purchase.remainingAmount);
 
@@ -336,6 +395,33 @@ export class PaymentsService {
         userId,
         paymentMethod: dto.method as string,
       });
+
+      await this.auditLogs.audit({
+        action: 'payment.purchase_payment',
+        entity: 'Payment',
+        entityId: payment.id,
+        userId,
+        newValue: {
+          id: payment.id,
+          reference: payRef,
+          amount: dto.amount,
+          method: dto.method,
+          type: PaymentType.SUPPLIER_PAYMENT,
+        },
+        metadata: {
+          paymentId: payment.id,
+          reference: payRef,
+          amount: dto.amount,
+          method: dto.method,
+          purchaseId,
+          orderNumber: payment.purchase?.orderNumber ?? null,
+          supplierId: purchase.supplierId,
+          supplierName: payment.purchase?.supplier?.name ?? null,
+          paidAmount: newPaidAmount,
+          remainingAmount: newRemainingAmount,
+          paymentStatus: newStatus,
+        },
+      }, tx);
 
       return payment;
     });

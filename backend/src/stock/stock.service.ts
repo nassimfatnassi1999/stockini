@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { AlertType, Prisma, StockMovementType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -23,6 +24,7 @@ export class StockService {
     private readonly prisma: PrismaService,
     private readonly references: ReferenceGeneratorService,
     private readonly settings: SettingsService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async entry(dto: StockChangeDto, userId?: string) {
@@ -30,15 +32,36 @@ export class StockService {
       'stock_movement_reasons',
       dto.reason,
     );
-    return this.prisma.$transaction((tx) =>
-      this.applyMovement(tx, {
+    return this.prisma.$transaction(async (tx) => {
+      const movement = await this.applyMovement(tx, {
         productId: dto.productId,
         type: StockMovementType.ENTRY,
         quantity: dto.quantity,
         reason: dto.reason,
         userId,
-      }),
-    );
+      });
+      const product = await tx.product.findUnique({
+        where: { id: dto.productId },
+        select: { reference: true, name: true },
+      });
+      await this.auditLogs.audit({
+        action: 'stock.entry',
+        entity: 'StockMovement',
+        entityId: movement.id,
+        userId,
+        oldValue: { quantity: movement.previousQuantity },
+        newValue: { quantity: movement.newQuantity },
+        metadata: {
+          stockMovementId: movement.id,
+          productId: dto.productId,
+          productReference: product?.reference ?? null,
+          productName: product?.name ?? null,
+          quantity: dto.quantity,
+          reason: dto.reason,
+        },
+      }, tx);
+      return movement;
+    });
   }
 
   async exit(dto: StockChangeDto, userId?: string) {
@@ -46,15 +69,36 @@ export class StockService {
       'stock_movement_reasons',
       dto.reason,
     );
-    return this.prisma.$transaction((tx) =>
-      this.applyMovement(tx, {
+    return this.prisma.$transaction(async (tx) => {
+      const movement = await this.applyMovement(tx, {
         productId: dto.productId,
         type: StockMovementType.EXIT,
         quantity: dto.quantity,
         reason: dto.reason,
         userId,
-      }),
-    );
+      });
+      const product = await tx.product.findUnique({
+        where: { id: dto.productId },
+        select: { reference: true, name: true },
+      });
+      await this.auditLogs.audit({
+        action: 'stock.exit',
+        entity: 'StockMovement',
+        entityId: movement.id,
+        userId,
+        oldValue: { quantity: movement.previousQuantity },
+        newValue: { quantity: movement.newQuantity },
+        metadata: {
+          stockMovementId: movement.id,
+          productId: dto.productId,
+          productReference: product?.reference ?? null,
+          productName: product?.name ?? null,
+          quantity: dto.quantity,
+          reason: dto.reason,
+        },
+      }, tx);
+      return movement;
+    });
   }
 
   async adjustment(dto: StockAdjustmentDto, userId?: string) {
@@ -89,6 +133,26 @@ export class StockService {
         data: { quantity: dto.newQuantity },
       });
       await this.ensureStockAlert(tx, product, dto.newQuantity);
+
+      await this.auditLogs.audit({
+        action: 'stock.adjustment',
+        entity: 'StockMovement',
+        entityId: movement.id,
+        userId,
+        oldValue: { quantity: product.quantity },
+        newValue: { quantity: dto.newQuantity },
+        metadata: {
+          stockMovementId: movement.id,
+          productId: dto.productId,
+          productReference: product.reference,
+          productName: product.name,
+          previousQuantity: product.quantity,
+          newQuantity: dto.newQuantity,
+          delta,
+          reason: dto.reason,
+        },
+      }, tx);
+
       return movement;
     });
   }
@@ -198,23 +262,20 @@ export class StockService {
         data: { quantity: 0 },
       });
 
-      // Audit log
-      await tx.auditLog.create({
-        data: {
-          userId: adminId,
-          action: 'RESET_INVENTORY',
-          entity: 'Product',
-          entityId: null,
-          metadata: {
-            adminId,
-            date: new Date().toISOString(),
-            action: 'RESET_INVENTORY',
-            previousTotal,
-            newTotal: 0,
-            productsImpacted,
-          },
+      await this.auditLogs.audit({
+        action: 'stock.inventory_reset',
+        entity: 'Product',
+        userId: adminId,
+        oldValue: { totalQuantity: previousTotal },
+        newValue: { totalQuantity: 0 },
+        metadata: {
+          adminId,
+          date: new Date().toISOString(),
+          previousTotal,
+          newTotal: 0,
+          productsImpacted,
         },
-      });
+      }, tx);
 
       return {
         success: true,

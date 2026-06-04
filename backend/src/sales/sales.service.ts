@@ -14,6 +14,7 @@ import {
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CaisseService } from '../caisse/caisse.service';
 import { CustomersService } from '../customers/customers.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -69,6 +70,7 @@ export class SalesService {
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
     private readonly customersService: CustomersService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async getNextReference(
@@ -193,14 +195,15 @@ export class SalesService {
         const unitPrice = item.unitPrice ?? this.salePriceHt(product);
         const discountPercent = item.discountPercent ?? 0;
 
-        // Guard: si unitPrice est explicitement fourni et diffère du prix calculé par défaut,
-        // la permission sales.line.edit_unit_price_ht est requise.
+        // Guard: si unitPrice est explicitement fourni et diffère du PRIX BRUT par défaut
+        // (marge 40 %, avant remise), la permission sales.line.edit_unit_price_ht est requise.
+        // Le frontend envoie toujours le prix brut (auto ou manuel) + discountPercent séparé.
         if (item.unitPrice !== undefined && item.unitPrice !== null) {
           const itemPurchasePriceHt = Number(product.purchasePrice);
           let expectedPuHt: number;
           if (itemPurchasePriceHt > 0) {
-            const margeFinalePourcent = Math.max(DEFAULT_MARGIN_PERCENT - discountPercent, 0);
-            expectedPuHt = this.round3(itemPurchasePriceHt * (1 + margeFinalePourcent / 100));
+            // Gross price = full default margin, discount is applied separately
+            expectedPuHt = this.round3(itemPurchasePriceHt * (1 + DEFAULT_MARGIN_PERCENT / 100));
           } else {
             expectedPuHt = this.salePriceHt(product);
           }
@@ -383,7 +386,7 @@ export class SalesService {
         );
       }
 
-      return tx.sale.findUniqueOrThrow({
+      const finalSale = await tx.sale.findUniqueOrThrow({
         where: { id: sale.id },
         include: {
           items: { include: { product: true } },
@@ -392,6 +395,36 @@ export class SalesService {
           payments: true,
         },
       });
+
+      await this.auditLogs.audit({
+        action: 'sale.created',
+        entity: 'Sale',
+        entityId: finalSale.id,
+        userId: sellerId,
+        userName: user?.email,
+        newValue: {
+          id: finalSale.id,
+          invoiceNumber: finalSale.invoiceNumber,
+          documentType: finalSale.documentType,
+          status: finalSale.status,
+          total: Number(finalSale.total),
+          paidAmount: Number(finalSale.paidAmount),
+          remainingAmount: Number(finalSale.remainingAmount),
+          customerId: finalSale.customerId,
+        },
+        metadata: {
+          invoiceNumber: finalSale.invoiceNumber,
+          documentType: finalSale.documentType,
+          customerId: finalSale.customerId,
+          customerName: finalSale.customer?.name ?? finalSale.counterClientFullName ?? null,
+          total: Number(finalSale.total),
+          paidAmount: Number(finalSale.paidAmount),
+          paymentMethod: dto.paymentMethod ?? null,
+          itemCount: finalSale.items.length,
+        },
+      }, tx);
+
+      return finalSale;
     });
 
     // Recalcule le statut de verrouillage après création (BL/Facture créent une dette)
@@ -474,6 +507,20 @@ export class SalesService {
           userId,
         );
       }
+
+      await this.auditLogs.audit({
+        action: 'sale.validated',
+        entity: 'Sale',
+        entityId: sale.id,
+        userId,
+        userName: user?.email,
+        oldValue: { status: sale.status },
+        newValue: { status: SaleStatus.COMPLETED },
+        metadata: {
+          invoiceNumber: sale.invoiceNumber,
+          documentType: sale.documentType,
+        },
+      }, tx);
 
       return updatedSale;
     });
@@ -668,6 +715,28 @@ export class SalesService {
         );
       }
 
+      await this.auditLogs.audit({
+        action: 'sale.cancelled',
+        entity: 'Sale',
+        entityId: sale.id,
+        userId,
+        userName: user?.email,
+        oldValue: {
+          status: sale.status,
+          paidAmount: Number(sale.paidAmount),
+          remainingAmount: Number(sale.remainingAmount),
+        },
+        newValue: {
+          status: SaleStatus.CANCELLED,
+          paidAmount: 0,
+          remainingAmount: Number(sale.total),
+        },
+        metadata: {
+          invoiceNumber: sale.invoiceNumber,
+          documentType: sale.documentType,
+        },
+      }, tx);
+
       return updatedSale;
     });
   }
@@ -698,10 +767,39 @@ export class SalesService {
     }
     const userId = user?.id;
     this.logger.log(`DELETE /sales/${id} called by ${userId ?? 'unknown'}`);
+
+    const sale = await this.prisma.sale.findFirstOrThrow({
+      where: { id, deletedAt: null },
+      select: { id: true, invoiceNumber: true, documentType: true, status: true, total: true, customerId: true },
+    });
+
     await this.prisma.sale.update({
       where: { id },
       data: { deletedAt: new Date(), deletedBy: userId ?? null },
     });
+
+    await this.auditLogs.audit({
+      action: 'sale.deleted',
+      entity: 'Sale',
+      entityId: sale.id,
+      userId,
+      userName: user?.email,
+      oldValue: {
+        id: sale.id,
+        invoiceNumber: sale.invoiceNumber,
+        documentType: sale.documentType,
+        status: sale.status,
+        total: Number(sale.total),
+        customerId: sale.customerId,
+        deletedAt: null,
+      },
+      newValue: { deletedAt: new Date().toISOString(), deletedBy: userId ?? null },
+      metadata: {
+        invoiceNumber: sale.invoiceNumber,
+        documentType: sale.documentType,
+      },
+    });
+
     this.logger.log(`Sale ${id} moved to trash by ${userId ?? 'unknown'}`);
     return { id };
   }
@@ -860,7 +958,7 @@ export class SalesService {
         );
       }
 
-      return tx.sale.findUniqueOrThrow({
+      const finalNew = await tx.sale.findUniqueOrThrow({
         where: { id: newSale.id },
         include: {
           items: { include: { product: true } },
@@ -869,6 +967,34 @@ export class SalesService {
           payments: true,
         },
       });
+
+      await this.auditLogs.audit({
+        action: 'sale.transformed',
+        entity: 'Sale',
+        entityId: finalNew.id,
+        userId,
+        userName: user?.email,
+        oldValue: {
+          id: source.id,
+          invoiceNumber: source.invoiceNumber,
+          documentType: source.documentType,
+        },
+        newValue: {
+          id: finalNew.id,
+          invoiceNumber: finalNew.invoiceNumber,
+          documentType: finalNew.documentType,
+        },
+        metadata: {
+          sourceRef: source.invoiceNumber,
+          sourceType: source.documentType,
+          sourceId: source.id,
+          targetRef: finalNew.invoiceNumber,
+          targetType: finalNew.documentType,
+          targetId: finalNew.id,
+        },
+      }, tx);
+
+      return finalNew;
     });
 
     // Recalcule le statut de verrouillage si transformation vers BL/Facture

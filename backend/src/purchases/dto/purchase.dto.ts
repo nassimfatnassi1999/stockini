@@ -14,6 +14,8 @@ import {
 } from 'class-validator';
 import { PaymentStatus, PurchaseStatus } from '@prisma/client';
 
+export type PurchaseTransformTarget = 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR';
+
 export class CreatePurchaseItemDto {
   @IsString()
   productId!: string;
@@ -66,6 +68,15 @@ export class ReceivePurchaseDto {
   @ValidateNested({ each: true })
   @Type(() => ReceivePurchaseItemDto)
   items!: ReceivePurchaseItemDto[];
+}
+
+/**
+ * Transforme un Bon de commande en Bon de réception ou Facture fournisseur.
+ * C'est à partir de ce moment que la dette fournisseur est créée et le document payable.
+ */
+export class TransformPurchaseDto {
+  @IsIn(['BON_RECEPTION', 'FACTURE_FOURNISSEUR'])
+  targetType!: PurchaseTransformTarget;
 }
 
 /** Only status changes via PATCH. Financial state managed through /payments/purchases/:id/pay. */

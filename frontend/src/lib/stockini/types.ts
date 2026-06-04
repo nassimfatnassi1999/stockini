@@ -36,27 +36,40 @@ export interface Product {
 export type CaisseMovementType =
   | "ENCAISSEMENT_VENTE"
   | "DECAISSEMENT_ACHAT"
+  | "DEPENSE_GENERALE"
   | "DEPOT_MANUEL"
   | "RETRAIT_MANUEL"
   | "ANNULATION_VENTE"
-  | "ANNULATION_ACHAT";
+  | "ANNULATION_ACHAT"
+  | "ANNULATION_DEPENSE"
+  | "CASH_RESET";
+
+export type TreasuryAccount = "PHYSICAL_CASH" | "BANK_TREASURY";
+export type ExpenseStatus = "ACTIVE" | "CANCELLED";
 
 export interface CaisseMovement {
   id: Id;
   type: CaisseMovementType;
+  treasuryAccount?: TreasuryAccount;
+  account?: TreasuryAccount;
   montant: number | string;
   ancienSolde: number | string;
   nouveauSolde: number | string;
   motif?: string | null;
   referenceDoc?: string | null;
+  expenseId?: string | null;
   userId?: string | null;
   createdAt: string;
   user?: { id: Id; fullName: string; email: string } | null;
 }
 
 export interface CaisseBalance {
-  solde: number;
+  solde?: number;
+  soldeCaisse: number;
+  soldeBanque: number;
+  soldeGlobal: number;
   allowNegative: boolean;
+  allowNegativeBanque?: boolean;
 }
 
 export interface Customer {
@@ -175,6 +188,8 @@ export interface SaleDetail {
   items: SaleItemDetail[];
 }
 
+export type PurchaseDocumentType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR';
+
 export interface Purchase {
   id: Id;
   orderNumber: string;
@@ -183,6 +198,7 @@ export interface Purchase {
   remainingAmount: number | string;
   paymentStatus: string;
   status: string;
+  documentType: PurchaseDocumentType;
   createdAt: string;
   supplier?: Supplier | null;
   items?: Array<{
@@ -220,6 +236,7 @@ export interface PurchaseDetail {
   remainingAmount: number | string;
   paymentStatus: string;
   status: string;
+  documentType: PurchaseDocumentType;
   createdAt: string;
   supplier?: Supplier | null;
   items: PurchaseItemDetail[];
@@ -239,6 +256,54 @@ export interface Payment {
   purchase?: Purchase | null;
   deletedAt?: string | null;
   deletedBy?: string | null;
+}
+
+export interface Expense {
+  id: Id;
+  reference: string;
+  amount: number | string;
+  paymentSource: TreasuryAccount;
+  category: string;
+  expenseDate: string;
+  description: string;
+  supplierId?: Id | null;
+  purchaseId?: Id | null;
+  attachmentUrl?: string | null;
+  status: ExpenseStatus;
+  createdById?: Id | null;
+  cancelledAt?: string | null;
+  cancelledById?: Id | null;
+  cancelReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  supplier?: Supplier | null;
+  purchase?: Pick<Purchase, "id" | "orderNumber"> | null;
+  createdBy?: { id: Id; fullName: string; email: string } | null;
+}
+
+export interface ExpensesQueryParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  category?: string;
+  paymentSource?: TreasuryAccount;
+  supplierId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: ExpenseStatus;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}
+
+export interface CreateExpensePayload {
+  amount: number;
+  paymentSource: TreasuryAccount;
+  category: string;
+  date: string;
+  description: string;
+  supplierId?: string;
+  purchaseId?: string;
+  attachmentUrl?: string;
 }
 
 export type SalesDocumentType =
@@ -390,8 +455,64 @@ export interface AuditLog {
   action: string;
   entity: string;
   entityId?: string | null;
+  userId?: string | null;
+  userName?: string | null;
+  oldValue?: Record<string, unknown> | null;
+  newValue?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
   createdAt: string;
-  user?: { email: string; fullName: string } | null;
+  archivedAt?: string | null;
+  _source?: 'active' | 'archive';
+  user?: { id: string; email: string; fullName: string } | null;
+}
+
+export interface AuditLogPaginatedResult {
+  data: AuditLog[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface AuditLogQuery {
+  page?: number;
+  limit?: number;
+  entity?: string;
+  action?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  source?: 'active' | 'archive';
+}
+
+export interface AuditLogStats {
+  activeCount: number;
+  archiveCount: number;
+  eligibleCount: number;
+  activeEstimatedBytes: number;
+  archiveEstimatedBytes: number;
+  retentionMonths: number;
+  archiveEnabled: boolean;
+  compressExport: boolean;
+  nextCutoffDate: string;
+  lastArchiveDate: string | null;
+}
+
+export interface AuditRetentionSettings {
+  retentionMonths: number;
+  archiveEnabled: boolean;
+  compressExport: boolean;
+}
+
+export interface ArchiveResult {
+  archivedCount: number;
+  exportedFile: string;
+  exportedSize: number;
+  skipped: boolean;
+  reason?: string;
 }
 
 export interface DropdownOption {

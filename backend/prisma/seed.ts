@@ -102,8 +102,8 @@ async function main() {
         // Paiements
         'payments.view', 'payments.create',
         // Dépenses / Paiements fournisseurs
-        'expenses.view', 'expenses.create', 'expenses.update', 'expenses.pay_supplier',
-        'expenses.export',
+        'expenses.read', 'expenses.view', 'expenses.create', 'expenses.update',
+        'expenses.cancel', 'expenses.pay_supplier', 'expenses.export',
         // Rapports achats
         'reports.view', 'reports.purchases_stats', 'reports.stock_stats', 'reports.export',
         // Documentation

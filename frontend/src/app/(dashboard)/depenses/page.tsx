@@ -5,7 +5,7 @@ import { PermissionGuard } from '@/components/shared/PermissionGuard';
 
 export default function Page() {
   return (
-    <PermissionGuard permission="expenses.view">
+    <PermissionGuard permission="expenses.read">
       <DepensesPage />
     </PermissionGuard>
   );

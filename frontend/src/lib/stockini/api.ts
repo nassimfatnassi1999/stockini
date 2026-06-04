@@ -3,6 +3,11 @@ import { cleanPaginationParams } from "@/lib/pagination";
 import type {
   Alert,
   AuditLog,
+  AuditLogPaginatedResult,
+  AuditLogQuery,
+  AuditLogStats,
+  AuditRetentionSettings,
+  ArchiveResult,
   CaisseBalance,
   CaisseMovement,
   CaisseMovementType,
@@ -16,6 +21,9 @@ import type {
   SalesDocumentType,
   ShareLinkResponse,
   DashboardReport,
+  CreateExpensePayload,
+  Expense,
+  ExpensesQueryParams,
   ReportOverview,
   ReportOverviewQuery,
   PaginatedResponse,
@@ -198,6 +206,8 @@ export const stockiniApi = {
     api.patch<Purchase>(`/purchases/${id}`, data).then((r) => r.data),
   cancelPurchase: (id: string) =>
     api.patch(`/purchases/${id}/cancel`).then((r) => r.data),
+  transformPurchase: (id: string, targetType: 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR') =>
+    api.post<Purchase>(`/purchases/${id}/transform`, { targetType }).then((r) => r.data),
   deletePurchase: (id: string) =>
     api.delete(`/purchases/${id}`).then((r) => r.data),
   payments: (params?: PaymentsQueryParams) =>
@@ -212,6 +222,16 @@ export const stockiniApi = {
     api.patch<Payment>(`/payments/${id}`, data).then((r) => r.data),
   deletePayment: (id: string) =>
     api.delete(`/payments/${id}`).then((r) => r.data),
+  expenses: (params?: ExpensesQueryParams) =>
+    api
+      .get<PaginatedResponse<Expense>>("/expenses", {
+        params: cleanPaginationParams(params),
+      })
+      .then((r) => r.data),
+  createExpense: (data: CreateExpensePayload) =>
+    api.post<Expense>("/expenses", data).then((r) => r.data),
+  cancelExpense: (id: string, reason?: string) =>
+    api.patch<Expense>(`/expenses/${id}/cancel`, { reason }).then((r) => r.data),
   paySale: (
     saleId: string,
     data: { amount: number; method: string; note?: string },
@@ -325,7 +345,22 @@ export const stockiniApi = {
         errors: string[];
       }>("/trash/empty")
       .then((r) => r.data),
-  auditLogs: () => api.get<AuditLog[]>("/audit-logs").then((r) => r.data),
+  auditLogs: (query?: AuditLogQuery) =>
+    api
+      .get<AuditLogPaginatedResult>("/audit-logs", { params: query })
+      .then((r) => r.data),
+  auditLogStats: () =>
+    api.get<AuditLogStats>("/audit-logs/stats").then((r) => r.data),
+  auditRetentionSettings: () =>
+    api.get<AuditRetentionSettings>("/audit-logs/retention-settings").then((r) => r.data),
+  updateRetentionSettings: (dto: Partial<AuditRetentionSettings>) =>
+    api.patch<void>("/audit-logs/retention-settings", dto).then((r) => r.data),
+  triggerAuditArchive: () =>
+    api.post<ArchiveResult>("/audit-logs/archive").then((r) => r.data),
+  listAuditArchives: () =>
+    api.get<string[]>("/audit-logs/archives").then((r) => r.data),
+  getLastAuditArchiveDownload: () =>
+    api.get<{ objectKey: string; url: string } | null>("/audit-logs/archives/download").then((r) => r.data),
   recalculateLastSalePrices: () =>
     api
       .post<{

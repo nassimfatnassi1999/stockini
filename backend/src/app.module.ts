@@ -23,6 +23,7 @@ import { SettingsModule } from './settings/settings.module';
 import { StockModule } from './stock/stock.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { DocumentsModule } from './documents/documents.module';
+import { ExpensesModule } from './expenses/expenses.module';
 import { SystemMonitorModule } from './system-monitor/system-monitor.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
@@ -49,6 +50,7 @@ import { UsersModule } from './users/users.module';
     RbacModule,
     TrashModule,
     DocumentsModule,
+    ExpensesModule,
     AvoirsModule,
     CaisseModule,
     AdminModule,

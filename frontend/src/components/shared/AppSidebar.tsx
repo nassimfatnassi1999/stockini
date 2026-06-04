@@ -73,7 +73,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Pilotage',
     items: [
       { label: 'Rapports',     href: '/rapports',    icon: BarChart3,   permission: 'reports.view' },
-      { label: 'Dépenses',     href: '/depenses',    icon: Receipt,     permission: 'expenses.view' },
+      { label: 'Dépenses',     href: '/depenses',    icon: Receipt,     permission: 'expenses.read' },
       { label: 'Alertes',      href: '/alertes',     icon: Bell,        permission: 'alerts.view' },
       { label: 'Audit Logs',   href: '/audit-logs',  icon: ShieldCheck, permission: 'audit_logs.view' },
     ],

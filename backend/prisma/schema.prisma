@@ -32,10 +32,12 @@ enum StockMovementType {
 enum CaisseMovementType {
   ENCAISSEMENT_VENTE
   DECAISSEMENT_ACHAT
+  DEPENSE_GENERALE
   DEPOT_MANUEL
   RETRAIT_MANUEL
   ANNULATION_VENTE
   ANNULATION_ACHAT
+  ANNULATION_DEPENSE
   CASH_RESET
 }
 
@@ -73,6 +75,12 @@ enum PurchaseStatus {
   PARTIALLY_RECEIVED
   RECEIVED
   CANCELLED
+}
+
+enum PurchaseDocumentType {
+  BON_COMMANDE
+  BON_RECEPTION
+  FACTURE_FOURNISSEUR
 }
 
 enum PaymentStatus {
@@ -129,6 +137,11 @@ enum DocumentStatus {
   DELETED
 }
 
+enum ExpenseStatus {
+  ACTIVE
+  CANCELLED
+}
+
 enum PermissionEffect {
   ALLOW
   DENY
@@ -163,6 +176,7 @@ model User {
   stockMovements        StockMovement[]
   caisseMovements       CaisseMovement[]
   cashTransactions      CashTransaction[]
+  expenses              Expense[]
   sales                 Sale[]                @relation("SellerSales")
   purchases             Purchase[]            @relation("CreatorPurchases")
   auditLogs             AuditLog[]
@@ -296,6 +310,7 @@ model Supplier {
   products      Product[]
   purchases     Purchase[]
   payments      Payment[]
+  expenses      Expense[]
 
   @@index([name])
   @@index([reference])
@@ -422,8 +437,9 @@ model Purchase {
   total           Decimal        @db.Decimal(12, 3)
   paidAmount      Decimal        @default(0) @db.Decimal(12, 3)
   remainingAmount Decimal        @default(0) @db.Decimal(12, 3)
-  paymentStatus   PaymentStatus  @default(UNPAID)
-  status          PurchaseStatus @default(DRAFT)
+  paymentStatus   PaymentStatus        @default(UNPAID)
+  status          PurchaseStatus       @default(DRAFT)
+  documentType    PurchaseDocumentType @default(BON_COMMANDE) @map("document_type")
   createdById     String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
@@ -433,12 +449,14 @@ model Purchase {
   createdBy       User?          @relation("CreatorPurchases", fields: [createdById], references: [id])
   items           PurchaseItem[]
   payments        Payment[]
+  expenses        Expense[]
 
   @@index([supplierId])
   @@index([createdById])
   @@index([createdAt])
   @@index([deletedAt])
   @@index([status, createdAt])
+  @@index([documentType, paymentStatus])
 }
 
 model PurchaseItem {
@@ -488,6 +506,38 @@ model Payment {
   @@index([createdAt])
   @@index([reference])
   @@index([deletedAt])
+}
+
+model Expense {
+  id              String          @id @default(cuid())
+  reference       String          @unique
+  amount          Decimal         @db.Decimal(12, 3)
+  paymentSource   TreasuryAccount
+  category        String
+  expenseDate     DateTime
+  description     String
+  supplierId      String?
+  purchaseId      String?
+  attachmentUrl   String?
+  status          ExpenseStatus   @default(ACTIVE)
+  createdById     String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelReason    String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  supplier        Supplier?       @relation(fields: [supplierId], references: [id])
+  purchase        Purchase?       @relation(fields: [purchaseId], references: [id])
+  createdBy       User?           @relation(fields: [createdById], references: [id])
+  caisseMovements CaisseMovement[]
+
+  @@index([paymentSource])
+  @@index([category])
+  @@index([expenseDate])
+  @@index([supplierId])
+  @@index([purchaseId])
+  @@index([status])
+  @@index([createdById])
 }
 
 model Alert {
@@ -570,17 +620,46 @@ model DocumentEmailLog {
 
 model AuditLog {
   id        String   @id @default(cuid())
-  userId    String?
   action    String
   entity    String
   entityId  String?
+  userId    String?
+  userName  String?
+  oldValue  Json?
+  newValue  Json?
   metadata  Json?
+  ipAddress String?
+  userAgent String?
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([entity])
+  @@index([action])
+  @@index([entityId])
   @@index([createdAt])
+}
+
+model AuditLogArchive {
+  id         String   @id
+  action     String
+  entity     String
+  entityId   String?
+  userId     String?
+  userName   String?
+  oldValue   Json?
+  newValue   Json?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime
+  archivedAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@map("audit_log_archives")
 }
 
 model Setting {
@@ -675,16 +754,19 @@ model CaisseMovement {
   nouveauSolde    Decimal            @db.Decimal(12, 3)
   motif           String?
   referenceDoc    String?
+  expenseId       String?
   userId          String?
   createdAt       DateTime           @default(now())
   clearedAt       DateTime?
   clearedBy       String?
   user            User?              @relation(fields: [userId], references: [id])
+  expense         Expense?           @relation(fields: [expenseId], references: [id])
 
   @@index([type])
   @@index([treasuryAccount])
   @@index([createdAt])
   @@index([userId])
+  @@index([expenseId])
   @@index([type, createdAt])
   @@index([treasuryAccount, createdAt])
 }

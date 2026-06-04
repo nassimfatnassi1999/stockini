@@ -20,6 +20,7 @@ const PAYMENT_STATUS_CLASSES: Record<string, string> = {
 const NON_PAYABLE_TYPES: ReadonlySet<string> = new Set([
   'DEVIS',
   'BON_COMMANDE',
+  'PURCHASE_ORDER',
   'AVOIR',
 ]);
 
@@ -27,6 +28,10 @@ const NEUTRAL_PAYMENT: PaymentDisplay = {
   label: '—',
   className: 'border-gray-200 bg-gray-100 text-gray-500',
 };
+
+export function isPurchaseOrder(documentType: string | null | undefined): boolean {
+  return documentType === 'BON_COMMANDE' || documentType === 'PURCHASE_ORDER';
+}
 
 export function getPaymentDisplay(
   documentType: string | null | undefined,
