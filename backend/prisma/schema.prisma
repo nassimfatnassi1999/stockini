@@ -390,6 +390,7 @@ model SaleItem {
   id              String           @id @default(cuid())
   saleId          String
   productId       String
+  designation     String?
   quantity        Int
   unitPrice       Decimal          @db.Decimal(12, 3)
   discountPercent Decimal          @default(0) @db.Decimal(5, 2)

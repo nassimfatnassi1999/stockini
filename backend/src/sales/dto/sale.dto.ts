@@ -36,6 +36,11 @@ export class CreateSaleItemDto {
   @IsString()
   productId!: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  designation?: string;
+
   @Type(() => Number)
   @IsNumber()
   @Min(1)

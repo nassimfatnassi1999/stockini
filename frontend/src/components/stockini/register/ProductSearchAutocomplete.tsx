@@ -13,6 +13,8 @@ interface ProductPickerFieldProps {
   onSelect: (product: Product) => void;
   placeholder?: string;
   className?: string;
+  /** When true, the text input accepts direct typing (e.g. custom designation). */
+  editable?: boolean;
 }
 
 export function ProductSearchAutocomplete({
@@ -22,20 +24,31 @@ export function ProductSearchAutocomplete({
   onSelect,
   placeholder,
   className,
+  editable = false,
 }: ProductPickerFieldProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <div className="flex w-full items-center">
-      <input
-        type="text"
-        value={value}
-        readOnly
-        onFocus={() => setOpen(true)}
-        onClick={() => setOpen(true)}
-        placeholder={placeholder}
-        className={`${className ?? ''} cursor-pointer rounded-r-none border-r-0`}
-      />
+      {editable ? (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`${className ?? ''} rounded-r-none border-r-0`}
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          readOnly
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          placeholder={placeholder}
+          className={`${className ?? ''} cursor-pointer rounded-r-none border-r-0`}
+        />
+      )}
       <button
         type="button"
         onClick={() => setOpen(true)}

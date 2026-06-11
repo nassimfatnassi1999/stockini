@@ -154,6 +154,7 @@ export interface Sale {
 export interface SaleItemDetail {
   id: Id;
   productId: Id;
+  designation?: string | null;
   quantity: number;
   unitPrice: number | string;
   discountPercent?: number | string;

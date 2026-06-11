@@ -128,7 +128,7 @@ export class DocumentsService {
           representant: (sale as any).seller?.fullName ?? null,
           items: sale.items.map((item) => ({
             reference: item.product?.reference ?? '—',
-            name: item.product?.name ?? '—',
+            name: item.designation ?? item.product?.name ?? '—',
             quantity: item.quantity,
             unitPrice: Number(item.unitPrice),
             discountPercent: Number(item.discountPercent ?? 0),
@@ -884,7 +884,7 @@ export class DocumentsService {
         representant: (sale as any).seller?.fullName ?? null,
         items: sale.items.map((item) => ({
           reference: item.product?.reference ?? '—',
-          name: item.product?.name ?? '—',
+          name: item.designation ?? item.product?.name ?? '—',
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice),
           discountPercent: Number(item.discountPercent ?? 0),

@@ -131,6 +131,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
           onSelect={handleProductSelect}
           placeholder="Désignation…"
           className={TEXT_INPUT}
+          editable
         />
       </td>
 

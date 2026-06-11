@@ -239,6 +239,7 @@ export class SalesService {
 
         return {
           productId: item.productId,
+          designation: item.designation?.trim() || product.name,
           quantity: item.quantity,
           unitPrice,
           tvaRate,
@@ -286,6 +287,7 @@ export class SalesService {
       const items = rawItems.map((item) => {
         return {
           productId: item.productId,
+          designation: item.designation,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           discountPercent: item.discountPercent,
@@ -906,6 +908,7 @@ export class SalesService {
           items: {
             create: source.items.map((item) => ({
               productId: item.productId,
+              designation: item.designation,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
               discountPercent: item.discountPercent,

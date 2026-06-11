@@ -1100,6 +1100,7 @@ export default function VentesPage() {
           paymentMethod: submittedPaidAmount > 0 && method ? method : undefined,
           items: filledLines.map((l) => ({
             productId: l.productId!,
+            designation: l.designation.trim() || undefined,
             quantity: l.quantity,
             unitPrice: round3(l.puHt),
             discountPercent: l.remisePercent,

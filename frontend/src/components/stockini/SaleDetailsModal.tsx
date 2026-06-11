@@ -173,7 +173,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                             {item.product?.reference ?? "—"}
                           </td>
                           <td className="px-3 py-2.5 font-medium text-text-primary">
-                            {item.product?.name ?? "—"}
+                            {item.designation ?? item.product?.name ?? "—"}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {item.quantity}

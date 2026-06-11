@@ -254,7 +254,7 @@ export class AvoirsService {
           resolvedItems.push({
             saleItemId: saleItem.id,
             productId: saleItem.productId,
-            designation: saleItem.product?.name ?? dtoItem.productId,
+            designation: saleItem.designation ?? saleItem.product?.name ?? dtoItem.productId,
             quantiteRetournee: dtoItem.quantiteRetournee,
             prixUnitaireHt: unitPriceHt,
             tva: tvaRate,
