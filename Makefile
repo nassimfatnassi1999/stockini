@@ -157,6 +157,10 @@ stop: env-check ## Arrêter PostgreSQL et MinIO (services Docker de développeme
 db-up: env-check ## Démarrer PostgreSQL
 	@echo -e "$(BLUE)Démarrage PostgreSQL...$(NC)"
 	@$(COMPOSE) up -d $(DB_SERVICE)
+	@if ! $(COMPOSE) port $(DB_SERVICE) 5432 >/dev/null 2>&1; then \
+		echo -e "$(YELLOW)Port PostgreSQL non publié, recréation du conteneur...$(NC)"; \
+		$(COMPOSE) up -d --force-recreate $(DB_SERVICE); \
+	fi
 
 db-down: env-check ## Arrêter PostgreSQL
 	@echo -e "$(YELLOW)Arrêt PostgreSQL...$(NC)"
