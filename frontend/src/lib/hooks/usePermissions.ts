@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
@@ -47,9 +47,20 @@ export function usePermissions() {
   const { data: me } = useMe();
   const queryClient = useQueryClient();
 
-  const permissions: string[] = me?.permissions ?? getCurrentUser()?.permissions ?? [];
-  const role: string = me?.role ?? getCurrentUser()?.role ?? '';
-  const superAdmin = me?.isSuperAdmin ?? isSuperUser(role);
+  const permissions = useMemo<string[]>(
+    () => me?.permissions ?? getCurrentUser()?.permissions ?? [],
+    [me?.permissions]
+  );
+
+  const role = useMemo<string>(
+    () => me?.role ?? getCurrentUser()?.role ?? '',
+    [me?.role]
+  );
+
+  const superAdmin = useMemo<boolean>(
+    () => me?.isSuperAdmin ?? isSuperUser(role),
+    [me?.isSuperAdmin, role]
+  );
 
   const can = useCallback(
     (permission: string): boolean => {

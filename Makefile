@@ -36,7 +36,7 @@ NC := \033[0m
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-backend install-frontend dev stop \
+.PHONY: help install install-backend install-frontend dev preview stop \
 	db-up db-down db-wait db-migrate db-seed db-seed-only db-reset studio \
 	minio-up minio-down minio-wait \
 	logs logs-db logs-minio build clean clean-all \
@@ -50,6 +50,9 @@ help: ## Afficher cette aide
 	@echo -e "$(BLUE)================================================$(NC)"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; printf "$(BOLD)Commandes disponibles:$(NC)\n\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+	@echo -e "$(YELLOW)Recommandation$(NC)"
+	@echo -e "  Utilisez $(BOLD)make preview$(NC) pour tester l'application sans lenteur de compilation Next.js."
 	@echo ""
 	@echo -e "$(YELLOW)URLs locales$(NC)"
 	@echo "  Backend       : http://localhost:$(BACKEND_PORT)/api"
@@ -109,8 +112,8 @@ install-frontend: frontend-env-check ## Installer les dépendances frontend
 	@echo -e "$(BLUE)Installation des dépendances frontend...$(NC)"
 	@cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && npm install
 
-dev: env-check deps-check db-up minio-up db-wait minio-wait db-migrate db-seed ## Lancer backend et frontend en développement
-	@echo -e "$(GREEN)Démarrage Stockini en développement...$(NC)"
+dev: env-check deps-check db-up minio-up db-wait minio-wait db-migrate db-seed ## Lancer backend et frontend en développement (HMR)
+	@echo -e "$(GREEN)Démarrage Stockini en développement (Mode HMR)...$(NC)"
 	@set -a; source "$(ENV_FILE)"; set +a; \
 	initial_port="$${PORT:-$(BACKEND_PORT)}"; \
 	initial_frontend_port="$(FRONTEND_PORT)"; \
@@ -149,6 +152,48 @@ dev: env-check deps-check db-up minio-up db-wait minio-wait db-migrate db-seed #
 	(cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$$backend_port" npm run start:dev 2>&1 | sed -u 's/^/[backend] /') & \
 	(cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$$frontend_port" NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_API_URL="http://localhost:$$backend_port" npm run dev 2>&1 | sed -u 's/^/[frontend] /') & \
 	wait
+
+preview: env-check deps-check db-up minio-up db-wait minio-wait db-migrate db-seed ## Tester l'application sans lenteur (build + start)
+	@echo -e "$(GREEN)Démarrage Stockini en mode PREVIEW (Optimisé)...$(NC)"
+	@set -a; source "$(ENV_FILE)"; set +a; \
+	initial_port="$${PORT:-$(BACKEND_PORT)}"; \
+	initial_frontend_port="$(FRONTEND_PORT)"; \
+	is_port_busy() { \
+		local port="$$1"; \
+		if command -v lsof >/dev/null 2>&1; then \
+			lsof -iTCP:"$$port" -sTCP:LISTEN -Pn >/dev/null 2>&1 && return 0; \
+		fi; \
+		if command -v ss >/dev/null 2>&1; then \
+			ss -ltn 2>/dev/null | awk -v target=":$$port" '$$4 ~ target "$$" { found = 1 } END { exit !found }' && return 0; \
+		fi; \
+		(timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$$port") >/dev/null 2>&1; \
+	}; \
+	find_free_port() { \
+		local port="$$1"; \
+		while is_port_busy "$$port"; do \
+			port=$$((port + 1)); \
+		done; \
+		echo "$$port"; \
+	}; \
+	backend_port="$$(find_free_port "$$initial_port")"; \
+	frontend_port="$$(find_free_port "$$initial_frontend_port")"; \
+	while [ "$$frontend_port" = "$$backend_port" ]; do \
+		frontend_port="$$(find_free_port "$$((frontend_port + 1))")"; \
+	done; \
+	if [ "$$backend_port" != "$$initial_port" ]; then \
+		echo -e "$(YELLOW)⚠ Port $$initial_port occupé → fallback sur $$backend_port$(NC)"; \
+	fi; \
+	if [ "$$frontend_port" != "$$initial_frontend_port" ]; then \
+		echo -e "$(YELLOW)⚠ Port $$initial_frontend_port occupé → fallback sur $$frontend_port$(NC)"; \
+	fi; \
+	echo -e "$(YELLOW)Backend → http://localhost:$$backend_port/api$(NC)"; \
+	echo -e "$(YELLOW)Swagger → http://localhost:$$backend_port/api/docs$(NC)"; \
+	echo -e "$(YELLOW)Frontend → http://localhost:$$frontend_port$(NC)"; \
+	trap 'kill 0' INT TERM EXIT; \
+	(cd "$(BACKEND)" && set -a && source "$(ENV_FILE)" && set +a && PORT="$$backend_port" npm run start:dev 2>&1 | sed -u 's/^/[backend] /') & \
+	(cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && NEXT_PUBLIC_API_URL="http://localhost:$$backend_port" npm run build && PORT="$$frontend_port" NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_API_URL="http://localhost:$$backend_port" npm start 2>&1 | sed -u 's/^/[frontend] /') & \
+	wait
+
 
 stop: env-check ## Arrêter PostgreSQL et MinIO (services Docker de développement)
 	@echo -e "$(YELLOW)Arrêt des services Docker de développement (PostgreSQL + MinIO)...$(NC)"
