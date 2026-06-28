@@ -3,6 +3,7 @@
 import React, {
   useState,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useCallback,
@@ -653,7 +654,8 @@ export default function VentesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { can } = usePermissions();
-  const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
+  const initialLineId = useId();
+  const [lines, setLines] = useState<RegisterLine[]>(() => [createEmptyLine(initialLineId)]);
   const [customerId, setCustomerId] = useState("");
   const [clientInfoName, setClientInfoName] = useState("");
   const [counterClientName, setCounterClientName] = useState("");
@@ -666,7 +668,7 @@ export default function VentesPage() {
   const [counterClientErrors, setCounterClientErrors] = useState<
     Record<string, string>
   >({});
-  const [saleDate, setSaleDate] = useState(() => new Date().toISOString());
+  const [saleDate, setSaleDate] = useState('');
   const [activeHistoryTab, setActiveHistoryTab] = useState<
     "ventes" | "documents"
   >("ventes");
@@ -697,6 +699,10 @@ export default function VentesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
   const [draftChecked, setDraftChecked] = useState(false);
+
+  useEffect(() => {
+    setSaleDate(new Date().toISOString());
+  }, []);
 
   const [activeTab, setActiveTab] = useState<SalesDocumentType>("DEVIS");
 
@@ -1386,11 +1392,13 @@ export default function VentesPage() {
     }
   };
 
-  const today = new Date(saleDate).toLocaleDateString("fr-TN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const today = saleDate
+    ? new Date(saleDate).toLocaleDateString("fr-TN", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
 
   const hasActions = true; // always show: kebab always has at minimum Envoyer
   const colSpan = 1 + 7 + (hasActions ? 1 : 0);

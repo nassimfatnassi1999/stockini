@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useId, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
@@ -103,6 +103,7 @@ function fmtCommandeOption(p: Purchase): string {
 export default function AchatsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
+  const initialLineId = useId();
 
   const [docType, setDocType] = useState<PurchaseDocType>('BON_COMMANDE');
   const [receptionMode, setReceptionMode] = useState<ReceptionMode>('LIBRE');
@@ -110,7 +111,7 @@ export default function AchatsPage() {
   const [commandeLineMap, setCommandeLineMap] = useState<
     Record<string, { purchaseItemId: string; maxQty: number }>
   >({});
-  const [lines, setLines] = useState<RegisterLine[]>([createEmptyLine()]);
+  const [lines, setLines] = useState<RegisterLine[]>(() => [createEmptyLine(initialLineId)]);
   const [supplierId, setSupplierId] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -430,11 +431,15 @@ export default function AchatsPage() {
 
   const [payTarget, setPayTarget] = useState<Purchase | null>(null);
 
-  const today = new Date().toLocaleDateString('fr-TN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const [today, setToday] = useState('');
+
+  useEffect(() => {
+    setToday(new Date().toLocaleDateString('fr-TN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }));
+  }, []);
 
   const activeConfig = DOC_TYPE_CONFIG[docType];
   const selectedCommandeSupplier = commandeDetailQuery.data?.supplier?.name;

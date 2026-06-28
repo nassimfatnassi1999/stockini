@@ -356,8 +356,9 @@ function BackupsTab() {
     }
   };
 
-  // Load on mount
-  useState(() => { void loadBackups(); });
+  useEffect(() => {
+    void loadBackups();
+  }, [loadBackups]);
 
   return (
     <div className="space-y-4">
@@ -1214,7 +1215,9 @@ function HealthTab() {
     }
   }, []);
 
-  useState(() => { void loadHealth(); });
+  useEffect(() => {
+    void loadHealth();
+  }, [loadHealth]);
 
   const StatCard = ({ label, value, icon: Icon, color = 'text-app-primary' }: {
     label: string; value: string | number; icon: React.ElementType; color?: string;

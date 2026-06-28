@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const DEFAULT_STORAGE_KEY = 'geocrm-workflow-frozen-columns';
 
@@ -13,18 +13,21 @@ export function useFrozenColumns(
   storageKey?: string
 ): UseFrozenColumnsReturn {
   const key = storageKey ?? DEFAULT_STORAGE_KEY;
-  const [frozenColumnIds, setFrozenColumnIds] = useState<Set<string>>(() => {
+  const [frozenColumnIds, setFrozenColumnIds] = useState<Set<string>>(
+    () => new Set(defaultFrozenColumnIds),
+  );
+
+  useEffect(() => {
     try {
-      const stored = localStorage.getItem(key);
+      const stored = window.localStorage.getItem(key);
       if (stored) {
         const parsed = JSON.parse(stored) as unknown;
-        if (Array.isArray(parsed)) return new Set(parsed as string[]);
+        if (Array.isArray(parsed)) setFrozenColumnIds(new Set(parsed as string[]));
       }
     } catch {
-      // localStorage unavailable (SSR or restricted context)
+      // localStorage unavailable or malformed: keep deterministic defaults.
     }
-    return new Set(defaultFrozenColumnIds);
-  });
+  }, [key]);
 
   const toggleColumnFrozen = (id: string) => {
     setFrozenColumnIds((prev) => {
@@ -35,7 +38,7 @@ export function useFrozenColumns(
         next.add(id);
       }
       try {
-        localStorage.setItem(key, JSON.stringify([...next]));
+        window.localStorage.setItem(key, JSON.stringify([...next]));
       } catch {
         // ignore write errors
       }

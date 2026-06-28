@@ -50,8 +50,7 @@ function compactMoney(v: number): string {
   return String(Math.round(v));
 }
 
-function getPeriodRange(period: Period, customRange?: DateRange): DateRange {
-  const now = new Date();
+function getPeriodRange(period: Period, now: Date, customRange?: DateRange): DateRange {
   switch (period) {
     case 'day':    return { start: startOfDay(now),                           end: endOfDay(now) };
     case 'week':   return { start: startOfWeek(now, { weekStartsOn: 1 }),     end: endOfWeek(now, { weekStartsOn: 1 }) };
@@ -225,6 +224,11 @@ export function SimpleDashboard() {
   const [period, setPeriod]           = useState<Period>('month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
+  const [now, setNow] = useState(() => new Date('2000-01-01T12:00:00.000Z'));
+
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
 
   const customRange = useMemo<DateRange | undefined>(() => {
     if (customStart && customEnd) {
@@ -234,7 +238,7 @@ export function SimpleDashboard() {
     return undefined;
   }, [customStart, customEnd]);
 
-  const range     = useMemo(() => getPeriodRange(period, customRange), [period, customRange]);
+  const range     = useMemo(() => getPeriodRange(period, now, customRange), [period, now, customRange]);
   const prevRange = useMemo(() => getPrevRange(range), [range]);
 
   // ── Data fetching ─────────────────────────────────────────────────────────

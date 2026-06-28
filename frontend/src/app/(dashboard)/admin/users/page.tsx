@@ -18,7 +18,6 @@ import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SlideOver } from '@/components/ui/SlideOver';
-import { getCurrentUser } from '@/lib/auth';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import {
@@ -113,8 +112,7 @@ function UserDetailModal({ user, onClose }: { user: User; onClose: () => void })
 }
 
 export default function UsersPage() {
-  const currentUser = getCurrentUser();
-  const { can } = usePermissions();
+  const { can, userId: currentUserId } = usePermissions();
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -270,7 +268,7 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {users.map((u) => {
-                  const isSelf = u.id === currentUser?.id;
+                  const isSelf = u.id === currentUserId;
                   return (
                     <tr
                       key={u.id}

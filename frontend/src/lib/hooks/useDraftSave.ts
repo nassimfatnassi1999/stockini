@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 
 interface DraftEnvelope<T> {
@@ -23,10 +23,13 @@ export function useDraftSave<T>({
   enabled = true,
   debounceMs = 1500,
 }: UseDraftSaveOptions<T>) {
-  const user = getCurrentUser();
-  const userId = user?.id ?? 'anonymous';
-  const storageKey = `draft:${key}:${userId}`;
+  const [storageKey, setStorageKey] = useState(`draft:${key}:anonymous`);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const userId = getCurrentUser()?.id ?? 'anonymous';
+    setStorageKey(`draft:${key}:${userId}`);
+  }, [key]);
 
   const saveDraft = useCallback(
     (value: T) => {

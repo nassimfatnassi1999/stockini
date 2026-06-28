@@ -68,9 +68,9 @@ export interface SaleMargeTotals {
 
 export type DocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE';
 
-export function createEmptyLine(): RegisterLine {
+export function createEmptyLine(id: string = crypto.randomUUID()): RegisterLine {
   return {
-    id: crypto.randomUUID(),
+    id,
     productId: null,
     reference: '',
     designation: '',

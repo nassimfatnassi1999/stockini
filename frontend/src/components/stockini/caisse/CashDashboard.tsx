@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BarChart3,
@@ -47,8 +47,8 @@ export function CashDashboard() {
   const [contentTab, setContentTab] = useState<ContentTab>('transactions');
   const [filters, setFilters] = useState<CashFilterState>({
     period:    'today',
-    startDate: todayStr(),
-    endDate:   todayStr(),
+    startDate: '',
+    endDate:   '',
   });
   const [page, setPage] = useState(1);
   const [showReset, setShowReset] = useState(false);
@@ -56,6 +56,11 @@ export function CashDashboard() {
   const [showRetrait, setShowRetrait] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
   const { can } = usePermissions();
+
+  useEffect(() => {
+    const today = todayStr();
+    setFilters((current) => ({ ...current, startDate: today, endDate: today }));
+  }, []);
   const canClearHistory = can('finance.history.clear');
   const canOperate = can('caisse.operate');
 

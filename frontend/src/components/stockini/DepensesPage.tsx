@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Plus, Trash2, XCircle } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
@@ -141,7 +141,7 @@ export function DepensesPage() {
     amount: '',
     paymentSource: 'PHYSICAL_CASH' as TreasuryAccount,
     category: '',
-    date: new Date().toISOString().slice(0, 10),
+    date: '',
     description: '',
     supplierId: '',
     purchaseId: '',
@@ -160,6 +160,13 @@ export function DepensesPage() {
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceSupplierFilter, setInvoiceSupplierFilter] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'' | 'UNPAID' | 'PARTIAL'>('');
+
+  useEffect(() => {
+    setExpenseForm((form) => ({
+      ...form,
+      date: new Date().toISOString().slice(0, 10),
+    }));
+  }, []);
   const paymentMethodOptions = usePaymentMethodOptions();
   const expenseCategoryOptions = useExpenseCategoryOptions();
 

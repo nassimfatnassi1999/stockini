@@ -4,7 +4,6 @@ import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
-  getCurrentUser,
   setAuthSession,
   type AuthUser,
 } from '@/lib/auth';
@@ -34,12 +33,6 @@ export function useMe() {
     },
     staleTime: 30 * 1000,
     retry: 1,
-    // Seed from localStorage for the initial render (no flicker)
-    initialData: () => {
-      const u = getCurrentUser();
-      return u ? (u as MeResponse) : undefined;
-    },
-    initialDataUpdatedAt: 0, // force background refetch even with initialData
   });
 }
 
@@ -48,12 +41,12 @@ export function usePermissions() {
   const queryClient = useQueryClient();
 
   const permissions = useMemo<string[]>(
-    () => me?.permissions ?? getCurrentUser()?.permissions ?? [],
+    () => me?.permissions ?? [],
     [me?.permissions]
   );
 
   const role = useMemo<string>(
-    () => me?.role ?? getCurrentUser()?.role ?? '',
+    () => me?.role ?? '',
     [me?.role]
   );
 
@@ -88,5 +81,14 @@ export function usePermissions() {
     void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
   }, [queryClient]);
 
-  return { can, canAny, canAll, permissions, role, isSuperAdmin: superAdmin, invalidate };
+  return {
+    can,
+    canAny,
+    canAll,
+    permissions,
+    role,
+    userId: me?.id ?? null,
+    isSuperAdmin: superAdmin,
+    invalidate,
+  };
 }
