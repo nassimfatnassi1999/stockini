@@ -75,9 +75,19 @@ export function setAuthSession(payload: { accessToken: string; refreshToken?: st
 }
 
 export function clearAuthSession() {
-  window.localStorage.removeItem('access_token');
-  window.localStorage.removeItem('refresh_token');
-  window.localStorage.removeItem('auth_user');
+  if (typeof window === 'undefined') return;
+  const authKeys = [
+    'access_token',
+    'refresh_token',
+    'auth_user',
+    'remember_me',
+    'app_last_route',
+    'stockini_restore_in_progress',
+  ];
+  for (const key of authKeys) {
+    window.localStorage.removeItem(key);
+    window.sessionStorage.removeItem(key);
+  }
 }
 
 // ── Last route tracking (for post-login redirect) ──────────────────────────

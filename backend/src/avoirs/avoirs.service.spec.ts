@@ -38,7 +38,9 @@ describe('AvoirsService', () => {
 
   function buildService(alreadyReturnedQty = 0, alreadyReturnedTotal = 0) {
     const references = {
-      generateSimple: jest.fn().mockResolvedValue('AV-001'),
+      generateSalesDocumentNumber: jest
+        .fn()
+        .mockResolvedValue('AV-Client-01072026-001'),
       generate: jest.fn().mockResolvedValue('AV-PAY-001'),
     };
     const stockService = { applyMovement: jest.fn().mockResolvedValue({}) };
@@ -519,7 +521,7 @@ describe('AvoirsService', () => {
 
     const stockServiceMulti = { applyMovement: jest.fn().mockResolvedValue({}) };
     const references = {
-      generateSimple: jest.fn().mockResolvedValue('AV-001'),
+      generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-001'),
       generate: jest.fn().mockResolvedValue('AV-PAY-001'),
     };
 
@@ -579,7 +581,7 @@ describe('AvoirsService', () => {
     const service = new AvoirsService(
       prismaRefund as any,
       { applyMovement: jest.fn() } as any,
-      { generateSimple: jest.fn().mockResolvedValue('AV-001'), generate: jest.fn().mockResolvedValue('AV-PAY-001') } as any,
+      { generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-001'), generate: jest.fn().mockResolvedValue('AV-PAY-001') } as any,
       {} as any,
       {} as any,
       {} as any,
@@ -666,7 +668,7 @@ describe('AvoirsService', () => {
     const service = new AvoirsService(
       prismaBl as any,
       { applyMovement: jest.fn() } as any,
-      { generateSimple: jest.fn().mockResolvedValue('AV-BL-001'), generate: jest.fn().mockResolvedValue('AV-PAY-BL') } as any,
+      { generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Comptoir-01072026-001'), generate: jest.fn().mockResolvedValue('AV-PAY-BL') } as any,
       {} as any,
       {} as any,
       {} as any,
@@ -726,7 +728,7 @@ describe('AvoirsService', () => {
         prisma as any,
         { applyMovement: jest.fn() } as any,
         {
-          generateSimple: jest.fn().mockResolvedValue('AV-001'),
+          generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-001'),
           generate: jest.fn().mockResolvedValue('AV-PAY-001'),
         } as any,
         {} as any,
@@ -832,7 +834,7 @@ describe('AvoirsService', () => {
         prisma as any,
         { applyMovement: jest.fn() } as any,
         {
-          generateSimple: jest.fn().mockResolvedValue('AV-BIG'),
+          generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-999'),
           generate: jest.fn().mockResolvedValue('AV-PAY-BIG'),
         } as any,
         {} as any,

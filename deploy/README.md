@@ -412,6 +412,29 @@ ls -lh /home/ubuntu/backup-automatique-db/
 sudo -u postgres pg_restore -d stockpro /home/ubuntu/backup-automatique-db/backup.sql
 ```
 
+Après une restauration, vérifier l'alignement Prisma :
+
+```bash
+cd backend
+npx prisma generate
+npx prisma migrate deploy
+npx prisma migrate status
+```
+
+Si les pages répondent mais que `/_next/static/*` retourne 404, le build Next.js est désynchronisé. Cette panne est indépendante des données PostgreSQL :
+
+```bash
+pm2 delete stockini-frontend 2>/dev/null || true
+cd frontend
+npm run clean:next
+npm install  # seulement si les dépendances ont changé
+cd ..
+bash deploy/vps/setup_frontend.sh
+pm2 status
+```
+
+La restauration depuis l'interface admin est limitée à PostgreSQL par défaut. MinIO doit être sélectionné explicitement ; aucun backup ne doit contenir ou modifier `frontend/.next`, `frontend/public` ou les fichiers runtime du projet.
+
 ---
 
 ## 7. Monitoring
@@ -658,6 +681,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `COMPANY_EMAIL` | `...` | Email société (PDF) |
 | `COMPANY_TAX_ID` | `...` | Matricule fiscal (PDF) |
 | `COMPANY_LOGO_URL` | `...` | URL logo société (PDF) |
+| `COMPANY_BANK_RIB` | `...` | RIB société (PDF, optionnel) |
 | `BACKUP_GPG_RECIPIENT` | `admin@example.com` | Email GPG pour chiffrement backup (optionnel) |
 | `ADMIN_EMAIL` | `admin@stockini-msp.tn` | Email contact Let's Encrypt |
 

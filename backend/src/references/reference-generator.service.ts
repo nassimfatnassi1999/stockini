@@ -15,6 +15,16 @@ type ReferenceTarget =
   | 'creditNote'
   | 'expense';
 
+const SALES_DOCUMENT_PREFIXES = {
+  DEVIS: 'DEV',
+  BON_COMMANDE: 'BC',
+  BON_LIVRAISON: 'BL',
+  FACTURE: 'FAC',
+  AVOIR: 'AV',
+} as const;
+
+type SalesDocumentType = keyof typeof SALES_DOCUMENT_PREFIXES;
+
 const TARGETS: Record<ReferenceTarget, { delegate: string; field: string }> = {
   sale: { delegate: 'sale', field: 'invoiceNumber' },
   purchase: { delegate: 'purchase', field: 'orderNumber' },
@@ -36,6 +46,51 @@ const CUSTOMER_PADDING = (type: string) => (type === 'INDIVIDUAL' ? 3 : 4);
 @Injectable()
 export class ReferenceGeneratorService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async generateSalesDocumentNumber(
+    documentType: SalesDocumentType,
+    clientName: string | null | undefined,
+    documentDate: Date,
+    client: ReferenceClient = this.prisma,
+  ): Promise<string> {
+    const prefix = SALES_DOCUMENT_PREFIXES[documentType];
+    const datePart = this.formatCompactDate(documentDate);
+    const clientPart = this.sanitizeClientName(clientName);
+    const counterPrefix = `SALE-DOC:${prefix}:${datePart}`;
+
+    // The atomic upsert serializes concurrent allocations for the same
+    // document type/date. Looping also repairs a stale/reset counter safely.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const counter = await client.referenceCounter.upsert({
+        where: { prefix_year: { prefix: counterPrefix, year: 0 } },
+        update: { sequence: { increment: 1 } },
+        create: { prefix: counterPrefix, year: 0, sequence: 1 },
+      });
+      const number = `${prefix}-${clientPart}-${datePart}-${String(counter.sequence).padStart(3, '0')}`;
+      const exists = await this.salesDocumentNumberExists(
+        client,
+        documentType,
+        number,
+      );
+      if (!exists) return number;
+    }
+
+    throw new Error(`Impossible d'allouer un numéro unique pour ${documentType}`);
+  }
+
+  async peekNextSalesDocumentNumber(
+    documentType: SalesDocumentType,
+    clientName: string | null | undefined,
+    documentDate = new Date(),
+  ): Promise<string> {
+    const prefix = SALES_DOCUMENT_PREFIXES[documentType];
+    const datePart = this.formatCompactDate(documentDate);
+    const counterPrefix = `SALE-DOC:${prefix}:${datePart}`;
+    const counter = await this.prisma.referenceCounter.findUnique({
+      where: { prefix_year: { prefix: counterPrefix, year: 0 } },
+    });
+    return `${prefix}-${this.sanitizeClientName(clientName)}-${datePart}-${String((counter?.sequence ?? 0) + 1).padStart(3, '0')}`;
+  }
 
   async generate(
     prefix: string,
@@ -204,6 +259,42 @@ export class ReferenceGeneratorService {
         const seq = Number(c.reference.slice(prefixStr.length));
         return Number.isFinite(seq) ? Math.max(max, seq) : max;
       }, 0);
+  }
+
+  private sanitizeClientName(value: string | null | undefined): string {
+    const sanitized = (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '')
+      .slice(0, 24);
+    return sanitized || 'Client';
+  }
+
+  private formatCompactDate(date: Date): string {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}${month}${date.getFullYear()}`;
+  }
+
+  private async salesDocumentNumberExists(
+    client: ReferenceClient,
+    documentType: SalesDocumentType,
+    number: string,
+  ): Promise<boolean> {
+    if (documentType === 'AVOIR') {
+      return Boolean(
+        await client.creditNote.findUnique({
+          where: { numero: number },
+          select: { id: true },
+        }),
+      );
+    }
+    return Boolean(
+      await client.sale.findUnique({
+        where: { invoiceNumber: number },
+        select: { id: true },
+      }),
+    );
   }
 
   private async findLastExistingSequence(

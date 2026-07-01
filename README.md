@@ -119,6 +119,31 @@ npm run test
 
 The frontend source lives in `frontend/src/app`, with shared UI components in `frontend/src/components`.
 
+### Recovering missing Next.js static chunks
+
+Database/MinIO restore never restores or deletes `frontend/.next`, `frontend/public`, source files, or runtime files. If HTML was served from an old Next.js process while its build changed, stop every frontend instance and rebuild the cache:
+
+```bash
+# Development
+cd frontend
+npm run clean:next
+npm install        # only needed when dependencies may have changed
+npm run dev
+
+# PM2 production: use the deployment script so static assets and the server
+# come from the same build, with a single stockini-frontend instance.
+cd ..
+pm2 delete stockini-frontend 2>/dev/null || true
+bash deploy/vps/setup_frontend.sh
+pm2 status
+```
+
+Do not run `next dev` and PM2 on the same port. A `200` response for a page together with `404` responses under `/_next/static/` indicates a stale/mismatched Next build, not a PostgreSQL data error.
+
+### Backup and restore scope
+
+Admin backups are database-only by default. MinIO objects are included/restored only when explicitly requested with `includeMinio=true` or `restoreMinio=true`. Restore archives are restricted to `database.sql`, metadata files, and optional `minio/`; frontend build/static folders are rejected. After SQL restore, the backend regenerates Prisma, deploys and checks migrations, verifies core tables, and checks duplicate sale/document numbers before returning success.
+
 Useful frontend commands:
 
 ```bash

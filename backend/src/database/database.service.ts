@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
@@ -47,11 +48,25 @@ export interface SystemHealth {
   uptime: number;
 }
 
+interface RestoreOptions {
+  uploadedFilename?: string;
+}
+
+interface PostgresConnection {
+  host: string;
+  port: string;
+  user: string;
+  password: string;
+  database: string;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class DatabaseService {
   private readonly logger = new Logger(DatabaseService.name);
+  private restoreInProgress = false;
+  private backupInProgress = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -65,6 +80,9 @@ export class DatabaseService {
   // ════════════════════════════════════════════════════════════
 
   async createBackup(user?: AuthUser): Promise<{ filename: string; size: number; path: string }> {
+    if (this.restoreInProgress) throw new ConflictException('Une restauration est en cours');
+    if (this.backupInProgress) throw new ConflictException('Une sauvegarde est déjà en cours');
+    this.backupInProgress = true;
     const backupDir = this.getBackupDir();
     this.ensureDir(backupDir);
 
@@ -77,35 +95,27 @@ export class DatabaseService {
       this.logger.log(`[BACKUP] Starting backup: ${stamp}`);
 
       // 1. SQL dump
-      await this.dumpPostgres(path.join(tmpDir, 'database.sql'));
+      const databaseDir = path.join(tmpDir, 'database');
+      fs.mkdirSync(databaseDir, { recursive: true });
+      await this.dumpPostgres(path.join(databaseDir, 'dump.sql'));
       this.logger.log(`[BACKUP] SQL dump completed`);
 
-      // 2. MinIO export
-      const minioDir = path.join(tmpDir, 'minio');
+      // 2. Full MinIO export, preserving every object key.
+      const minioDir = path.join(tmpDir, 'minio', this.minio.bucket);
       fs.mkdirSync(minioDir, { recursive: true });
       await this.exportMinio(minioDir);
       this.logger.log(`[BACKUP] MinIO export completed`);
 
       // 3. Metadata
-      const stats = await this.collectStats();
       const metadata = {
-        version: '1.0.0',
-        erpName: 'Stockini',
+        app: 'Stockini',
         createdAt: now.toISOString(),
-        createdBy: user?.email ?? 'system',
-        dbSizeBytes: stats.dbSizeBytes,
-        customersCount: stats.customers,
-        productsCount: stats.products,
-        salesCount: stats.sales,
-        documentsCount: stats.documents,
+        database: 'postgresql',
+        storage: 'minio',
+        bucket: this.minio.bucket,
+        backupVersion: 1,
       };
       fs.writeFileSync(path.join(tmpDir, 'metadata.json'), JSON.stringify(metadata, null, 2));
-
-      // 4. Version file
-      fs.writeFileSync(
-        path.join(tmpDir, 'version.json'),
-        JSON.stringify({ stockini: '1.0.0', node: process.version, timestamp: now.toISOString() }, null, 2),
-      );
 
       // 5. Create ZIP
       const zipName = `backup-${stamp}.zip`;
@@ -130,6 +140,7 @@ export class DatabaseService {
       return { filename: zipName, size, path: zipPath };
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
+      this.backupInProgress = false;
     }
   }
 
@@ -159,16 +170,27 @@ export class DatabaseService {
   }
 
   getBackupPath(filename: string): string {
-    const backupDir = this.getBackupDir();
-    const safeName = path.basename(filename);
-    if (!safeName.endsWith('.zip') || !safeName.startsWith('backup-')) {
+    const backupDir = path.resolve(this.getBackupDir());
+    this.logger.log(`[RESTORE] Requested filename: ${filename}`);
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      throw new BadRequestException('Nom de fichier invalide');
+    }
+    const safeName = filename;
+    // Keep minute-only archives restorable while all new archives use seconds/ms.
+    if (!/^backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d{2}-\d{3})?\.zip$/.test(safeName)) {
       throw new BadRequestException('Nom de fichier invalide');
     }
     const full = path.join(backupDir, safeName);
+    this.logger.log(`[RESTORE] Absolute backup path: ${full}`);
+    this.logger.log(`[RESTORE] ZIP exists: ${fs.existsSync(full)}`);
     if (!fs.existsSync(full)) {
       throw new NotFoundException('Sauvegarde introuvable');
     }
     return full;
+  }
+
+  downloadBackup(filename: string): string {
+    return this.getBackupPath(filename);
   }
 
   async deleteBackup(filename: string, user?: AuthUser): Promise<void> {
@@ -182,13 +204,22 @@ export class DatabaseService {
     });
   }
 
-  async restoreBackup(zipBuffer: Buffer, user?: AuthUser): Promise<{ restored: string[] }> {
+  async restoreBackup(zipBuffer: Buffer, user?: AuthUser, options: RestoreOptions = {}): Promise<{ restored: string[] }> {
+    if (this.backupInProgress) {
+      throw new ConflictException('Une sauvegarde est en cours');
+    }
+    if (this.restoreInProgress) {
+      throw new ConflictException('Une restauration est déjà en cours');
+    }
+    this.restoreInProgress = true;
     const stamp = this.dateStamp(new Date());
     const tmpDir = path.join(os.tmpdir(), `restore-${stamp}-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
 
-    this.logger.log(`[RESTORE] Upload received`);
+    this.logger.log(`[RESTORE] Upload received: ${options.uploadedFilename ?? 'server backup'}`);
     this.logger.log(`[RESTORE] File size: ${zipBuffer.length} bytes`);
+    this.logger.log(`[RESTORE] Mode: full database + MinIO`);
+    this.logger.log(`[RESTORE] Temporary workspace: ${tmpDir}`);
 
     try {
       // 1. Write ZIP to temp dir
@@ -208,69 +239,96 @@ export class DatabaseService {
         throw new BadRequestException('Le fichier ZIP est vide');
       }
 
+      this.assertSafeBackupEntries(zip);
+      this.logger.log(
+        `[RESTORE] ZIP entries (${zip.getEntries().length}): ${zip.getEntries().map((entry) => entry.entryName).join(', ')}`,
+      );
+
       // 3. Extract to sub-directory to avoid mixing with restore.zip
       const extractDir = path.join(tmpDir, 'extracted');
       fs.mkdirSync(extractDir, { recursive: true });
       zip.extractAllTo(extractDir, true);
-      this.logger.log(`[RESTORE] ZIP validated and extracted`);
+      this.logger.log(`[RESTORE] ZIP validated and extracted to: ${extractDir}`);
 
       // 4. Validate required files
-      const sqlPath = path.join(extractDir, 'database.sql');
+      const dumpPath = ['database/dump.sql']
+        .map((name) => path.join(extractDir, name))
+        .find((candidate) => fs.existsSync(candidate));
       const metadataPath = path.join(extractDir, 'metadata.json');
-      const versionPath = path.join(extractDir, 'version.json');
 
-      const missing: string[] = [];
-      if (!fs.existsSync(sqlPath)) missing.push('database.sql');
-      if (!fs.existsSync(metadataPath)) missing.push('metadata.json');
-      if (!fs.existsSync(versionPath)) missing.push('version.json');
-
-      if (missing.length > 0) {
-        throw new BadRequestException(
-          `Backup ZIP invalide ou incomplet — fichiers manquants : ${missing.join(', ')}`,
-        );
+      if (!dumpPath) {
+        throw new BadRequestException('database/dump.sql not found in backup');
       }
-
-      const sqlContent = fs.readFileSync(sqlPath, 'utf8');
-      if (sqlContent.trim().length === 0) {
-        throw new BadRequestException('Le fichier database.sql est vide');
+      if (!fs.existsSync(metadataPath)) {
+        throw new BadRequestException('metadata.json not found in backup');
       }
-
-      if (sqlContent.includes('pg_dump not available')) {
-        throw new BadRequestException(
-          'Ce backup ne contient pas de dump SQL valide (pg_dump n\'était pas disponible lors de la création)',
-        );
-      }
-
-      this.logger.log(`[RESTORE] database.sql found (${sqlContent.length} chars)`);
-      this.logger.log(`[RESTORE] ZIP validated`);
-
-      // 5. Create pre-restore safety backup (non-blocking — continue even if it fails)
-      this.logger.log(`[RESTORE] Creating pre-restore safety backup...`);
       try {
-        const preBackup = await this.createBackup(user);
-        this.logger.log(`[RESTORE] Pre-restore backup created: ${preBackup.filename}`);
-      } catch (err) {
-        this.logger.warn(
-          `[RESTORE] Pre-restore backup failed (continuing anyway): ${(err as Error).message}`,
-        );
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as Record<string, unknown>;
+        if (
+          metadata.app !== 'Stockini' ||
+          metadata.database !== 'postgresql' || typeof metadata.createdAt !== 'string' ||
+          metadata.storage !== 'minio' || metadata.bucket !== this.minio.bucket ||
+          metadata.backupVersion !== 1
+        ) {
+          throw new Error('champs requis invalides');
+        }
+      } catch (error) {
+        throw new BadRequestException(`metadata.json invalide : ${(error as Error).message}`);
       }
+      const dumpStat = fs.statSync(dumpPath);
+      if (dumpStat.size === 0) throw new BadRequestException(`Le dump ${path.basename(dumpPath)} est vide`);
+      if (path.extname(dumpPath).toLowerCase() === '.sql') {
+        const sqlPreview = fs.readFileSync(dumpPath, 'utf8').slice(0, 4096);
+        if (sqlPreview.includes('pg_dump not available')) {
+          throw new BadRequestException(
+            'Ce backup ne contient pas de dump SQL valide (pg_dump n\'était pas disponible lors de la création)',
+          );
+        }
+      }
+
+      this.logger.log(`[RESTORE] Database dump path: ${dumpPath}`);
+      this.logger.log(`[RESTORE] Dump detected: ${path.basename(dumpPath)} (${dumpStat.size} bytes)`);
+      this.logger.log(`[RESTORE] ZIP validated`);
 
       const restored: string[] = [];
 
       // 6. Restore SQL
       this.logger.log(`[RESTORE] SQL restore started`);
-      this.restorePostgres(sqlPath);
-      restored.push('database.sql');
+      await this.prisma.$disconnect();
+      try {
+        this.preparePostgresForRestore();
+        this.restorePostgres(dumpPath);
+      } finally {
+        await this.prisma.$connect();
+      }
+      restored.push(path.basename(dumpPath));
       this.logger.log(`[RESTORE] SQL restore completed`);
 
-      // 7. Restore MinIO
-      const minioDir = path.join(extractDir, 'minio');
-      if (fs.existsSync(minioDir)) {
-        this.logger.log(`[RESTORE] MinIO restore started`);
-        await this.importMinio(minioDir);
-        restored.push('minio/');
-        this.logger.log(`[RESTORE] MinIO restore completed`);
+      // The dump may come from an older release. Reconnect the Prisma pool,
+      // apply current migrations, and verify the restored schema before success.
+      await this.validateRestoredDatabase();
+      restored.push('prisma-schema');
+
+      // 7. Restore MinIO only after the database is healthy.
+      const minioDir = path.join(extractDir, 'minio', this.minio.bucket);
+      if (!fs.existsSync(minioDir)) {
+        throw new BadRequestException(`minio/${this.minio.bucket} not found in backup`);
       }
+      await this.minio.ensureBucketOrThrow(this.minio.bucket);
+      this.logger.log(`[RESTORE] MinIO restore started; replacing bucket ${this.minio.bucket}`);
+      const expectedObjects = await this.importMinio(minioDir, true);
+      const actualObjects = (await this.minio.listAllObjects(this.minio.bucket)).length;
+      if (actualObjects !== expectedObjects) {
+        throw new InternalServerErrorException(
+          `MinIO health check failed: expected ${expectedObjects} objects, found ${actualObjects}`,
+        );
+      }
+      restored.push(`minio/${this.minio.bucket}/`);
+      this.logger.log(`[RESTORE] MinIO restore completed and verified (${actualObjects} objects)`);
+
+      // Final health check after both restore phases are complete.
+      await this.validateRestoredDatabase();
+      this.logger.log(`[RESTORE] Final database + MinIO health check passed`);
 
       // 8. Audit log
       await this.audit.create({
@@ -295,13 +353,22 @@ export class DatabaseService {
       } catch {
         // ignore cleanup errors
       }
+      this.restoreInProgress = false;
     }
   }
 
-  async restoreBackupByFilename(filename: string, user?: AuthUser): Promise<{ restored: string[] }> {
-    const filePath = this.getBackupPath(filename);
-    const zipBuffer = fs.readFileSync(filePath);
-    return this.restoreBackup(zipBuffer, user);
+  async restoreBackupByFilename(filename: string, user?: AuthUser, options: RestoreOptions = {}): Promise<{ restored: string[] }> {
+    try {
+      const filePath = this.getBackupPath(filename);
+      const zipBuffer = fs.readFileSync(filePath);
+      return await this.restoreBackup(zipBuffer, user, {
+        ...options,
+        uploadedFilename: path.basename(filename),
+      });
+    } catch (error) {
+      this.logger.error(`[RESTORE][FILENAME=${filename}] ${(error as Error).message}`, (error as Error).stack);
+      throw error;
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -776,14 +843,14 @@ export class DatabaseService {
       const zip = new AdmZip(zipPath);
       const entryNames = zip.getEntries().map((e) => e.entryName);
 
-      if (!entryNames.includes('metadata.json') || !entryNames.includes('version.json')) {
+      if (!entryNames.includes('metadata.json')) {
         return 'invalid';
       }
-      if (!entryNames.includes('database.sql')) {
+      if (!entryNames.includes('database/dump.sql')) {
         return 'missing-sql';
       }
 
-      const sqlEntry = zip.getEntry('database.sql');
+      const sqlEntry = zip.getEntry('database/dump.sql');
       if (!sqlEntry) return 'missing-sql';
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -976,7 +1043,7 @@ export class DatabaseService {
   // ════════════════════════════════════════════════════════════
 
   private getBackupDir(): string {
-    return this.config.get<string>('BACKUP_STORAGE_PATH', path.join(os.homedir(), 'stockini-backups'));
+    return this.config.get<string>('BACKUP_STORAGE_PATH', path.join(process.cwd(), 'storage', 'backups'));
   }
 
   private ensureDir(dir: string) {
@@ -985,18 +1052,154 @@ export class DatabaseService {
 
   private dateStamp(d: Date): string {
     const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}`;
+    const milliseconds = String(d.getMilliseconds()).padStart(3, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}-${milliseconds}`;
+  }
+
+  private assertSafeBackupEntries(zip: AdmZip): void {
+    for (const entry of zip.getEntries()) {
+      const normalized = entry.entryName.replace(/\\/g, '/');
+      const isUnsafePath =
+        normalized.startsWith('/') ||
+        normalized.split('/').includes('..') ||
+        path.isAbsolute(normalized);
+      const isAllowed =
+        normalized === 'database' ||
+        normalized === 'database/' ||
+        normalized === 'database/dump.sql' ||
+        normalized === 'metadata.json' ||
+        normalized === 'minio' ||
+        normalized === 'minio/' ||
+        normalized === `minio/${this.minio.bucket}` ||
+        normalized === `minio/${this.minio.bucket}/` ||
+        normalized.startsWith(`minio/${this.minio.bucket}/`);
+
+      if (isUnsafePath || !isAllowed) {
+        this.logger.warn(`[RESTORE] Rejected unsafe/out-of-scope ZIP entry: ${normalized}`);
+        throw new BadRequestException(
+          `Archive hors périmètre : ${normalized}. Seuls database/dump.sql, metadata.json et minio/${this.minio.bucket}/ sont autorisés.`,
+        );
+      }
+    }
+    this.logger.log(
+      `[RESTORE] Archive scope validated: database and optional MinIO only; runtime folders are excluded`,
+    );
+  }
+
+  private async validateRestoredDatabase(): Promise<void> {
+    const requiredTables = ['User', 'Customer', 'Product', 'Sale'];
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ table_name: string }>>(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
+    );
+    const found = new Set(rows.map((row) => row.table_name));
+    const missing = requiredTables.filter((table) => !found.has(table));
+    if (missing.length) {
+      throw new InternalServerErrorException(
+        `Schéma restauré incomplet — tables manquantes : ${missing.join(', ')}`,
+      );
+    }
+
+    this.logger.log(`[RESTORE][VALIDATION] ${requiredTables.length} critical tables present`);
+  }
+
+  private getPostgresConnection(): PostgresConnection {
+    const databaseUrl = this.config.get<string>('DATABASE_URL')?.trim();
+    if (databaseUrl) {
+      try {
+        const parsed = new URL(databaseUrl);
+        return {
+          host: parsed.hostname,
+          port: parsed.port || '5432',
+          user: decodeURIComponent(parsed.username),
+          password: decodeURIComponent(parsed.password),
+          database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
+        };
+      } catch (error) {
+        throw new InternalServerErrorException(
+          `DATABASE_URL invalide : ${(error as Error).message}`,
+        );
+      }
+    }
+
+    const connection = {
+      host: this.config.get<string>('POSTGRES_HOST', 'localhost'),
+      port: this.config.get<string>('POSTGRES_PORT', '5432'),
+      user: this.config.get<string>('POSTGRES_USER', ''),
+      password: this.config.get<string>('POSTGRES_PASSWORD', ''),
+      database: this.config.get<string>('POSTGRES_DB', ''),
+    };
+    if (!connection.user || !connection.database) {
+      throw new InternalServerErrorException(
+        'Configuration PostgreSQL incomplète : définir DATABASE_URL ou POSTGRES_HOST/PORT/USER/PASSWORD/DB',
+      );
+    }
+    return connection;
+  }
+
+  private preparePostgresForRestore(): void {
+    const connection = this.getPostgresConnection();
+    const sql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;';
+    const args = [
+      '-h', connection.host, '-p', connection.port, '-U', connection.user,
+      '-d', connection.database, '--set=ON_ERROR_STOP=1', '-c', sql,
+    ];
+    this.logger.log(
+      `[RESTORE][PREPARE] Command: psql -h ${connection.host} -p ${connection.port} -U ${connection.user} -d ${connection.database} -c "${sql}"`,
+    );
+    const result = this.runPostgresCommand(
+      'psql',
+      args,
+      ['-U', connection.user, '-d', connection.database, '--set=ON_ERROR_STOP=1', '-c', sql],
+    );
+    this.assertPostgresCommandSucceeded('Préparation PostgreSQL', result);
+  }
+
+  private runPostgresCommand(
+    tool: 'psql' | 'pg_restore',
+    nativeArgs: string[],
+    dockerArgs = nativeArgs,
+    input?: Buffer,
+  ) {
+    const connection = this.getPostgresConnection();
+    let result = spawnSync(tool, nativeArgs, {
+      env: { ...process.env, PGPASSWORD: connection.password },
+      input,
+      encoding: input ? undefined : 'utf8',
+      maxBuffer: 500 * 1024 * 1024,
+    });
+    if (result.error) {
+      const container = this.config.get<string>('POSTGRES_CONTAINER_NAME', 'stockini-postgres');
+      this.logger.warn(`[RESTORE] ${tool} unavailable locally: ${result.error.message}`);
+      this.logger.log(`[RESTORE] Fallback command: docker exec -i ${container} ${tool} ${dockerArgs.join(' ')}`);
+      result = spawnSync(
+        'docker',
+        ['exec', '-i', '-e', `PGPASSWORD=${connection.password}`, container, tool, ...dockerArgs],
+        { input, maxBuffer: 500 * 1024 * 1024 },
+      );
+    }
+    return result;
+  }
+
+  private assertPostgresCommandSucceeded(
+    operation: string,
+    result: ReturnType<typeof spawnSync>,
+  ): void {
+    const stdout = result.stdout ? Buffer.from(result.stdout as any).toString('utf8').trim() : '';
+    const stderr = result.stderr ? Buffer.from(result.stderr as any).toString('utf8').trim() : '';
+    this.logger.log(`[RESTORE] ${operation} exit code: ${result.status ?? 'interrupted'}`);
+    this.logger.log(`[RESTORE] ${operation} stdout: ${stdout || '(empty)'}`);
+    this.logger.log(`[RESTORE] ${operation} stderr: ${stderr || '(empty)'}`);
+    if (result.error || result.status !== 0) {
+      throw new InternalServerErrorException(
+        `${operation} échouée : ${stderr || stdout || result.error?.message || `exit ${result.status ?? 'interrompu'}`}`,
+      );
+    }
   }
 
   private async dumpPostgres(outputPath: string): Promise<void> {
-    const dbUrl = this.config.get<string>('DATABASE_URL', '');
-    const match = dbUrl.match(/postgresql:\/\/([^:]+):([^@]+)@([^:\/]+):?(\d+)?\/([^?]+)/);
-    if (!match) {
-      throw new InternalServerErrorException('Impossible de parser DATABASE_URL pour pg_dump');
-    }
-    const [, user, password, host, port, dbName] = match;
+    const { user, password, host, port, database: dbName } = this.getPostgresConnection();
 
-    this.logger.log(`[PG_DUMP] Starting — db=${dbName} host=${host} port=${port || '5432'} user=${user}`);
+    this.logger.log(`[PG_DUMP] Starting — db=${dbName} host=${host} port=${port} user=${user}`);
     this.logger.log(`[PG_DUMP] Output path: ${outputPath}`);
 
     // ── Strategy 1: native pg_dump (works when postgresql-client is installed) ──
@@ -1012,7 +1215,7 @@ export class DatabaseService {
         '--no-owner',
         '--no-privileges',
         '-h', host,
-        '-p', port || '5432',
+        '-p', port,
         '-U', user,
         dbName,
       ],
@@ -1077,116 +1280,75 @@ export class DatabaseService {
     this.logger.log(`[PG_DUMP] SQL dump written successfully: ${outputPath} (${stdout.length} bytes)`);
   }
 
-  private restorePostgres(sqlPath: string): void {
-    const dbUrl = this.config.get<string>('DATABASE_URL', '');
-    const match = dbUrl.match(/postgresql:\/\/([^:]+):([^@]+)@([^:\/]+):?(\d+)?\/([^?]+)/);
-    if (!match) throw new InternalServerErrorException('Impossible de parser DATABASE_URL pour psql');
+  private restorePostgres(dumpPath: string): void {
+    const connection = this.getPostgresConnection();
+    const extension = path.extname(dumpPath).toLowerCase();
+    const signature = fs.readFileSync(dumpPath).subarray(0, 5).toString('ascii');
+    const isCustomDump = signature === 'PGDMP' || extension === '.dump' || extension === '.backup';
+    const isPlainSql = !isCustomDump;
+    const tool = isPlainSql ? 'psql' : 'pg_restore';
+    const common = [
+      '-h', connection.host, '-p', connection.port,
+      '-U', connection.user, '-d', connection.database,
+    ];
+    const nativeArgs = isPlainSql
+      ? [...common, '--set=ON_ERROR_STOP=1', '-f', dumpPath]
+      : [...common, '--clean', '--if-exists', '--no-owner', '--no-privileges', dumpPath];
+    const dockerArgs = isPlainSql
+      ? ['-U', connection.user, '-d', connection.database, '--set=ON_ERROR_STOP=1']
+      : ['-U', connection.user, '-d', connection.database, '--clean', '--if-exists', '--no-owner', '--no-privileges'];
+    const input = fs.readFileSync(dumpPath);
 
-    const [, user, password, host, port, dbName] = match;
-
-    this.logger.log(`[PSQL_RESTORE] Starting — db=${dbName} host=${host} port=${port || '5432'} user=${user}`);
-
-    // ── Strategy 1: native psql ──────────────────────────────────────────────
-    this.logger.log(`[PSQL_RESTORE] Trying native psql...`);
-    let result = spawnSync(
-      'psql',
-      [
-        '-h', host,
-        '-p', port || '5432',
-        '-U', user,
-        '-d', dbName,
-        '--set=ON_ERROR_STOP=0',
-        '-f', sqlPath,
-      ],
-      { env: { ...process.env, PGPASSWORD: password }, maxBuffer: 500 * 1024 * 1024 },
+    this.logger.log(
+      `[RESTORE] Dump format: ${isPlainSql ? 'plain SQL' : 'PostgreSQL custom'} (extension=${extension}, signature=${signature === 'PGDMP' ? 'PGDMP' : 'text'})`,
     );
-
-    // ── Strategy 2: docker exec (dev mode — backend on host, postgres in Docker) ──
-    if (result.error) {
-      this.logger.warn(`[PSQL_RESTORE] Native psql unavailable (${result.error.message})`);
-      const containerName = this.config.get<string>('POSTGRES_CONTAINER_NAME', 'stockini-postgres');
-      this.logger.log(`[PSQL_RESTORE] Trying docker exec psql on container: ${containerName}`);
-
-      const sql = fs.readFileSync(sqlPath);
-      result = spawnSync(
-        'docker',
-        [
-          'exec', '-i',
-          '-e', `PGPASSWORD=${password}`,
-          containerName,
-          'psql',
-          '-U', user,
-          '-d', dbName,
-          '-v', 'ON_ERROR_STOP=0',
-        ],
-        { input: sql, maxBuffer: 500 * 1024 * 1024 },
-      );
-
-      if (result.error) {
-        throw new InternalServerErrorException(
-          `psql introuvable et docker exec échoué : ${result.error.message}. ` +
-          `Installez postgresql-client ou définissez POSTGRES_CONTAINER_NAME.`,
-        );
-      }
-    }
-
-    const stderr = result.stderr
-      ? (Buffer.isBuffer(result.stderr) ? result.stderr.toString('utf8') : String(result.stderr)).trim()
-      : '';
-    const stdout = result.stdout
-      ? (Buffer.isBuffer(result.stdout) ? result.stdout.toString('utf8') : String(result.stdout)).trim()
-      : '';
-
-    this.logger.log(`[PSQL_RESTORE] Docker restore exit code: ${result.status}`);
-    if (stderr) this.logger.log(`[PSQL_RESTORE] STDERR: ${stderr.substring(0, 1000)}`);
-    if (stdout) this.logger.log(`[PSQL_RESTORE] STDOUT: ${stdout.substring(0, 500)}`);
-
-    if (result.status !== null && result.status !== 0) {
-      throw new InternalServerErrorException(
-        `Restauration SQL échouée (exit ${result.status}) : ${stderr || 'pas de message'}`,
-      );
-    }
-
-    this.logger.log(`[PSQL_RESTORE] Completed successfully`);
+    this.logger.log(
+      `[RESTORE] Command: ${tool} ${nativeArgs.join(' ')} (PGPASSWORD hidden)`,
+    );
+    const result = this.runPostgresCommand(tool, nativeArgs, dockerArgs, input);
+    this.assertPostgresCommandSucceeded(`${tool} restore`, result);
+    this.logger.log(`[RESTORE] PostgreSQL restore completed successfully`);
   }
 
   private async exportMinio(targetDir: string): Promise<void> {
-    try {
-      const keys = await this.minio.listAllObjects(this.minio.bucket);
-      for (const key of keys) {
-        const buf = await this.minio.getObject(this.minio.bucket, key);
-        const destPath = path.join(targetDir, key.replace(/\//g, path.sep));
-        fs.mkdirSync(path.dirname(destPath), { recursive: true });
-        fs.writeFileSync(destPath, buf);
+    const keys = await this.minio.listAllObjects(this.minio.bucket);
+    for (const key of keys) {
+      const buf = await this.minio.getObject(this.minio.bucket, key);
+      const targetRoot = path.resolve(targetDir);
+      const destPath = path.resolve(targetRoot, key.replace(/\//g, path.sep));
+      if (destPath !== targetRoot && !destPath.startsWith(`${targetRoot}${path.sep}`)) {
+        throw new InternalServerErrorException(`Clé MinIO hors périmètre : ${key}`);
       }
-      this.logger.log(`[BACKUP] MinIO: exported ${keys.length} object(s)`);
-    } catch (err) {
-      this.logger.warn(`MinIO export warning: ${(err as Error).message}`);
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.writeFileSync(destPath, buf);
     }
+    this.logger.log(`[BACKUP] MinIO: exported ${keys.length} object(s)`);
   }
 
-  private async importMinio(sourceDir: string): Promise<void> {
-    try {
-      const walk = (dir: string): string[] => {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        const files: string[] = [];
-        for (const e of entries) {
-          const full = path.join(dir, e.name);
-          if (e.isDirectory()) files.push(...walk(full));
-          else files.push(full);
-        }
-        return files;
-      };
-
-      const files = walk(sourceDir);
-      for (const f of files) {
-        const objName = path.relative(sourceDir, f).replace(/\\/g, '/');
-        const buf = fs.readFileSync(f);
-        await this.minio.putObject(this.minio.bucket, objName, buf, 'application/octet-stream');
+  private async importMinio(sourceDir: string, clearExisting = false): Promise<number> {
+    const walk = (dir: string): string[] => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const files: string[] = [];
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) files.push(...walk(full));
+        else files.push(full);
       }
-    } catch (err) {
-      this.logger.warn(`MinIO import warning: ${(err as Error).message}`);
+      return files;
+    };
+
+    const files = walk(sourceDir);
+    if (clearExisting) {
+      const existingKeys = await this.minio.listAllObjects(this.minio.bucket);
+      for (const key of existingKeys) await this.minio.removeObject(this.minio.bucket, key);
+      this.logger.log(`[RESTORE] MinIO: removed ${existingKeys.length} existing object(s)`);
     }
+    for (const f of files) {
+      const objName = path.relative(sourceDir, f).replace(/\\/g, '/');
+      const buf = fs.readFileSync(f);
+      await this.minio.putObject(this.minio.bucket, objName, buf, 'application/octet-stream');
+    }
+    return files.length;
   }
 
   private createZip(sourceDir: string, destPath: string): void {

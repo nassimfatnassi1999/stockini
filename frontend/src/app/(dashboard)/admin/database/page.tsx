@@ -29,6 +29,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { clearAuthSession } from '@/lib/auth';
 import { toast } from '@/lib/toast';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
@@ -238,6 +239,17 @@ function BackupsTab() {
   const restoreRef = useRef<HTMLInputElement>(null);
   const [restoring, setRestoring] = useState(false);
 
+  const readRestoreError = (payload: unknown, status: number): string => {
+    if (payload && typeof payload === 'object') {
+      const value = (payload as { details?: unknown }).details ??
+        (payload as { message?: unknown; error?: unknown }).message ??
+        (payload as { error?: unknown }).error;
+      if (Array.isArray(value)) return value.join(', ');
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return `Erreur HTTP ${status}`;
+  };
+
   const loadBackups = useCallback(async () => {
     setLoading(true);
     try {
@@ -253,11 +265,15 @@ function BackupsTab() {
   const createBackup = async () => {
     setCreating(true);
     try {
-      const { data } = await api.post<{ success: boolean; filename: string; size: number }>('/admin/database/backup');
+      const { data } = await api.post<{ success: boolean; filename: string; size: number }>(
+        '/admin/database/backups',
+        {},
+      );
       toast.success(`Sauvegarde créée : ${data.filename}`);
       await loadBackups();
-    } catch {
-      toast.error('Échec de la création de la sauvegarde');
+    } catch (error) {
+      const payload = (error as { response?: { data?: unknown; status?: number } }).response;
+      toast.error(`Échec de la création : ${readRestoreError(payload?.data, payload?.status ?? 500)}`);
     } finally {
       setCreating(false);
     }
@@ -295,13 +311,16 @@ function BackupsTab() {
       await api.delete(`/admin/database/backups/${encodeURIComponent(filename)}`);
       toast.success('Sauvegarde supprimée');
       await loadBackups();
-    } catch {
-      toast.error('Erreur lors de la suppression');
+    } catch (error) {
+      const payload = (error as { response?: { data?: unknown; status?: number } }).response;
+      toast.error(`Erreur suppression : ${readRestoreError(payload?.data, payload?.status ?? 500)}`);
     }
   };
 
   const handleRestoreFile = async (file: File) => {
     setRestoring(true);
+    window.sessionStorage.setItem('stockini_restore_in_progress', '1');
+    let restoreSucceeded = false;
     try {
       // Use fetch directly to avoid axios interceptor double-toast on 500 errors.
       // Never set Content-Type manually with FormData — the browser must add the boundary.
@@ -315,44 +334,66 @@ function BackupsTab() {
         body: form,
       });
 
-      type RestoreResponse = { success?: boolean; restored?: string[]; message?: string };
+      type RestoreResponse = { success?: boolean; restored?: string[]; message?: string; details?: string; requiresReLogin?: boolean };
       let json: RestoreResponse = {};
-      try { json = await res.json() as RestoreResponse; } catch { /* ignore parse errors */ }
+      try { json = await res.json() as RestoreResponse; } catch { /* response may be plain text */ }
 
       if (!res.ok) {
-        throw new Error(json.message ?? `Erreur HTTP ${res.status}`);
+        throw new Error(readRestoreError(json, res.status));
       }
 
-      toast.success(`Restauration réussie : ${(json.restored ?? []).join(', ')}`);
-      setTimeout(() => window.location.reload(), 1500);
+      restoreSucceeded = true;
+      clearAuthSession();
+      window.sessionStorage.setItem(
+        'stockini_restore_message',
+        'Restauration terminée. Veuillez vous reconnecter.',
+      );
+      toast.success('Restauration terminée. Veuillez vous reconnecter.');
+      window.history.replaceState(null, '', '/login');
+      window.setTimeout(() => window.location.reload(), 500);
     } catch (err) {
+      window.sessionStorage.removeItem('stockini_restore_in_progress');
       toast.error(`Erreur restauration : ${(err as Error).message}`);
     } finally {
-      setRestoring(false);
+      if (!restoreSucceeded) setRestoring(false);
       if (restoreRef.current) restoreRef.current.value = '';
     }
   };
 
   const restoreByFilename = async (filename: string) => {
     setRestoring(true);
+    window.sessionStorage.setItem('stockini_restore_in_progress', '1');
+    let restoreSucceeded = false;
     try {
       const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') ?? '') : '';
       const res = await fetch(`/api/admin/database/backups/${encodeURIComponent(filename)}/restore`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
       });
-      type RestoreResponse = { success?: boolean; restored?: string[]; message?: string };
+      type RestoreResponse = { success?: boolean; restored?: string[]; message?: string; details?: string; requiresReLogin?: boolean };
       let json: RestoreResponse = {};
       try { json = await res.json() as RestoreResponse; } catch { /* ignore */ }
       if (!res.ok) {
-        throw new Error(json.message ?? `Erreur HTTP ${res.status}`);
+        throw new Error(readRestoreError(json, res.status));
       }
-      toast.success(`Restauration réussie : ${(json.restored ?? []).join(', ')}`);
-      setTimeout(() => window.location.reload(), 1500);
+      restoreSucceeded = true;
+      clearAuthSession();
+      window.sessionStorage.setItem(
+        'stockini_restore_message',
+        'Restauration terminée. Veuillez vous reconnecter.',
+      );
+      toast.success('Restauration terminée. Veuillez vous reconnecter.');
+      window.history.replaceState(null, '', '/login');
+      window.setTimeout(() => window.location.reload(), 500);
     } catch (err) {
+      window.sessionStorage.removeItem('stockini_restore_in_progress');
       toast.error(`Erreur restauration : ${(err as Error).message}`);
     } finally {
-      setRestoring(false);
+      if (!restoreSucceeded) setRestoring(false);
     }
   };
 
@@ -362,6 +403,15 @@ function BackupsTab() {
 
   return (
     <div className="space-y-4">
+      {restoring && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-surface/95 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-8 py-7 shadow-xl">
+            <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-base font-semibold text-text-primary">Restauration en cours...</p>
+            <p className="text-sm text-text-secondary">Ne fermez pas cette page.</p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -374,11 +424,11 @@ function BackupsTab() {
             Actualiser
           </Button>
           <Can permission="database.backup">
-            <Button size="sm" onClick={createBackup} disabled={creating}>
+            <Button size="sm" onClick={createBackup} disabled={creating || restoring}>
               {creating
                 ? <RefreshCw size={13} className="mr-1.5 animate-spin" />
                 : <Plus size={13} className="mr-1.5" />}
-              {creating ? 'Création...' : 'Créer une sauvegarde'}
+              {creating ? 'Création...' : 'Créer sauvegarde complète'}
             </Button>
           </Can>
         </div>
@@ -393,7 +443,7 @@ function BackupsTab() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-text-primary">Restaurer depuis un fichier</p>
-              <p className="text-xs text-text-secondary">Uploadez un fichier .zip de sauvegarde pour restaurer</p>
+              <p className="text-xs text-text-secondary">Restaure la base PostgreSQL puis remplace les fichiers MinIO.</p>
             </div>
             <input
               ref={restoreRef}
@@ -526,7 +576,7 @@ function BackupsTab() {
       <ConfirmDialog
         open={confirm?.type === 'restore-server'}
         title="Restaurer cette sauvegarde ?"
-        message={`Cette opération remplacera les données actuelles par celles de ${confirm?.filename ?? 'la sauvegarde'}. Une sauvegarde de sécurité sera créée automatiquement avant la restauration. Cette action est irréversible.`}
+        message="Cette action remplacera la base et les fichiers MinIO actuels."
         confirmText="Restaurer"
         confirmKeyword="RESTAURER"
         dangerous

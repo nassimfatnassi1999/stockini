@@ -72,6 +72,7 @@ export interface PdfCompanyInfo {
   email?: string;
   taxNumber?: string;
   logoUrl?: string;
+  bankRib?: string;
 }
 
 // ── MSP Palette ───────────────────────────────────────────────────────────────
@@ -525,6 +526,31 @@ function drawPageFooter(
   doc.fontSize(6.5).fillColor(MSP_GRAY).font('Helvetica')
     .text('Cachet et signature', cachetX, cachetY + 5, { width: cachetW, align: 'center', lineBreak: false });
   drawHLine(doc, cachetX + 14, cachetY + 15, cachetX + cachetW - 14, MSP_BORDER, 0.2);
+
+  // Optional bank details — uses the free space beside the signature box.
+  const bankRib = company.bankRib?.trim();
+  if (bankRib) {
+    const bankX = MARGIN;
+    const bankY = fy + 29;
+    const bankW = cachetX - MARGIN - 10;
+    const bankH = 35;
+
+    (doc as any).roundedRect(bankX, bankY, bankW, bankH, 3)
+      .fillAndStroke('#FAFAFA', MSP_BORDER);
+    doc.fontSize(6.5).fillColor(MSP_DARK_GRAY).font('Helvetica-Bold')
+      .text('Coordonnées bancaires', bankX + 8, bankY + 5, {
+        width: bankW - 16,
+        lineBreak: false,
+      });
+    drawHLine(doc, bankX + 5, bankY + 15, bankX + bankW - 5, MSP_LINE, 0.3);
+    doc.fontSize(6.5).fillColor(MSP_BLACK).font('Helvetica')
+      .text(`RIB : ${bankRib}`, bankX + 8, bankY + 19, {
+        width: bankW - 16,
+        height: bankH - 22,
+        lineBreak: true,
+        ellipsis: true,
+      });
+  }
 }
 
 // ── Shared table column definitions ──────────────────────────────────────────

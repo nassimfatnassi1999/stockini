@@ -8,9 +8,10 @@ export const config = {
   matcher: [
     /*
      * Protège toutes les routes sauf :
-     * - _next/static, _next/image, favicon.ico
-     * - fichiers avec extension (images, fonts…)
+     * - tous les chemins internes Next.js (_next/*)
+     * - favicon.ico, assets/* et images/*
+     * - tous les fichiers statiques avec extension
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next(?:/|$)|favicon\\.ico$|assets(?:/|$)|images(?:/|$)|.*\\.[^/]+$).*)',
   ],
 };

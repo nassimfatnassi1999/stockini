@@ -76,10 +76,10 @@ export class SalesService {
   async getNextReference(
     documentType: DocumentType,
   ): Promise<{ reference: string }> {
-    const prefix = this.prefixForDocument(documentType);
-    const reference = await this.references.peekNextSimpleReference(
-      prefix,
-      'sale',
+    this.prefixForDocument(documentType);
+    const reference = await this.references.peekNextSalesDocumentNumber(
+      documentType,
+      'Client',
     );
     return { reference };
   }
@@ -155,21 +155,26 @@ export class SalesService {
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
     const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
+    const documentDate = new Date();
+    const counterClientFullName = isComptoir
+      ? (dto.counterClientFirstName && dto.counterClientLastName)
+        ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
+        : (dto.counterClientLastName?.trim() || dto.counterClientFirstName?.trim() || undefined)
+      : dto.counterClientFullName?.trim() || undefined;
 
     const sale = await this.prisma.$transaction(async (tx) => {
-      const prefix = this.prefixForDocument(documentType);
-      const invoiceNumber = await this.references.generateSimple(
-        prefix,
-        'sale',
+      const customer = resolvedCustomerId
+        ? await tx.customer.findUnique({
+            where: { id: resolvedCustomerId },
+            select: { name: true },
+          })
+        : null;
+      const invoiceNumber = await this.references.generateSalesDocumentNumber(
+        documentType,
+        customer?.name ?? counterClientFullName ?? (isComptoir ? 'Comptoir' : null),
+        documentDate,
         tx,
       );
-
-      const expectedPrefix = `${prefix}-`;
-      if (!invoiceNumber.startsWith(expectedPrefix)) {
-        throw new BadRequestException(
-          `Référence invalide pour le type ${documentType}. Attendu: ${expectedPrefix}...`,
-        );
-      }
 
       const productIds = dto.items.map((item) => item.productId);
       const products = await tx.product.findMany({
@@ -297,15 +302,10 @@ export class SalesService {
       });
 
       const sellerId = user?.id;
-      const counterClientFullName = isComptoir
-        ? (dto.counterClientFirstName && dto.counterClientLastName)
-          ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
-          : (dto.counterClientLastName?.trim() || dto.counterClientFirstName?.trim() || undefined)
-        : dto.counterClientFullName?.trim() || undefined;
-
       const sale = await tx.sale.create({
         data: {
           invoiceNumber,
+          createdAt: documentDate,
           customerId: resolvedCustomerId,
           clientType: resolvedClientType ?? null,
           counterClientFirstName: isComptoir ? dto.counterClientFirstName?.trim() ?? null : null,
@@ -867,10 +867,13 @@ export class SalesService {
         }
       }
 
-      const prefix = this.prefixForDocument(targetType);
-      const invoiceNumber = await this.references.generateSimple(
-        prefix,
-        'sale',
+      const documentDate = new Date();
+      const invoiceNumber = await this.references.generateSalesDocumentNumber(
+        targetType,
+        source.customer?.name ??
+          source.counterClientFullName ??
+          (source.clientType === 'COMPTOIR' ? 'Comptoir' : null),
+        documentDate,
         tx,
       );
 
@@ -882,6 +885,7 @@ export class SalesService {
       const newSale = await tx.sale.create({
         data: {
           invoiceNumber,
+          createdAt: documentDate,
           customerId: source.customerId,
           clientType: source.clientType,
           counterClientFirstName: source.counterClientFirstName,

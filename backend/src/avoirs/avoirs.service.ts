@@ -129,7 +129,10 @@ export class AvoirsService {
         // Validate sale
         const sale = await tx.sale.findFirst({
           where: { id: dto.saleId, deletedAt: null },
-          include: { items: { include: { product: true } } },
+          include: {
+            customer: { select: { name: true } },
+            items: { include: { product: true } },
+          },
         });
         if (!sale)
           throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
@@ -277,15 +280,20 @@ export class AvoirsService {
         const total = totals.totalTtc;
         const montantRembourse = refundMethod === 'NONE' ? 0 : total;
 
-        const numero = await this.references.generateSimple(
-          'AV',
-          'creditNote',
+        const documentDate = new Date();
+        const numero = await this.references.generateSalesDocumentNumber(
+          DocumentType.AVOIR,
+          sale.customer?.name ??
+            sale.counterClientFullName ??
+            (sale.clientType === 'COMPTOIR' ? 'Comptoir' : null),
+          documentDate,
           tx,
         );
 
         const avoir = await tx.creditNote.create({
           data: {
             numero,
+            dateAvoir: documentDate,
             saleId: dto.saleId,
             customerId: effectiveCustomerId,
             motif: dto.motif,
@@ -488,10 +496,11 @@ export class AvoirsService {
     );
 
     // Store or update in minio and GeneratedDocument
-    const fileName = `AVOIR-${avoir.numero}.pdf`;
+    const fileName = `${avoir.numero}.pdf`;
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const documentDate = new Date(avoir.dateAvoir);
+    const year = documentDate.getFullYear();
+    const month = String(documentDate.getMonth() + 1).padStart(2, '0');
     const objectKey = `documents/ventes/avoir/${year}/${month}/${fileName}`;
 
     await this.minio.putObject(
@@ -505,7 +514,6 @@ export class AvoirsService {
       where: {
         creditNoteId: id,
         documentType: DocumentType.AVOIR,
-        status: { not: DocumentStatus.DELETED },
       },
     });
 
@@ -516,27 +524,40 @@ export class AvoirsService {
           fileSize: pdfBuffer.length,
           generatedAt: now,
           status: DocumentStatus.GENERATED,
+          deletedAt: null,
+          deletedBy: null,
         },
       });
     } else {
-      await this.prisma.generatedDocument.create({
-        data: {
-          creditNoteId: id,
-          clientId: avoir.customerId ?? undefined,
-          clientName: customerName,
-          documentType: DocumentType.AVOIR,
-          documentNumber: `AVOIR-${avoir.numero}`,
-          fileName,
-          minioBucket: this.minio.bucket,
-          minioObjectKey: objectKey,
-          fileSize: pdfBuffer.length,
-          totalHt: avoir.subtotal,
-          totalTva: avoir.tax,
-          totalTtc: avoir.total,
-          generatedBy: user?.id,
-          status: DocumentStatus.GENERATED,
-        },
-      });
+      try {
+        await this.prisma.generatedDocument.create({
+          data: {
+            creditNoteId: id,
+            clientId: avoir.customerId ?? undefined,
+            clientName: customerName,
+            documentType: DocumentType.AVOIR,
+            documentNumber: avoir.numero,
+            fileName,
+            minioBucket: this.minio.bucket,
+            minioObjectKey: objectKey,
+            fileSize: pdfBuffer.length,
+            totalHt: avoir.subtotal,
+            totalTva: avoir.tax,
+            totalTtc: avoir.total,
+            generatedBy: user?.id,
+            status: DocumentStatus.GENERATED,
+          },
+        });
+      } catch (error) {
+        if (!this.isDocumentNumberConflict(error)) throw error;
+        const concurrent = await this.prisma.generatedDocument.findFirst({
+          where: { creditNoteId: id, documentType: DocumentType.AVOIR },
+        });
+        if (!concurrent) throw error;
+        this.logger.warn(
+          `Concurrent PDF generation reused ${concurrent.documentNumber}`,
+        );
+      }
     }
 
     return { buffer: pdfBuffer, fileName };
@@ -656,6 +677,26 @@ export class AvoirsService {
         map['matricule_fiscal'] ??
         process.env.COMPANY_TAX_ID ??
         undefined,
+      bankRib:
+        map['company_bank_rib']?.trim() ||
+        map['bank_rib']?.trim() ||
+        process.env.COMPANY_BANK_RIB?.trim() ||
+        undefined,
     };
+  }
+
+  private isDocumentNumberConflict(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+    const target = error.meta?.target;
+    return (
+      target === 'GeneratedDocument_documentNumber_key' ||
+      target === 'documentNumber' ||
+      (Array.isArray(target) && target.includes('documentNumber'))
+    );
   }
 }

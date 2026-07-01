@@ -47,3 +47,6 @@ settings.local.json
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# Runtime backup archives
+/backend/storage/backups/

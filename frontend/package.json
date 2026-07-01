@@ -4,6 +4,7 @@
   "description": "Stockini — Frontend Next.js",
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev",
+    "clean:next": "rm -rf .next node_modules/.cache && NEXT_TELEMETRY_DISABLED=1 next dev",
     "dev:clean": "rm -rf .next && NEXT_TELEMETRY_DISABLED=1 next dev",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "build:clean": "rm -rf .next && NEXT_TELEMETRY_DISABLED=1 next build",

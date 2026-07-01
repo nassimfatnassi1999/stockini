@@ -87,18 +87,18 @@ export class DocumentsService {
         where: {
           invoiceId,
           documentType: dto.documentType,
-          status: { not: DocumentStatus.DELETED },
         },
       });
-      if (existing) {
+      if (existing && existing.status !== DocumentStatus.DELETED) {
         results.push(existing);
         continue;
       }
 
       const companySettings = await this.getCompanySettings();
-      const prefix = DOC_PREFIXES[dto.documentType];
-      const documentNumber = `${prefix}-${sale.invoiceNumber}`;
-      const fileName = `${documentNumber}.pdf`;
+      // The sale reference is already the canonical, globally unique business
+      // document number. Reusing it keeps the PDF and sale screens consistent.
+      const documentNumber = existing?.documentNumber ?? sale.invoiceNumber;
+      const fileName = existing?.fileName ?? `${documentNumber}.pdf`;
       const clientId = sale.customerId ?? undefined;
       const clientName =
         sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir';
@@ -106,7 +106,9 @@ export class DocumentsService {
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const folder = DOC_FOLDER[dto.documentType];
-      const objectKey = `documents/ventes/${folder}/${year}/${month}/${fileName}`;
+      const objectKey =
+        existing?.minioObjectKey ??
+        `documents/ventes/${folder}/${year}/${month}/${fileName}`;
 
       const isComptoir = sale.clientType === 'COMPTOIR';
       // Snapshot fields take priority over live customer data for all client types
@@ -146,24 +148,59 @@ export class DocumentsService {
         'application/pdf',
       );
 
-      const doc = await this.prisma.generatedDocument.create({
-        data: {
-          invoiceId,
-          clientId,
-          clientName,
-          documentType: dto.documentType,
-          documentNumber,
-          fileName,
-          minioBucket: this.minio.bucket,
-          minioObjectKey: objectKey,
-          fileSize: pdfBuffer.length,
-          totalHt: sale.subtotal,
-          totalTva: sale.tax,
-          totalTtc: sale.total,
-          generatedBy: user?.id,
-          status: DocumentStatus.GENERATED,
-        },
-      });
+      const data: Prisma.GeneratedDocumentUncheckedCreateInput = {
+        invoiceId,
+        clientId,
+        clientName,
+        documentType: dto.documentType,
+        documentNumber,
+        fileName,
+        minioBucket: this.minio.bucket,
+        minioObjectKey: objectKey,
+        fileSize: pdfBuffer.length,
+        totalHt: sale.subtotal,
+        totalTva: sale.tax,
+        totalTtc: sale.total,
+        generatedBy: user?.id,
+        status: DocumentStatus.GENERATED,
+      };
+
+      let doc;
+      if (existing) {
+        // Soft-deleted documents keep their unique number. Reuse the canonical
+        // row and restore it instead of attempting an impossible duplicate.
+        doc = await this.prisma.generatedDocument.update({
+          where: { id: existing.id },
+          data: {
+            ...data,
+            deletedAt: null,
+            deletedBy: null,
+            generatedAt: now,
+            emailStatus: EmailStatus.PENDING,
+            sentAt: null,
+            sentTo: null,
+          },
+        });
+      } else {
+        try {
+          doc = await this.prisma.generatedDocument.create({ data });
+        } catch (error) {
+          if (!this.isDocumentNumberConflict(error)) throw error;
+
+          // Another request may have created this sale/type after our initial
+          // lookup. The unique index is the atomic arbiter; return its winner.
+          const concurrentDocument =
+            await this.prisma.generatedDocument.findFirst({
+              where: { invoiceId, documentType: dto.documentType },
+            });
+          if (!concurrentDocument) throw error;
+
+          doc = concurrentDocument;
+          this.logger.warn(
+            `Concurrent generation reused ${concurrentDocument.documentNumber}`,
+          );
+        }
+      }
 
       results.push(doc);
       this.logger.log(`Generated ${documentNumber} stored at ${objectKey}`);
@@ -918,6 +955,22 @@ export class DocumentsService {
 
   // ─── Private helpers ─────────────────────────────────────────────────────────
 
+  private isDocumentNumberConflict(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+
+    const target = error.meta?.target;
+    return (
+      target === 'GeneratedDocument_documentNumber_key' ||
+      target === 'documentNumber' ||
+      (Array.isArray(target) && target.includes('documentNumber'))
+    );
+  }
+
   private async getCompanySettings() {
     const rows = await this.settings.findAll();
     const map: Record<string, string> = {};
@@ -953,6 +1006,11 @@ export class DocumentsService {
       logoUrl:
         map['company_logo_url'] ??
         process.env.COMPANY_LOGO_URL ??
+        undefined,
+      bankRib:
+        map['company_bank_rib']?.trim() ||
+        map['bank_rib']?.trim() ||
+        process.env.COMPANY_BANK_RIB?.trim() ||
         undefined,
     };
   }

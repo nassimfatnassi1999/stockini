@@ -4,11 +4,11 @@ import type { SaleDetail } from './types';
 
 export type SalesDocumentType = 'devis' | 'bon_commande' | 'bon_livraison' | 'facture';
 
-const DOC_CONFIG: Record<SalesDocumentType, { title: string; filePrefix: string }> = {
-  devis: { title: 'DEVIS', filePrefix: 'DEVIS' },
-  bon_commande: { title: 'BON DE COMMANDE', filePrefix: 'BON-COMMANDE' },
-  bon_livraison: { title: 'BON DE LIVRAISON', filePrefix: 'BON-LIVRAISON' },
-  facture: { title: 'FACTURE', filePrefix: 'FACTURE' },
+const DOC_CONFIG: Record<SalesDocumentType, { title: string }> = {
+  devis: { title: 'DEVIS' },
+  bon_commande: { title: 'BON DE COMMANDE' },
+  bon_livraison: { title: 'BON DE LIVRAISON' },
+  facture: { title: 'FACTURE' },
 };
 
 interface CompanyInfo {
@@ -345,6 +345,6 @@ export function generateSalesPDF(
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────────
-  const fileName = `${config.filePrefix}-${sale.invoiceNumber}.pdf`;
+  const fileName = `${sale.invoiceNumber}.pdf`;
   doc.save(fileName);
 }

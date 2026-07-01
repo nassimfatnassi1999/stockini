@@ -28,11 +28,15 @@ describe('SalesService document references', () => {
 
   function buildService() {
     const references = {
-      peekNextSimpleReference: jest.fn((prefix: string) =>
-        Promise.resolve(`${prefix}-001`),
+      peekNextSalesDocumentNumber: jest.fn((documentType: DocumentType) =>
+        Promise.resolve(
+          `${{ FACTURE: 'FAC', DEVIS: 'DEV', BON_COMMANDE: 'BC', BON_LIVRAISON: 'BL', AVOIR: 'AV' }[documentType]}-Client-01072026-001`,
+        ),
       ),
-      generateSimple: jest.fn((prefix: string) =>
-        Promise.resolve(`${prefix}-001`),
+      generateSalesDocumentNumber: jest.fn((documentType: DocumentType) =>
+        Promise.resolve(
+          `${{ FACTURE: 'FAC', DEVIS: 'DEV', BON_COMMANDE: 'BC', BON_LIVRAISON: 'BL', AVOIR: 'AV' }[documentType]}-AutoTop-01072026-001`,
+        ),
       ),
       generate: jest.fn((prefix: string) => Promise.resolve(`${prefix}-001`)),
     };
@@ -42,6 +46,9 @@ describe('SalesService document references', () => {
       product: {
         findMany: jest.fn().mockResolvedValue([product]),
         update: jest.fn().mockResolvedValue(product),
+      },
+      customer: {
+        findUnique: jest.fn().mockResolvedValue({ name: 'Auto Top' }),
       },
       sale: {
         create: jest.fn(({ data }: { data: any }) =>
@@ -147,10 +154,10 @@ describe('SalesService document references', () => {
   }
 
   it.each([
-    [DocumentType.FACTURE, 'FAC', 'FAC-001'],
-    [DocumentType.DEVIS, 'DEV', 'DEV-001'],
-    [DocumentType.BON_COMMANDE, 'BC', 'BC-001'],
-    [DocumentType.BON_LIVRAISON, 'BL', 'BL-001'],
+    [DocumentType.FACTURE, 'FAC', 'FAC-AutoTop-01072026-001'],
+    [DocumentType.DEVIS, 'DEV', 'DEV-AutoTop-01072026-001'],
+    [DocumentType.BON_COMMANDE, 'BC', 'BC-AutoTop-01072026-001'],
+    [DocumentType.BON_LIVRAISON, 'BL', 'BL-AutoTop-01072026-001'],
   ])(
     'creates %s with recalculated HT/TVA/TTC and exact %s reference',
     async (documentType, prefix, expectedReference) => {
@@ -165,9 +172,10 @@ describe('SalesService document references', () => {
         items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
       });
 
-      expect(references.generateSimple).toHaveBeenCalledWith(
-        prefix,
-        'sale',
+      expect(references.generateSalesDocumentNumber).toHaveBeenCalledWith(
+        documentType,
+        'Auto Top',
+        expect.any(Date),
         tx,
       );
       expect(tx.sale.create).toHaveBeenCalledWith(
@@ -292,12 +300,12 @@ describe('SalesService document references', () => {
     await expect(
       service.getNextReference(DocumentType.FACTURE),
     ).resolves.toEqual({
-      reference: 'FAC-001',
+      reference: 'FAC-Client-01072026-001',
     });
 
-    expect(references.peekNextSimpleReference).toHaveBeenCalledWith(
-      'FAC',
-      'sale',
+    expect(references.peekNextSalesDocumentNumber).toHaveBeenCalledWith(
+      DocumentType.FACTURE,
+      'Client',
     );
   });
 

@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Delete,
   Get,
+  HttpException,
+  HttpStatus,
   Logger,
   NotFoundException,
   Param,
@@ -16,9 +19,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import type { Multer } from 'multer';
-import { RequirePermissions } from '../auth/decorators';
+import { RequirePermissions, Roles } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { DatabaseService } from './database.service';
@@ -27,7 +31,8 @@ import * as path from 'path';
 
 type MulterFile = Express.Multer.File;
 
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Roles('ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin')
 @Controller('admin/database')
 export class DatabaseController {
   private readonly logger = new Logger(DatabaseController.name);
@@ -47,14 +52,20 @@ export class DatabaseController {
   @RequirePermissions('database.view')
   @Get('backups')
   listBackups() {
-    return this.db.listBackups();
+    return this.db.listBackups().map(({ path: _path, ...backup }) => backup);
   }
 
   @RequirePermissions('database.backup')
-  @Post('backup')
-  async createBackup(@CurrentUser() user: AuthUser) {
-    const result = await this.db.createBackup(user);
-    return { success: true, filename: result.filename, size: result.size };
+  @Post('backups')
+  async createBackup(
+    @CurrentUser() user: AuthUser,
+  ) {
+    try {
+      const result = await this.db.createBackup(user);
+      return { success: true, filename: result.filename, size: result.size };
+    } catch (error) {
+      this.throwStructuredError(error, 'Backup creation failed');
+    }
   }
 
   @RequirePermissions('database.backup')
@@ -62,7 +73,7 @@ export class DatabaseController {
   async downloadBackup(@Param('filename') filename: string, @Res() res: Response) {
     this.logger.log(`[DOWNLOAD] Backup requested: ${filename}`);
     try {
-      const filePath = this.db.getBackupPath(filename);
+      const filePath = this.db.downloadBackup(filename);
       const stat = fs.statSync(filePath);
 
       if (stat.size === 0) {
@@ -82,7 +93,7 @@ export class DatabaseController {
       stream.on('error', (err) => {
         this.logger.error(`[DOWNLOAD] Stream error for ${filename}: ${err.message}`);
         if (!res.headersSent) {
-          res.status(500).json({ message: 'Erreur lecture du fichier' });
+          res.status(500).json({ success: false, message: 'Download failed', details: err.message });
         }
       });
       stream.pipe(res);
@@ -94,7 +105,7 @@ export class DatabaseController {
           err instanceof NotFoundException ? 404
           : err instanceof BadRequestException ? 400
           : 500;
-        res.status(status).json({ message: (err as Error).message });
+        res.status(status).json({ success: false, message: 'Download failed', details: (err as Error).message });
       }
     }
   }
@@ -105,8 +116,17 @@ export class DatabaseController {
     @Param('filename') filename: string,
     @CurrentUser() user: AuthUser,
   ) {
-    const result = await this.db.restoreBackupByFilename(filename, user);
-    return { success: true, restored: result.restored };
+    try {
+      const result = await this.db.restoreBackupByFilename(filename, user);
+      return {
+        success: true,
+        message: 'Restauration terminée avec succès. Reconnexion requise.',
+        requiresReLogin: true,
+        restored: result.restored,
+      };
+    } catch (error) {
+      this.throwStructuredError(error, 'Restore failed');
+    }
   }
 
   @RequirePermissions('database.backup')
@@ -115,8 +135,12 @@ export class DatabaseController {
     @Param('filename') filename: string,
     @CurrentUser() user: AuthUser,
   ) {
-    await this.db.deleteBackup(filename, user);
-    return { success: true };
+    try {
+      await this.db.deleteBackup(filename, user);
+      return { success: true };
+    } catch (error) {
+      this.throwStructuredError(error, 'Backup deletion failed');
+    }
   }
 
   // ─── Restore ─────────────────────────────────────────────────────────────────
@@ -153,8 +177,33 @@ export class DatabaseController {
 
     this.logger.log(`[RESTORE] File received: ${file.originalname} (${file.size} bytes, mime: ${file.mimetype})`);
 
-    const result = await this.db.restoreBackup(file.buffer, user);
-    return { success: true, restored: result.restored };
+    try {
+      const result = await this.db.restoreBackup(file.buffer, user, {
+        uploadedFilename: file.originalname,
+      });
+      return {
+        success: true,
+        message: 'Restauration terminée avec succès. Reconnexion requise.',
+        requiresReLogin: true,
+        restored: result.restored,
+      };
+    } catch (error) {
+      this.throwStructuredError(error, 'Restore failed');
+    }
+  }
+
+  private throwStructuredError(error: unknown, message: string): never {
+    const status = error instanceof HttpException ? error.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    const response = error instanceof HttpException ? error.getResponse() : undefined;
+    const detail = typeof response === 'string'
+      ? response
+      : response && typeof response === 'object' && 'message' in response
+        ? (response as { message: string | string[] }).message
+        : error instanceof Error ? error.message : String(error);
+    throw new HttpException(
+      { success: false, message, details: Array.isArray(detail) ? detail.join(', ') : detail },
+      status,
+    );
   }
 
   // ─── Export ───────────────────────────────────────────────────────────────────

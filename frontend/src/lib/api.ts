@@ -11,6 +11,15 @@ export const api = axios.create({
 // Queue of requests waiting for token refresh to complete
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
+let loginRedirectStarted = false;
+
+function redirectToLogin() {
+  if (typeof window === 'undefined' || loginRedirectStarted) return;
+  loginRedirectStarted = true;
+  processQueue(new Error('Session expirée'), null);
+  clearAuthSession();
+  window.location.href = '/login';
+}
 
 // Deduplicate 403 toasts — only fire once per 3-second window
 let toast403Timer: ReturnType<typeof setTimeout> | null = null;
@@ -53,6 +62,17 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url: string = originalRequest?.url ?? '';
 
+    // During a destructive restore, background dashboard requests may become 401
+    // before the restore response returns. Keep the overlay mounted and let the
+    // restore request perform the final logout after confirmed success.
+    if (
+      status === 401 &&
+      typeof window !== 'undefined' &&
+      window.sessionStorage.getItem('stockini_restore_in_progress') === '1'
+    ) {
+      return Promise.reject(error);
+    }
+
     // Handle 401: attempt silent refresh before logging out
     if (
       status === 401 &&
@@ -77,8 +97,7 @@ api.interceptors.response.use(
 
       const refreshToken = window.localStorage.getItem('refresh_token');
       if (!refreshToken) {
-        clearAuthSession();
-        window.location.href = '/login';
+        redirectToLogin();
         return Promise.reject(error);
       }
 
@@ -97,8 +116,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-        clearAuthSession();
-        window.location.href = '/login';
+        redirectToLogin();
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

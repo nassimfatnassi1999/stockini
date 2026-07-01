@@ -39,6 +39,14 @@ export class MinioService implements OnModuleInit {
     }
   }
 
+  async ensureBucketOrThrow(bucket: string): Promise<void> {
+    const exists = await this.client.bucketExists(bucket);
+    if (!exists) {
+      await this.client.makeBucket(bucket);
+      this.logger.log(`Bucket "${bucket}" created for restore`);
+    }
+  }
+
   async putObject(
     bucket: string,
     objectKey: string,

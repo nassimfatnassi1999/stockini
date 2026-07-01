@@ -1,7 +1,7 @@
 'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { isAuthenticated, setLastRoute } from '@/lib/auth';
 import { AppSidebar } from '@/components/shared/AppSidebar';
 import { AppTopbar } from '@/components/shared/AppTopbar';
@@ -10,19 +10,29 @@ import { BreadcrumbProvider } from '@/components/shared/breadcrumb-context';
 import { SidebarProvider } from '@/components/shared/sidebar-context';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
-      router.push('/login');
+      window.location.href = '/login';
+      return;
     }
-  }, [router]);
+    setAuthChecked(true);
+  }, []);
 
   // Persist the current route so we can restore it after login/refresh
   useEffect(() => {
-    if (pathname) setLastRoute(pathname);
-  }, [pathname]);
+    if (authChecked && pathname) setLastRoute(pathname);
+  }, [authChecked, pathname]);
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface text-sm text-text-secondary">
+        Vérification de la session...
+      </div>
+    );
+  }
 
   return (
     <SidebarProvider>
