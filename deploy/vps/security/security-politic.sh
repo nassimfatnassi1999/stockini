@@ -478,8 +478,8 @@ MONITOR
     SMTP_PORT=$(get_input "SMTP Configuration" "SMTP port:" "587")
     SMTP_USER=$(get_input "SMTP Configuration" "SMTP username:" "")
     SMTP_PASS=$(get_input "SMTP Configuration" "SMTP password:" "")
-    FROM_EMAIL=$(get_input "SMTP Configuration" "From email:" "security@stockini-msp.tn")
-    ALERT_EMAIL=$(get_input "SMTP Configuration" "Alert recipient email:" "admin@stockini-msp.tn")
+    FROM_EMAIL=$(get_input "SMTP Configuration" "From email:" "security@localhost")
+    ALERT_EMAIL=$(get_input "SMTP Configuration" "Alert recipient email:" "admin@localhost")
     
     cat > /etc/msmtprc << MSMTP
 defaults

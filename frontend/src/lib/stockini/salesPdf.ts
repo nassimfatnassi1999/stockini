@@ -250,7 +250,7 @@ export function generateSalesPDF(
   const tableBody = sale.items.map((item) => {
     const unitPrice = Number(item.unitPrice);
     const totalHt = Number(item.total);
-    const tvaRate = 19;
+    const tvaRate = Number(item.tvaPercent ?? 19);
     const totalTtc = totalHt * (1 + tvaRate / 100);
     return [
       item.product?.reference ?? '—',
@@ -302,7 +302,7 @@ export function generateSalesPDF(
     { label: 'Total HT', value: `${fmt3(subtotal)} DT` },
   ];
   if (discountAmount > 0) {
-    summaryRows.push({ label: 'Remise', value: `- ${fmt3(discountAmount)} DT` });
+    summaryRows.push({ label: 'Remise incluse', value: `${fmt3(discountAmount)} DT` });
   }
   summaryRows.push({ label: 'Total TVA (19%)', value: `${fmt3(taxAmount)} DT` });
   summaryRows.push({ label: 'Total TTC', value: `${fmt3(total)} DT`, bold: true });

@@ -247,7 +247,7 @@ export class AvoirsService {
           }
 
           const unitPriceHt = Number(saleItem.unitPrice);
-          const tvaRate = Number(saleItem.product?.tva ?? 19);
+          const tvaRate = Number(saleItem.tvaPercent ?? saleItem.product?.tva ?? 19);
           const lineTotals = calculateCreditNoteLineTotals({
             quantity: dtoItem.quantiteRetournee,
             unitPriceHt,

@@ -69,16 +69,16 @@ Services locaux (localhost uniquement, pas exposés) :
 - **Accès SSH :** utilisateur non-root avec `sudo`
 
 ### DNS
-Avant de lancer le setup, le domaine `stockini-msp.tn` doit pointer vers l'IP du VPS :
+Avant de lancer le setup, le domaine `51.178.46.89` doit pointer vers l'IP du VPS :
 
 ```
-A    stockini-msp.tn      →  <IP_DU_VPS>
-A    www.stockini-msp.tn  →  <IP_DU_VPS>
+A    51.178.46.89      →  <IP_DU_VPS>
+A    51.178.46.89  →  <IP_DU_VPS>
 ```
 
 Vérifier la propagation :
 ```bash
-dig stockini-msp.tn +short
+dig 51.178.46.89 +short
 # doit retourner l'IP du VPS
 ```
 
@@ -184,12 +184,12 @@ SMTP_PASS="app_password_gmail_16_caracteres"
 Le domaine et les URLs sont déjà pré-configurés :
 
 ```bash
-DOMAIN=stockini-msp.tn
-CORS_ORIGIN=https://stockini-msp.tn
-FRONTEND_URL=https://stockini-msp.tn
-NEXT_PUBLIC_APP_URL=https://stockini-msp.tn
-NEXT_PUBLIC_SITE_URL=https://stockini-msp.tn
-MINIO_PUBLIC_ENDPOINT=https://stockini-msp.tn/storage
+DOMAIN=51.178.46.89
+CORS_ORIGIN=http://51.178.46.89
+FRONTEND_URL=http://51.178.46.89
+NEXT_PUBLIC_APP_URL=http://51.178.46.89
+NEXT_PUBLIC_SITE_URL=http://51.178.46.89
+MINIO_PUBLIC_ENDPOINT=http://51.178.46.89/storage
 SMTP_FROM="moumnaspareparts@gmail.com"
 ```
 
@@ -256,7 +256,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Configure et démarre PM2 (`stockini-frontend`, port 3000)
 
 #### Étape 7/8 — Nginx (`setup_nginx.sh`, sudo)
-- Copie `nginx-stockini-msp.conf` vers `/etc/nginx/sites-available/stockini-msp.tn`
+- Copie `nginx-stockini-msp.conf` vers `/etc/nginx/sites-available/51.178.46.89`
 - Active le site (symlink dans `sites-enabled`)
 - Supprime le site `default` de Nginx
 - Teste la configuration (`nginx -t`) et recharge Nginx
@@ -264,7 +264,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Sinon : installe une config HTTP-only temporaire (pour pouvoir obtenir le certificat)
 
 #### Étape 8/8 — SSL Let's Encrypt (automatique)
-- Utilise Certbot pour obtenir un certificat pour `stockini-msp.tn` et `www.stockini-msp.tn`
+- Utilise Certbot pour obtenir un certificat pour `51.178.46.89` et `51.178.46.89`
 - Active le renouvellement automatique via `certbot.timer`
 - Reconfigure Nginx en HTTPS après obtention du certificat
 
@@ -275,9 +275,9 @@ Le setup l'active automatiquement si le DNS est propagé. Si le certificat n'a p
 ```bash
 # Obtenir le certificat manuellement
 sudo certbot certonly --nginx \
-  -d stockini-msp.tn -d www.stockini-msp.tn \
+  -d 51.178.46.89 -d 51.178.46.89 \
   --non-interactive --agree-tos \
-  -m admin@stockini-msp.tn
+  -m admin@localhost
 
 # Reconfigurer Nginx en HTTPS
 sudo bash deploy/vps/setup_nginx.sh
@@ -498,7 +498,7 @@ curl http://127.0.0.1:3001/health
 
 # Certificat SSL — date d'expiration
 sudo certbot certificates
-echo | openssl s_client -servername stockini-msp.tn -connect stockini-msp.tn:443 2>/dev/null \
+echo | openssl s_client -servername 51.178.46.89 -connect 51.178.46.89:443 2>/dev/null \
   | openssl x509 -noout -enddate
 ```
 
@@ -567,7 +567,7 @@ echo | openssl s_client -servername stockini-msp.tn -connect stockini-msp.tn:443
 **Rôle :** Installation et activation de la configuration Nginx.  
 **Exécution :** `sudo bash deploy/vps/setup_nginx.sh`  
 **Source config :** `deploy/vps/nginx-stockini-msp.conf`  
-**Destination :** `/etc/nginx/sites-available/stockini-msp.tn`  
+**Destination :** `/etc/nginx/sites-available/51.178.46.89`
 **Comportement :** installe la config HTTPS si les certificats existent, sinon HTTP-only.
 
 ---
@@ -636,7 +636,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 
 | Variable | Exemple | Description |
 |----------|---------|-------------|
-| `DOMAIN` | `stockini-msp.tn` | Domaine principal |
+| `DOMAIN` | `51.178.46.89` | Domaine principal |
 | `NODE_ENV` | `production` | Environnement Node |
 | `PORT` | `3001` | Port backend NestJS |
 | `BACKEND_PORT` | `3001` | Port backend (redondant, utilisé par les scripts) |
@@ -652,12 +652,12 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `JWT_REFRESH_SECRET` | `openssl rand -base64 64` | Clé refresh tokens JWT |
 | `JWT_EXPIRES_IN` | `15m` | Durée token d'accès |
 | `JWT_REFRESH_EXPIRES_IN` | `7d` | Durée token de rafraîchissement |
-| `CORS_ORIGIN` | `https://stockini-msp.tn` | Origines CORS autorisées |
-| `FRONTEND_URL` | `https://stockini-msp.tn` | URL frontend (pour les liens dans les emails) |
+| `CORS_ORIGIN` | `http://51.178.46.89` | Origines CORS autorisées |
+| `FRONTEND_URL` | `http://51.178.46.89` | URL frontend (pour les liens dans les emails) |
 | `NEXT_PUBLIC_API_URL` | `/api` | Chemin API côté browser |
 | `INTERNAL_API_URL` | `http://127.0.0.1:3001/api` | URL API interne (SSR Next.js) |
-| `NEXT_PUBLIC_APP_URL` | `https://stockini-msp.tn` | URL publique de l'app |
-| `NEXT_PUBLIC_SITE_URL` | `https://stockini-msp.tn` | URL du site (Next.js metadata) |
+| `NEXT_PUBLIC_APP_URL` | `http://51.178.46.89` | URL publique de l'app |
+| `NEXT_PUBLIC_SITE_URL` | `http://51.178.46.89` | URL du site (Next.js metadata) |
 | `NEXT_PUBLIC_APP_NAME` | `Stockini` | Nom affiché de l'application |
 | `MINIO_ENDPOINT` | `127.0.0.1` | Adresse MinIO |
 | `MINIO_PORT` | `9000` | Port MinIO API |
@@ -665,7 +665,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `MINIO_BUCKET` | `generated-documents` | Nom du bucket |
 | `MINIO_ACCESS_KEY` | `...` | Clé d'accès MinIO |
 | `MINIO_SECRET_KEY` | `...` | Clé secrète MinIO |
-| `MINIO_PUBLIC_ENDPOINT` | `https://stockini-msp.tn/storage` | URL publique MinIO (liens de téléchargement) |
+| `MINIO_PUBLIC_ENDPOINT` | `http://51.178.46.89/storage` | URL publique MinIO (liens de téléchargement) |
 | `UPLOAD_DIR` | `/home/ubuntu/stockini/uploads` | Répertoire uploads local |
 | `SMTP_HOST` | `smtp.gmail.com` | Hôte SMTP |
 | `SMTP_PORT` | `587` | Port SMTP |
@@ -683,7 +683,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `COMPANY_LOGO_URL` | `...` | URL logo société (PDF) |
 | `COMPANY_BANK_RIB` | `...` | RIB société (PDF, optionnel) |
 | `BACKUP_GPG_RECIPIENT` | `admin@example.com` | Email GPG pour chiffrement backup (optionnel) |
-| `ADMIN_EMAIL` | `admin@stockini-msp.tn` | Email contact Let's Encrypt |
+| `ADMIN_EMAIL` | `admin@localhost` | Email contact Let's Encrypt |
 
 ---
 
@@ -757,7 +757,7 @@ sudo certbot certificates
 sudo certbot renew
 
 # Renouveler un domaine spécifique
-sudo certbot renew --cert-name stockini-msp.tn
+sudo certbot renew --cert-name 51.178.46.89
 
 # Recharger Nginx après renouvellement
 sudo systemctl reload nginx

@@ -22,6 +22,7 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '../common/utils/sales-calculations';
 import {
   CreateSaleDto,
   SalePaginationDto,
@@ -30,7 +31,6 @@ import {
 
 const MIN_MARGIN_PERCENT = 20;
 // Mirrors the frontend DEFAULT_MARGIN_PERCENT used in recalculateSaleLine
-const DEFAULT_MARGIN_PERCENT = 40;
 
 const STOCK_IMPACTING_TYPES = new Set<DocumentType>([
   DocumentType.BON_LIVRAISON,
@@ -197,47 +197,45 @@ export class SalesService {
         }
 
         const tvaRate = Number(product.tva ?? 0);
-        const unitPrice = item.unitPrice ?? this.salePriceHt(product);
         const discountPercent = item.discountPercent ?? 0;
-
-        // Guard: si unitPrice est explicitement fourni et diffère du PRIX BRUT par défaut
-        // (marge 40 %, avant remise), la permission sales.line.edit_unit_price_ht est requise.
-        // Le frontend envoie toujours le prix brut (auto ou manuel) + discountPercent séparé.
-        if (item.unitPrice !== undefined && item.unitPrice !== null) {
-          const itemPurchasePriceHt = Number(product.purchasePrice);
-          let expectedPuHt: number;
-          if (itemPurchasePriceHt > 0) {
-            // Gross price = full default margin, discount is applied separately
-            expectedPuHt = this.round3(itemPurchasePriceHt * (1 + DEFAULT_MARGIN_PERCENT / 100));
-          } else {
-            expectedPuHt = this.salePriceHt(product);
-          }
-          if (Math.abs(item.unitPrice - expectedPuHt) > 0.005 && !allowEditUnitPriceHt) {
-            throw new ForbiddenException(
-              `Vous n'avez pas la permission de modifier le prix unitaire HT pour "${product.name}".`,
-            );
-          }
+        const marginPercent = item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
+        const purchasePriceHt = Number(product.purchasePrice);
+        const calculation = calculateSalesLine({
+          purchasePriceHt,
+          marginPercent,
+          discountPercent,
+          taxPercent: tvaRate,
+          quantity: item.quantity,
+        });
+        const unitPrice = purchasePriceHt > 0
+          ? calculation.unitPriceHt
+          : (item.unitPrice ?? this.salePriceHt(product));
+        if (unitPrice < 0) {
+          throw new BadRequestException(
+            `Le prix de vente calculé pour "${product.name}" ne peut pas être négatif.`,
+          );
         }
-        const grossLineHt = unitPrice * item.quantity;
-        const lineDiscount = grossLineHt * (discountPercent / 100);
-        const netLineHt = grossLineHt - lineDiscount;
-        const lineTax = netLineHt * (tvaRate / 100);
-        const lineTotalTtc = netLineHt + lineTax;
+
+        if (Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 && !allowEditUnitPriceHt) {
+          throw new ForbiddenException(
+            `Vous n'avez pas la permission de modifier la marge pour "${product.name}".`,
+          );
+        }
+        const grossLineHt = calculation.unitPriceHtBeforeDiscount * item.quantity;
+        const lineDiscount = calculation.discountAmount;
+        const netLineHt = purchasePriceHt > 0 ? calculation.totalHt : unitPrice * item.quantity;
+        const lineTax = this.round3(netLineHt * (tvaRate / 100));
+        const lineTotalTtc = this.round3(netLineHt + lineTax);
 
         if (!isDevis) {
-          const purchasePriceHt = Number(product.purchasePrice);
           if (purchasePriceHt <= 0) {
             throw new BadRequestException(
               `Le produit "${product.name}" n'a pas de prix d'achat défini. Vente refusée.`,
             );
           }
-          const marginPercent =
-            ((unitPrice * (1 - discountPercent / 100) - purchasePriceHt) /
-              purchasePriceHt) *
-            100;
-          if (marginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
+          if (calculation.netMarginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
             throw new BadRequestException(
-              `Vente refusée : marge insuffisante pour "${product.name}" (${marginPercent.toFixed(2)}% < ${MIN_MARGIN_PERCENT}%).`,
+              `Vente refusée : marge insuffisante pour "${product.name}" (${calculation.netMarginPercent.toFixed(2)}% < ${MIN_MARGIN_PERCENT}%).`,
             );
           }
         }
@@ -249,6 +247,7 @@ export class SalesService {
           unitPrice,
           tvaRate,
           discountPercent,
+          marginPercent,
           grossTotal: grossLineHt,
           discountAmount: lineDiscount,
           netLineTotal: netLineHt,
@@ -296,6 +295,8 @@ export class SalesService {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           discountPercent: item.discountPercent,
+          marginPercent: item.marginPercent,
+          tvaPercent: item.tvaRate,
           finalUnitPrice: item.netLineTotal / item.quantity,
           total: item.netLineTotal,
         };
@@ -916,6 +917,8 @@ export class SalesService {
               quantity: item.quantity,
               unitPrice: item.unitPrice,
               discountPercent: item.discountPercent,
+              marginPercent: item.marginPercent,
+              tvaPercent: item.tvaPercent,
               finalUnitPrice: item.finalUnitPrice,
               total: item.total,
             })),
@@ -1108,17 +1111,21 @@ export class SalesService {
       for (const item of saleGroup) {
         const grossHt = Number(item.unitPrice) * item.quantity;
         const discountPercent = Number(item.discountPercent ?? 0);
-        const netHt = grossHt * (1 - discountPercent / 100);
+        // New rows already store the final HT produced by margin - discount.
+        // NULL marginPercent identifies legacy rows using multiplicative discount.
+        const netHt = item.marginPercent === null
+          ? grossHt * (1 - discountPercent / 100)
+          : grossHt;
         lineNetHtByItemId.set(item.id, netHt);
         lineDiscountTotal += grossHt - netHt;
         lineNetSubtotal += netHt;
       }
 
       const sale = saleGroup[0].sale;
-      const remainingDocumentDiscount = Math.max(
-        Number(sale.discount) - lineDiscountTotal,
-        0,
-      );
+      const usesNewPricing = saleGroup.every((item) => item.marginPercent !== null);
+      const remainingDocumentDiscount = usesNewPricing
+        ? 0
+        : Math.max(Number(sale.discount) - lineDiscountTotal, 0);
 
       for (const item of saleGroup) {
         if (!productIdsToUpdate.includes(item.productId)) {

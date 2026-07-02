@@ -3,7 +3,7 @@
 import { Plus } from 'lucide-react';
 import { ProductLineRow } from './ProductLineRow';
 import {
-  calculateDocumentTotals,
+  calculateSalesDocumentTotals,
   calculateSaleMargeTotals,
   createEmptyLine,
   isFilledLine,
@@ -24,13 +24,16 @@ const HEADERS = [
   { label: 'Emplacement', className: 'min-w-[80px]' },
   { label: 'Marque / Famille', className: 'min-w-[90px]' },
   { label: 'Qté', className: 'min-w-[55px] text-right' },
-  { label: 'PU HT', className: 'min-w-[80px] text-right' },
-  { label: 'Marge %', className: 'min-w-[70px] text-right' },
-  { label: 'Marge DT', className: 'min-w-[80px] text-right' },
+  { label: 'PA HT', className: 'min-w-[80px] text-right' },
+  { label: 'Marge %', className: 'min-w-[65px] text-right' },
   { label: 'Remise %', className: 'min-w-[60px] text-right' },
+  { label: 'Marge nette %', className: 'min-w-[80px] text-right' },
+  { label: 'Marge DT', className: 'min-w-[80px] text-right' },
+  { label: 'PV HT', className: 'min-w-[80px] text-right' },
   { label: 'TVA %', className: 'min-w-[55px] text-right' },
-  { label: 'Net HT', className: 'min-w-[80px] text-right' },
-  { label: 'Net TTC', className: 'min-w-[85px] text-right' },
+  { label: 'PV TTC', className: 'min-w-[80px] text-right' },
+  { label: 'Total HT', className: 'min-w-[80px] text-right' },
+  { label: 'Total TTC', className: 'min-w-[85px] text-right' },
   { label: '', className: 'w-8' },
 ];
 
@@ -42,7 +45,7 @@ function fmt3(value: number): string {
 }
 
 export function ProductRegisterGrid({ lines, hasLowMarginPermission, canEditUnitPriceHt, onLinesChange }: Props) {
-  const totals = calculateDocumentTotals(lines);
+  const totals = calculateSalesDocumentTotals(lines);
   const margeTotals = calculateSaleMargeTotals(lines);
 
   const updateLine = (index: number, updated: RegisterLine) => {

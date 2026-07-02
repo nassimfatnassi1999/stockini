@@ -88,6 +88,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
   const margeAmountDisplay = line.margeAmount === null
     ? '—'
     : line.margeAmount.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const unitPriceTtc = round3(line.puHt * (1 + line.tvaPercent / 100));
 
   const marginTooltip =
     line.margePercent === null && line.productId !== null
@@ -158,7 +159,53 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
         />
       </td>
 
-      {/* PU HT — éditable si canEditUnitPriceHt, sinon lecture seule */}
+      {/* Prix achat HT */}
+      <td className={`min-w-[80px] px-2 text-xs text-right tabular-nums text-text-secondary ${CELL}`}>
+        {fmt(line.purchasePriceHt)}
+      </td>
+
+      {/* Marge brute */}
+      <td className={`min-w-[65px] ${CELL}`}>
+        <input
+          type="number"
+          step={0.1}
+          value={line.defaultMarginPercent}
+          disabled={!canEditUnitPriceHt}
+          onChange={(e) => update({ defaultMarginPercent: Number(e.target.value.replace(',', '.')) || 0, manualUnitPriceHt: false })}
+          className={NUM_INPUT}
+        />
+      </td>
+
+      {/* Remise en points de marge */}
+      <td className={`min-w-[60px] ${CELL}`}>
+        <input
+          type="number"
+          min={0}
+          step={0.1}
+          value={line.remisePercent === 0 ? '' : line.remisePercent}
+          onChange={(e) => update({ remisePercent: Math.max(0, Number(e.target.value.replace(',', '.')) || 0) })}
+          placeholder="0"
+          className={NUM_INPUT}
+        />
+      </td>
+
+      {/* Marge nette */}
+      <td
+        className={`min-w-[80px] px-2 text-xs text-right tabular-nums ${CELL} ${margeColorClass}`}
+        title={marginTooltip}
+      >
+        {hasProduct ? margePercentDisplay : '—'}
+      </td>
+
+      {/* Marge DT */}
+      <td
+        className={`min-w-[80px] px-2 text-xs text-right tabular-nums ${CELL} ${margeColorClass}`}
+        title={marginTooltip}
+      >
+        {hasProduct ? margeAmountDisplay : '—'}
+      </td>
+
+      {/* Prix vente HT — éditable si autorisé */}
       <td className={`min-w-[80px] ${CELL}`}>
         {canEditUnitPriceHt ? (
           <input
@@ -174,15 +221,19 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
               setPuHtRaw(raw);
               // Recalcul immédiat à chaque frappe
               const newPuHt = Math.max(0, parseFloat(raw.replace(',', '.')) || 0);
-              const manual = newPuHt > 0;
-              onChange(recalculateSaleLine({ ...line, puHt: manual ? newPuHt : 0, manualUnitPriceHt: manual }));
+              const margin = line.purchasePriceHt > 0
+                ? ((newPuHt / line.purchasePriceHt) - 1) * 100 + line.remisePercent
+                : line.defaultMarginPercent;
+              onChange(recalculateSaleLine({ ...line, defaultMarginPercent: margin, manualUnitPriceHt: true }));
             }}
             onBlur={() => {
               setIsPuHtFocused(false);
               // Recalcul final pour assurer la cohérence (ex: focus sans frappe)
               const newPuHt = Math.max(0, parseFloat(puHtRaw.replace(',', '.')) || 0);
-              const manual = newPuHt > 0;
-              onChange(recalculateSaleLine({ ...line, puHt: manual ? newPuHt : 0, manualUnitPriceHt: manual }));
+              const margin = line.purchasePriceHt > 0
+                ? ((newPuHt / line.purchasePriceHt) - 1) * 100 + line.remisePercent
+                : line.defaultMarginPercent;
+              onChange(recalculateSaleLine({ ...line, defaultMarginPercent: margin, manualUnitPriceHt: true }));
             }}
             placeholder="—"
             className={NUM_INPUT}
@@ -195,40 +246,6 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
             {line.puHt === 0 ? '—' : line.puHt.toLocaleString('fr-TN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
           </div>
         )}
-      </td>
-
-      {/* Marge % — read-only, auto-calculated */}
-      <td
-        className={`min-w-[70px] px-2 text-xs text-right tabular-nums ${CELL} ${margeColorClass}`}
-        title={marginTooltip}
-      >
-        {hasProduct ? margePercentDisplay : '—'}
-      </td>
-
-      {/* Marge DT — profit amount per unit after discount */}
-      <td
-        className={`min-w-[80px] px-2 text-xs text-right tabular-nums ${CELL} ${margeColorClass}`}
-        title={marginTooltip}
-      >
-        {hasProduct ? margeAmountDisplay : '—'}
-      </td>
-
-      {/* Remise % */}
-      <td className={`min-w-[60px] ${CELL}`}>
-        <input
-          type="number"
-          min={0}
-          max={100}
-          step={0.1}
-          value={line.remisePercent === 0 ? '' : line.remisePercent}
-          onChange={(e) =>
-            update({
-              remisePercent: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
-            })
-          }
-          placeholder="0"
-          className={NUM_INPUT}
-        />
       </td>
 
       {/* TVA % */}
@@ -246,6 +263,11 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
           }
           className={NUM_INPUT}
         />
+      </td>
+
+      {/* Prix vente TTC unitaire */}
+      <td className={`min-w-[80px] px-2 text-xs text-right tabular-nums ${CELL}`}>
+        {fmt(unitPriceTtc)}
       </td>
 
       {/* Net HT */}

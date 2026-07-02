@@ -17,7 +17,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-DOMAIN="stockini-msp.tn"
+DOMAIN="51.178.46.89"
 
 # ── Robust project root detection (handles symlinks / any cwd) ─────────────
 resolve_project_root() {
@@ -647,7 +647,7 @@ clear_frontend() {
   local NGINX_CONF="$SCRIPT_DIR/nginx-stockini-msp.conf"
   if [ -f "$NGINX_CONF" ]; then
     info "Mise à jour config Nginx..."
-    sudo cp "$NGINX_CONF" /etc/nginx/sites-available/stockini-msp.tn
+    sudo cp "$NGINX_CONF" /etc/nginx/sites-available/51.178.46.89
     if sudo nginx -t 2>&1; then
       sudo systemctl reload nginx
       ok "Nginx rechargé (cache purgé)"

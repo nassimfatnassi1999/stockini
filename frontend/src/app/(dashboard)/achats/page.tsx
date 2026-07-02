@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
@@ -8,7 +8,7 @@ import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
 import { generateClientId } from '@/lib/id';
-import { useDraftSave } from '@/lib/hooks/useDraftSave';
+import { useFormDraft } from '@/hooks/useFormDraft';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +37,9 @@ interface AchatDraft {
   supplierId: string;
   paidAmount: string;
   paymentMethod: string;
+  selectedCommandeId: string;
+  commandeLineMap: Record<string, { purchaseItemId: string; maxQty: number }>;
+  purchaseDate: string;
 }
 
 function round3(v: number) {
@@ -116,7 +119,9 @@ export default function AchatsPage() {
   const [supplierId, setSupplierId] = useState('');
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString());
   const [showHistory, setShowHistory] = useState(true);
+  const restoredCommandeRef = useRef('');
 
   // ── Purchases history pagination + filters ────────────────────────────────
   const [purchasesPage, setPurchasesPage] = useState(1);
@@ -137,8 +142,6 @@ export default function AchatsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
-  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
-  const [draftChecked, setDraftChecked] = useState(false);
 
   const suppliersQuery = useQuery<Supplier[]>({
     queryKey: ['stockini-suppliers'],
@@ -170,41 +173,51 @@ export default function AchatsPage() {
     enabled: !!selectedCommandeId && docType === 'BON_RECEPTION' && receptionMode === 'FROM_COMMANDE',
   });
 
-  // Auto-save — disabled in FROM_COMMANDE mode (lines are auto-populated from commande)
   const draftData = useMemo<AchatDraft>(
-    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod }),
-    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod],
+    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate }),
+    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate],
   );
-  const draftEnabled = receptionMode !== 'FROM_COMMANDE';
-  const { getDraft, hasDraft, clearDraft } = useDraftSave<AchatDraft>({
-    key: 'purchases:achat',
-    data: draftData,
-    enabled: draftEnabled,
-  });
-
-  // Check for existing draft on first render
-  useEffect(() => {
-    if (draftChecked) return;
-    setDraftChecked(true);
-    if (hasDraft()) setShowRestorePrompt(true);
-  }, [draftChecked, hasDraft]);
-
-  const handleRestoreDraft = () => {
-    const draft = getDraft();
-    if (!draft) return;
+  const restoreDraft = useCallback((draft: AchatDraft) => {
     setDocType(draft.docType ?? 'BON_COMMANDE');
     setReceptionMode(draft.receptionMode ?? 'LIBRE');
-    setLines(draft.lines?.length ? draft.lines : [createEmptyLine()]);
+    setLines(
+      draft.lines?.length
+        ? draft.lines.map((line) => recalculateLine({
+            ...createEmptyLine(),
+            ...line,
+            id: line.id || generateClientId(),
+            productId: line.productId ?? null,
+            quantity: Number(line.quantity) || 0,
+            puHt: Number(line.puHt) || 0,
+            remisePercent: Number(line.remisePercent) || 0,
+            tvaPercent: Number(line.tvaPercent) || 0,
+          }))
+        : [createEmptyLine()],
+    );
     setSupplierId(draft.supplierId ?? '');
     setPaidAmount(draft.paidAmount ?? '');
     setPaymentMethod(draft.paymentMethod ?? '');
-    setShowRestorePrompt(false);
-  };
-
-  const handleIgnoreDraft = () => {
-    clearDraft();
-    setShowRestorePrompt(false);
-  };
+    setSelectedCommandeId(draft.selectedCommandeId ?? '');
+    setCommandeLineMap(draft.commandeLineMap ?? {});
+    setPurchaseDate(draft.purchaseDate ?? new Date().toISOString());
+    restoredCommandeRef.current = draft.selectedCommandeId ?? '';
+  }, []);
+  const isDraftEmpty = useCallback(
+    (draft: AchatDraft) =>
+      !draft.lines.some(isFilledLine) &&
+      !draft.supplierId &&
+      !draft.paidAmount &&
+      !draft.paymentMethod &&
+      !draft.selectedCommandeId,
+    [],
+  );
+  const { clearDraft, status: draftStatus } = useFormDraft<AchatDraft>({
+    key: 'stockini:purchases:create:draft',
+    data: draftData,
+    isEmpty: isDraftEmpty,
+    onRestore: restoreDraft,
+    debounceMs: 400,
+  });
 
   const commandesToReceptionner = purchasesList.filter(
     (p) => p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED',
@@ -214,6 +227,10 @@ export default function AchatsPage() {
   useEffect(() => {
     const detail = commandeDetailQuery.data;
     if (!detail || !selectedCommandeId) return;
+    if (restoredCommandeRef.current === selectedCommandeId) {
+      restoredCommandeRef.current = '';
+      return;
+    }
 
     setSupplierId(detail.supplier?.id ?? '');
 
@@ -291,26 +308,29 @@ export default function AchatsPage() {
       filledLines.every((l) => l.productId !== null) &&
       !!supplierId;
 
-  const resetForm = () => {
+  const resetForm = (confirmIfFilled = true) => {
+    if (confirmIfFilled && !isDraftEmpty(draftData) && !window.confirm('Vider le brouillon et réinitialiser le formulaire ?')) return false;
     setLines([createEmptyLine()]);
     setSupplierId('');
     setPaidAmount('');
     setPaymentMethod('');
     setSelectedCommandeId('');
     setCommandeLineMap({});
+    setPurchaseDate(new Date().toISOString());
     clearDraft();
+    return true;
   };
 
   const handleDocTypeChange = (type: PurchaseDocType) => {
     if (type === docType) return;
+    if (!resetForm()) return;
     setDocType(type);
-    resetForm();
   };
 
   const handleReceptionModeChange = (mode: ReceptionMode) => {
     if (mode === receptionMode) return;
+    if (!resetForm()) return;
     setReceptionMode(mode);
-    resetForm();
   };
 
   const createMutation = useMutation({
@@ -397,7 +417,7 @@ export default function AchatsPage() {
             : 'Facture enregistrée';
       toast.success(label);
       clearDraft();
-      resetForm();
+      resetForm(false);
     },
     onError: (error: unknown) => {
       if (error instanceof Error) {
@@ -432,15 +452,14 @@ export default function AchatsPage() {
 
   const [payTarget, setPayTarget] = useState<Purchase | null>(null);
 
-  const [today, setToday] = useState('');
-
-  useEffect(() => {
-    setToday(new Date().toLocaleDateString('fr-TN', {
+  const today = useMemo(
+    () => new Date(purchaseDate).toLocaleDateString('fr-TN', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    }));
-  }, []);
+    }),
+    [purchaseDate],
+  );
 
   const activeConfig = DOC_TYPE_CONFIG[docType];
   const selectedCommandeSupplier = commandeDetailQuery.data?.supplier?.name;
@@ -454,24 +473,6 @@ export default function AchatsPage() {
   return (
     <PermissionGuard permission="purchases.view">
     <div className="space-y-4">
-      {/* Draft restore banner */}
-      {showRestorePrompt && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm text-amber-800">
-            <RotateCcw size={15} className="shrink-0" />
-            <span>Un brouillon non enregistré a été trouvé. Voulez-vous le restaurer&nbsp;?</span>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={handleIgnoreDraft}>
-              Ignorer
-            </Button>
-            <Button size="sm" onClick={handleRestoreDraft}>
-              Restaurer
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Page header + document type buttons */}
       <div className="flex flex-wrap items-start gap-3 justify-between">
         <div>
@@ -479,6 +480,11 @@ export default function AchatsPage() {
           <p className="app-page-subtitle">
             Gestion des commandes, réceptions et factures fournisseurs
           </p>
+          {draftStatus !== 'idle' && (
+            <span className="text-xs text-text-muted" role="status">
+              {draftStatus === 'restored' ? 'Brouillon restauré' : 'Brouillon sauvegardé'}
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {(Object.keys(DOC_TYPE_CONFIG) as PurchaseDocType[]).map((type) => {
@@ -586,6 +592,9 @@ export default function AchatsPage() {
                 disabled={isFromCommande}
               >
                 <option value="">— Sélectionner un fournisseur —</option>
+                {supplierId && suppliersQuery.isSuccess && !(suppliersQuery.data ?? []).some((s) => s.id === supplierId) && (
+                  <option value={supplierId}>Fournisseur indisponible (brouillon)</option>
+                )}
                 {(suppliersQuery.data ?? []).map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -668,7 +677,7 @@ export default function AchatsPage() {
             )}
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={resetForm}>
+            <Button type="button" variant="outline" size="sm" onClick={() => resetForm()}>
               Réinitialiser
             </Button>
             {can('purchases.create') && (

@@ -158,6 +158,8 @@ export interface SaleItemDetail {
   quantity: number;
   unitPrice: number | string;
   discountPercent?: number | string;
+  marginPercent?: number | string | null;
+  tvaPercent?: number | string | null;
   finalUnitPrice?: number | string | null;
   total: number | string;
   product?: {

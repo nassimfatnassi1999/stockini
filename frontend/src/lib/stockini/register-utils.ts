@@ -1,7 +1,8 @@
 import { generateClientId } from '@/lib/id';
+import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '@/lib/salesCalculations';
 
 export const MIN_MARGIN_PERCENT = 20;
-export const DEFAULT_MARGIN_PERCENT = 40;
+export const DEFAULT_MARGIN_PERCENT = DEFAULT_SALES_MARGIN_PERCENT;
 
 export interface RegisterLine {
   id: string;
@@ -116,43 +117,43 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
  * derived fields (margePercent, margeAmount, netHt, netTtc) are recalculated.
  */
 export function recalculateSaleLine(line: RegisterLine): RegisterLine {
-  if (line.manualUnitPriceHt) {
-    // Manual mode: puHt is fixed by the user, discount applied classically.
-    const puHt = line.puHt;
-    const grossHt = round3(puHt * line.quantity);
-    const discountAmount = round3(grossHt * line.remisePercent / 100);
-    const netHt = round3(grossHt - discountAmount);
-    const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
-    let margePercent: number | null = null;
-    let margeAmount: number | null = null;
-    if (line.purchasePriceHt > 0) {
-      // Net unit price after per-unit share of discount
-      const netUnitPriceHt = round3(puHt * (1 - line.remisePercent / 100));
-      margeAmount = round3(netUnitPriceHt - line.purchasePriceHt);
-      margePercent = Math.round(((netUnitPriceHt - line.purchasePriceHt) / line.purchasePriceHt) * 10000) / 100;
-    }
-    return { ...line, margePercent, margeAmount, netHt, netTtc };
-  }
-
   if (line.purchasePriceHt > 0) {
-    // Auto mode: puHt is always the GROSS price (full default margin, no discount baked in).
-    // Remise is applied as a standard line discount so the backend receives matching values.
-    const puHt = round3(line.purchasePriceHt * (1 + line.defaultMarginPercent / 100));
-    const grossHt = round3(puHt * line.quantity);
-    const discountAmount = round3(grossHt * line.remisePercent / 100);
-    const netHt = round3(grossHt - discountAmount);
-    const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
-    // Margin is based on the net unit price (after discount)
-    const netUnitPriceHt = round3(puHt * (1 - line.remisePercent / 100));
-    const margeAmount = round3(netUnitPriceHt - line.purchasePriceHt);
-    const margePercent = Math.round(((netUnitPriceHt - line.purchasePriceHt) / line.purchasePriceHt) * 10000) / 100;
-    return { ...line, puHt, margePercent, margeAmount, netHt, netTtc };
+    const result = calculateSalesLine({
+      purchasePriceHt: line.purchasePriceHt,
+      marginPercent: line.defaultMarginPercent,
+      discountPercent: line.remisePercent,
+      taxPercent: line.tvaPercent,
+      quantity: line.quantity,
+    });
+    return {
+      ...line,
+      puHt: result.unitPriceHt,
+      margePercent: result.netMarginPercent,
+      margeAmount: result.marginAmount,
+      netHt: result.totalHt,
+      netTtc: result.totalTtc,
+    };
   }
 
   // No purchase price: use puHt as-is.
   const netHt = round3(line.puHt * line.quantity);
   const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
   return { ...line, margePercent: null, margeAmount: null, netHt, netTtc };
+}
+
+export function calculateSalesDocumentTotals(lines: RegisterLine[]): DocumentTotals {
+  const filled = lines.filter(isFilledLine);
+  const calculations = filled.map((line) => calculateSalesLine({
+    purchasePriceHt: line.purchasePriceHt,
+    marginPercent: line.defaultMarginPercent,
+    discountPercent: line.remisePercent,
+    taxPercent: line.tvaPercent,
+    quantity: line.quantity,
+  }));
+  const totalHt = round3(calculations.reduce((sum, line) => sum + line.totalHt, 0));
+  const totalRemise = round3(calculations.reduce((sum, line) => sum + line.discountAmount, 0));
+  const totalTva = round3(calculations.reduce((sum, line) => sum + line.taxAmount, 0));
+  return { totalHt, totalRemise, totalTva, totalTtc: round3(totalHt + totalTva) };
 }
 
 export function isFilledLine(line: RegisterLine): boolean {

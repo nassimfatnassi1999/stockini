@@ -37,7 +37,7 @@ import { toast } from "@/lib/toast";
 import { generateClientId } from "@/lib/id";
 import { PermissionGuard } from "@/components/shared/PermissionGuard";
 import { usePermissions } from "@/lib/hooks/usePermissions";
-import { useDraftSave } from "@/lib/hooks/useDraftSave";
+import { useFormDraft } from "@/hooks/useFormDraft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +48,7 @@ import { EmailToast } from "@/components/stockini/EmailToast";
 import { GeneratedDocumentsHistory } from "@/components/stockini/GeneratedDocumentsHistory";
 import { AvoirPage } from "@/components/stockini/pages/AvoirPage";
 import {
-  calculateDocumentTotals,
+  calculateSalesDocumentTotals,
   createEmptyLine,
   isFilledLine,
   MIN_MARGIN_PERCENT,
@@ -649,6 +649,7 @@ interface VenteDraft {
   counterClientTaxId: string;
   counterClientNote: string;
   saleDate: string;
+  activeTab: SalesDocumentType;
 }
 
 export default function VentesPage() {
@@ -698,8 +699,6 @@ export default function VentesPage() {
 
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
-  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
-  const [draftChecked, setDraftChecked] = useState(false);
 
   useEffect(() => {
     setSaleDate(new Date().toISOString());
@@ -735,7 +734,7 @@ export default function VentesPage() {
   });
 
   const filledLines = lines.filter(isFilledLine);
-  const totals = calculateDocumentTotals(lines);
+  const totals = calculateSalesDocumentTotals(lines);
   const selectedClient = (customersQuery.data ?? []).find(
     (c) => c.id === customerId,
   );
@@ -780,6 +779,7 @@ export default function VentesPage() {
       counterClientTaxId,
       counterClientNote,
       saleDate,
+      activeTab,
     }),
     [
       lines,
@@ -792,28 +792,10 @@ export default function VentesPage() {
       counterClientTaxId,
       counterClientNote,
       saleDate,
+      activeTab,
     ],
   );
-  const draftEnabled = draftChecked && !showRestorePrompt;
-  const { getDraft, hasDraft, clearDraft } = useDraftSave<VenteDraft>({
-    key: "sales:vente",
-    data: draftData,
-    enabled: draftEnabled,
-  });
-
-  useEffect(() => {
-    if (draftChecked) return;
-    setDraftChecked(true);
-    if (hasDraft()) setShowRestorePrompt(true);
-  }, [draftChecked, hasDraft]);
-
-  const handleRestoreDraft = () => {
-    const draft = getDraft();
-    if (!draft) {
-      setShowRestorePrompt(false);
-      toast.info("Aucun brouillon à restaurer");
-      return;
-    }
+  const restoreDraft = useCallback((draft: VenteDraft) => {
     setLines(
       draft.lines?.length
         ? draft.lines.map((line) =>
@@ -840,13 +822,28 @@ export default function VentesPage() {
     setCounterClientTaxId(draft.counterClientTaxId ?? "");
     setCounterClientNote(draft.counterClientNote ?? "");
     setSaleDate(draft.saleDate ?? new Date().toISOString());
-    setShowRestorePrompt(false);
-  };
-
-  const handleIgnoreDraft = () => {
-    clearDraft();
-    setShowRestorePrompt(false);
-  };
+    if (SALES_API_DOCUMENT_TYPES.has(draft.activeTab)) setActiveTab(draft.activeTab);
+  }, []);
+  const isDraftEmpty = useCallback(
+    (draft: VenteDraft) =>
+      !draft.lines.some(isFilledLine) &&
+      !draft.customerId &&
+      !draft.clientInfoName.trim() &&
+      !draft.counterClientName.trim() &&
+      !draft.counterClientEmail.trim() &&
+      !draft.counterClientPhone.trim() &&
+      !draft.counterClientAddress.trim() &&
+      !draft.counterClientTaxId.trim() &&
+      !draft.counterClientNote.trim(),
+    [],
+  );
+  const { clearDraft, status: draftStatus } = useFormDraft<VenteDraft>({
+    key: "stockini:sales:create:draft",
+    data: draftData,
+    isEmpty: isDraftEmpty,
+    onRestore: restoreDraft,
+    debounceMs: 400,
+  });
 
   const salesQueryParams: SalesQueryParams = {
     page: salesPage,
@@ -914,7 +911,8 @@ export default function VentesPage() {
     !hasMissingPurchasePrice &&
     !hasInvalidQuantity;
 
-  const resetForm = () => {
+  const resetForm = (confirmIfFilled = true) => {
+    if (confirmIfFilled && !isDraftEmpty(draftData) && !window.confirm("Vider le brouillon et réinitialiser le formulaire ?")) return;
     setLines([createEmptyLine()]);
     setCustomerId("");
     setClientInfoName("");
@@ -1111,6 +1109,7 @@ export default function VentesPage() {
             quantity: l.quantity,
             unitPrice: round3(l.puHt),
             discountPercent: l.remisePercent,
+            marginPercent: l.defaultMarginPercent,
           })),
         })
         .then((r) => r.data);
@@ -1131,7 +1130,7 @@ export default function VentesPage() {
       toast.success(`Document ${typeLabel} N°${num} enregistré`);
       setShowValidateModal(false);
       clearDraft();
-      resetForm();
+      resetForm(false);
     },
     onError: (error: unknown) => {
       if (error instanceof Error) {
@@ -1407,33 +1406,17 @@ export default function VentesPage() {
   return (
     <PermissionGuard permission="sales.view">
       <div className="space-y-4">
-        {/* Draft restore banner */}
-        {showRestorePrompt && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm text-amber-800">
-              <RotateCcw size={15} className="shrink-0" />
-              <span>
-                Un brouillon non enregistré a été trouvé. Voulez-vous le
-                restaurer&nbsp;?
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={handleIgnoreDraft}>
-                Ignorer
-              </Button>
-              <Button size="sm" onClick={handleRestoreDraft}>
-                Restaurer
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Page header */}
-        <div>
-          <h1 className="app-page-title">Ventes</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div><h1 className="app-page-title">Ventes</h1>
           <p className="app-page-subtitle">
             Enregistrement des ventes et documents commerciaux
-          </p>
+          </p></div>
+          {draftStatus !== "idle" && (
+            <span className="text-xs text-text-muted" role="status">
+              {draftStatus === "restored" ? "Brouillon restauré" : "Brouillon sauvegardé"}
+            </span>
+          )}
         </div>
 
         {/* Tab selector — 5 document types */}
@@ -1473,6 +1456,9 @@ export default function VentesPage() {
                     className="app-select"
                   >
                     <option value="">Client comptoir</option>
+                    {customerId && customersQuery.isSuccess && !(customersQuery.data ?? []).some((c) => c.id === customerId) && (
+                      <option value={customerId}>Client indisponible (brouillon)</option>
+                    )}
                     {(customersQuery.data ?? []).map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -1794,7 +1780,7 @@ export default function VentesPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={resetForm}
+                  onClick={() => resetForm()}
                 >
                   Réinitialiser
                 </Button>

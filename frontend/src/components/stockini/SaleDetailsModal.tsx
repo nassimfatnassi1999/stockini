@@ -145,7 +145,9 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                         { label: "Désignation", right: false },
                         { label: "Qté", right: true },
                         { label: "PU HT", right: true },
-                        { label: "Marge %", right: true },
+                        { label: "Marge brute", right: true },
+                        { label: "Remise", right: true },
+                        { label: "Marge nette", right: true },
                         { label: "Total HT", right: true },
                       ].map(({ label, right }) => (
                         <th
@@ -167,6 +169,10 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                         purchasePrice > 0
                           ? ((unitPrice - purchasePrice) / purchasePrice) * 100
                           : null;
+                      const grossMargin = item.marginPercent == null
+                        ? null
+                        : Number(item.marginPercent);
+                      const discount = Number(item.discountPercent ?? 0);
                       return (
                         <tr key={item.id} className="hover:bg-slate-50/60">
                           <td className="px-3 py-2.5 font-mono text-text-secondary">
@@ -180,6 +186,12 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {fmt3(item.unitPrice)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {grossMargin === null ? "Historique" : `${grossMargin.toFixed(2)} %`}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {discount.toFixed(2)} %
                           </td>
                           <td
                             className={`px-3 py-2.5 text-right tabular-nums font-medium ${margePercent === null ? "text-text-muted" : margePercent < 20 ? "text-red-600" : "text-emerald-600"}`}
@@ -204,8 +216,8 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                 <TotalRow label="Sous-total HT" value={money(sale.subtotal)} />
                 {Number(sale.discount) > 0 && (
                   <TotalRow
-                    label="Remise"
-                    value={`− ${money(sale.discount)}`}
+                    label="Remise incluse"
+                    value={money(sale.discount)}
                     negative
                   />
                 )}

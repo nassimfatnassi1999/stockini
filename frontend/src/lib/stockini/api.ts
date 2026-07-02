@@ -538,7 +538,8 @@ export const stockiniApi = {
     api
       .get<CreditNote[]>(`/avoirs/sales/${saleId}/credit-notes`)
       .then((r) => r.data),
-  avoirPdfUrl: (id: string) => `/api/avoirs/${id}/pdf`,
+  avoirPdf: (id: string): Promise<Blob> =>
+    api.get(`/avoirs/${id}/pdf`, { responseType: 'blob' }).then((r) => r.data as Blob),
 
   // ── Caisse ────────────────────────────────────────────────────────────────
   caisseBalance: () =>

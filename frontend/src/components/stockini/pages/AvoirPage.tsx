@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { stockiniApi } from "@/lib/stockini/api";
 import { money } from "@/lib/stockini/format";
 import { toast } from "@/lib/toast";
+import { openPdfInNewTab, pdfOpenErrorMessage } from "@/lib/openPdf";
 import type { CreditNote, ReturnableItem, Sale } from "@/lib/stockini/types";
 import { PageHeader } from "../shared/PageHeader";
 import { SlideOver } from "@/components/ui/SlideOver";
@@ -59,7 +60,13 @@ function AvoirDetailModal({
   avoir: CreditNote;
   onClose: () => void;
 }) {
-  const pdfUrl = stockiniApi.avoirPdfUrl(avoir.id);
+  const openPdf = async () => {
+    try {
+      await openPdfInNewTab(() => stockiniApi.avoirPdf(avoir.id));
+    } catch (error) {
+      toast.error(pdfOpenErrorMessage(error));
+    }
+  };
   return (
     <SlideOver
       title={`Avoir ${avoir.numero}`}
@@ -69,11 +76,9 @@ function AvoirDetailModal({
       width={720}
       footer={
         <>
-          <a href={pdfUrl} target="_blank" rel="noreferrer">
-            <Button size="sm" variant="outline">
-              <FileDown size={14} className="mr-1" /> PDF
-            </Button>
-          </a>
+          <Button size="sm" variant="outline" onClick={openPdf}>
+            <FileDown size={14} className="mr-1" /> PDF
+          </Button>
           <Button size="sm" variant="outline" onClick={onClose}>
             Fermer
           </Button>
@@ -784,11 +789,13 @@ export function AvoirPage() {
                             {
                               label: "Télécharger PDF",
                               icon: <FileDown size={14} />,
-                              onClick: () =>
-                                window.open(
-                                  stockiniApi.avoirPdfUrl(avoir.id),
-                                  "_blank",
-                                ),
+                              onClick: async () => {
+                                try {
+                                  await openPdfInNewTab(() => stockiniApi.avoirPdf(avoir.id));
+                                } catch (error) {
+                                  toast.error(pdfOpenErrorMessage(error));
+                                }
+                              },
                             },
                           ]}
                         />

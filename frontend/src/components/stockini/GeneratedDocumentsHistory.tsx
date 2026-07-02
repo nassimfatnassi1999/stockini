@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { toast } from '@/lib/toast';
+import { openPdfInNewTab, pdfOpenErrorMessage } from '@/lib/openPdf';
 import { stockiniApi } from '@/lib/stockini/api';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import type { GeneratedDocument, SalesDocumentType } from '@/lib/stockini/types';
@@ -210,10 +211,9 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
 
   const handleView = async (id: string) => {
     try {
-      const { url } = await stockiniApi.documentPresignedUrl(id);
-      window.open(url, '_blank');
-    } catch {
-      toast.error('Impossible d\'ouvrir le document');
+      await openPdfInNewTab(() => stockiniApi.viewDocument(id));
+    } catch (error) {
+      toast.error(pdfOpenErrorMessage(error));
     }
   };
 

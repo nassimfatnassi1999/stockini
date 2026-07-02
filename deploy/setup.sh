@@ -250,7 +250,9 @@ run_step() {
 
 # ── SSL Setup ────────────────────────────────────────────────
 setup_ssl() {
-  log_step "CERTIFICAT SSL (Let's Encrypt)"
+  log_step "SSL DÉSACTIVÉ — ACCÈS PAR IP"
+  log_warn "Configuration IP-only: Let's Encrypt/Certbot n'est pas utilisé."
+  return 0
 
   local DOMAIN
   DOMAIN=$(grep -E '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]"'"'"'')

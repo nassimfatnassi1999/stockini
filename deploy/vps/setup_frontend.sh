@@ -92,12 +92,12 @@ set -a
 source "$ENV_FILE"
 set +a
 
-_DOMAIN=$(grep -E '^DOMAIN=' "$ENV_FILE" | head -1 | cut -d= -f2 | tr -d '[:space:]"'"'"'')
-_DOMAIN="${_DOMAIN:-stockini-msp.tn}"
+_VPS_IP=$(grep -E '^VPS_IP=' "$ENV_FILE" | head -1 | cut -d= -f2 | tr -d '[:space:]"'"'"'')
+_VPS_IP="${_VPS_IP:-51.178.46.89}"
 export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-/api}"
 export INTERNAL_API_URL="${INTERNAL_API_URL:-http://127.0.0.1:${BACKEND_PORT:-${PORT:-3001}}/api}"
-export NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-https://$_DOMAIN}"
-export NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://$_DOMAIN}"
+export NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-http://$_VPS_IP}"
+export NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-http://$_VPS_IP}"
 log_info "NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL"
 log_info "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL"
 

@@ -134,6 +134,7 @@ export class DocumentsService {
             quantity: item.quantity,
             unitPrice: Number(item.unitPrice),
             discountPercent: Number(item.discountPercent ?? 0),
+            tvaPercent: Number(item.tvaPercent ?? item.product?.tva ?? 0),
             total: Number(item.total),
           })),
         },
@@ -337,9 +338,7 @@ export class DocumentsService {
   // ─── Presigned URL ───────────────────────────────────────────────────────────
 
   async getPresignedUrl(id: string): Promise<{ url: string }> {
-    const doc = await this.prisma.generatedDocument.findUniqueOrThrow({
-      where: { id },
-    });
+    const doc = await this.findAvailableDocument(id);
     const url = await this.minio.presignedGetUrl(
       doc.minioBucket,
       doc.minioObjectKey,
@@ -352,14 +351,22 @@ export class DocumentsService {
   async getDownloadBuffer(
     id: string,
   ): Promise<{ buffer: Buffer; fileName: string }> {
-    const doc = await this.prisma.generatedDocument.findUniqueOrThrow({
-      where: { id },
-    });
+    const doc = await this.findAvailableDocument(id);
+    const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey);
+    if (!exists) throw new NotFoundException('Le document demandé est introuvable.');
     const buffer = await this.minio.getObject(
       doc.minioBucket,
       doc.minioObjectKey,
     );
     return { buffer, fileName: doc.fileName };
+  }
+
+  private async findAvailableDocument(id: string) {
+    const doc = await this.prisma.generatedDocument.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!doc) throw new NotFoundException('Le document demandé est introuvable.');
+    return doc;
   }
 
   // ─── Email preview (batch, from ventes page) ─────────────────────────────────
@@ -925,6 +932,7 @@ export class DocumentsService {
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice),
           discountPercent: Number(item.discountPercent ?? 0),
+          tvaPercent: Number(item.tvaPercent ?? item.product?.tva ?? 0),
           total: Number(item.total),
         })),
       },

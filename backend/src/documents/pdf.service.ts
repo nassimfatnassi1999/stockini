@@ -678,7 +678,7 @@ export class PdfService {
         { label: 'TOTAL HT', value: `${fmt3(sale.subtotal)} DT` },
       ];
       if (sale.discount > 0) {
-        summaryRows.push({ label: 'Remise', value: `- ${fmt3(sale.discount)} DT`, color: MSP_RED });
+        summaryRows.push({ label: 'Remise incluse', value: `${fmt3(sale.discount)} DT`, color: MSP_RED });
       }
       summaryRows.push({ label: 'TOTAL TVA', value: `${fmt3(sale.tax)} DT` });
       if ((sale.timbreFiscal ?? 0) > 0) {

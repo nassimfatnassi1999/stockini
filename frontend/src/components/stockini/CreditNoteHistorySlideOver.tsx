@@ -5,6 +5,8 @@ import { FileDown, Loader2 } from "lucide-react";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { Button } from "@/components/ui/button";
 import { stockiniApi } from "@/lib/stockini/api";
+import { openPdfInNewTab, pdfOpenErrorMessage } from "@/lib/openPdf";
+import { toast } from "@/lib/toast";
 import { money } from "@/lib/stockini/format";
 import type { CreditNote, Sale } from "@/lib/stockini/types";
 
@@ -31,7 +33,13 @@ const REFUND_METHOD_LABELS: Record<string, string> = {
 };
 
 function AvoirCard({ avoir }: { avoir: CreditNote }) {
-  const pdfUrl = stockiniApi.avoirPdfUrl(avoir.id);
+  const openPdf = async () => {
+    try {
+      await openPdfInNewTab(() => stockiniApi.avoirPdf(avoir.id));
+    } catch (error) {
+      toast.error(pdfOpenErrorMessage(error));
+    }
+  };
   const refundMethod =
     avoir.payments?.[0]?.method
       ? (REFUND_METHOD_LABELS[avoir.payments[0].method] ?? avoir.payments[0].method)
@@ -60,12 +68,10 @@ function AvoirCard({ avoir }: { avoir: CreditNote }) {
           <span className={`rounded px-2 py-0.5 text-xs font-medium ${badge.cls}`}>
             {badge.label}
           </span>
-          <a href={pdfUrl} target="_blank" rel="noreferrer">
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-              <FileDown size={12} className="mr-1" />
-              PDF
-            </Button>
-          </a>
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={openPdf}>
+            <FileDown size={12} className="mr-1" />
+            PDF
+          </Button>
         </div>
       </div>
 

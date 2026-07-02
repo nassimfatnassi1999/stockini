@@ -58,6 +58,13 @@ export class CreateSaleItemDto {
   @Min(0)
   @Max(100)
   discountPercent?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-1000)
+  @Max(1000)
+  marginPercent?: number;
 }
 
 export class CreateSaleDto {

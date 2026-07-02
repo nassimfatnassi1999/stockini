@@ -103,6 +103,8 @@ export class DocumentsController {
   async view(@Param('id') id: string, @Res() res: Response) {
     const { buffer, fileName } = await this.svc.getDownloadBuffer(id);
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
     res.send(buffer);
   }
@@ -112,6 +114,8 @@ export class DocumentsController {
   async download(@Param('id') id: string, @Res() res: Response) {
     const { buffer, fileName } = await this.svc.getDownloadBuffer(id);
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(buffer);
   }

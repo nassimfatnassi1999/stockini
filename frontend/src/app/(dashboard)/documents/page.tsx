@@ -21,6 +21,7 @@ import { SlideOver } from '@/components/ui/SlideOver';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
+import { openPdfInNewTab, pdfOpenErrorMessage } from '@/lib/openPdf';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
@@ -507,19 +508,9 @@ export default function DocumentsPage() {
     if (viewingId) return;
     setViewingId(doc.id);
     try {
-      const blob = await stockiniApi.viewDocument(doc.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      await openPdfInNewTab(() => stockiniApi.viewDocument(doc.id));
     } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 401 || status === 403) {
-        toast.error('Accès refusé — permission ou session invalide');
-      } else if (status === 404) {
-        toast.error('Document introuvable dans le stockage');
-      } else {
-        toast.error('Impossible d\'ouvrir le document');
-      }
+      toast.error(pdfOpenErrorMessage(err));
     } finally {
       setViewingId(null);
     }

@@ -7,8 +7,8 @@ set -e
 # Usage: sudo bash deploy/vps/setup_nginx.sh
 #
 # Copies nginx config, enables the site, tests and reloads.
-# Nginx must already be installed. SSL is used automatically when
-# certificates are present.
+# Nginx must already be installed. This setup intentionally uses the VPS IP
+# over HTTP; Let's Encrypt does not issue certificates for bare IPv4 hosts.
 # =============================================================
 
 RED='\033[0;31m'
@@ -33,11 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NGINX_CONF_SRC="$SCRIPT_DIR/nginx-stockini-msp.conf"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$PROJECT_ROOT/.env"
-SITE_NAME="stockini-msp.tn"
-if [ -f "$ENV_FILE" ]; then
-  ENV_DOMAIN=$(grep -E '^DOMAIN=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]"'"'"'')
-  [ -n "$ENV_DOMAIN" ] && SITE_NAME="$ENV_DOMAIN"
-fi
+SITE_NAME="51.178.46.89"
 NGINX_AVAILABLE="/etc/nginx/sites-available/$SITE_NAME"
 NGINX_ENABLED="/etc/nginx/sites-enabled/$SITE_NAME"
 
@@ -54,31 +50,19 @@ if ! command -v nginx &>/dev/null; then
 fi
 log_ok "Nginx installed ($(nginx -v 2>&1 | cut -d/ -f2))"
 
-# ── 2. Check SSL certificates ─────────────────────────────
-SSL_CERT="/etc/letsencrypt/live/$SITE_NAME/fullchain.pem"
-SSL_KEY="/etc/letsencrypt/live/$SITE_NAME/privkey.pem"
-
-SSL_ENABLED=1
-if [ ! -f "$SSL_CERT" ] || [ ! -f "$SSL_KEY" ]; then
-  SSL_ENABLED=0
-  log_warn "SSL certificates not found for $SITE_NAME. Installing HTTP-only config first."
+# ── 2. Verify frontend is running ─────────────────────────
+if curl -s http://127.0.0.1:3010 > /dev/null 2>&1; then
+  log_ok "Frontend is running on port 3010"
 else
-  log_ok "SSL certificates found"
-fi
-
-# ── 3. Verify frontend is running ─────────────────────────
-if curl -s http://127.0.0.1:3000 > /dev/null 2>&1; then
-  log_ok "Frontend is running on port 3000"
-else
-  log_warn "Frontend not responding on port 3000"
+  log_warn "Frontend not responding on port 3010"
   log_warn "Run setup_frontend.sh first, or / will fail"
 fi
 
-# ── 4. Verify backend is running ──────────────────────────
-if curl -s http://127.0.0.1:3001/health > /dev/null 2>&1; then
-  log_ok "Backend is running on port 3001"
+# ── 3. Verify backend is running ──────────────────────────
+if curl -s http://127.0.0.1:4010/api/health > /dev/null 2>&1; then
+  log_ok "Backend is running on port 4010"
 else
-  log_warn "Backend not responding on port 3001"
+  log_warn "Backend not responding on port 4010"
   log_warn "Run setup_backend.sh first, or API calls will fail"
 fi
 
@@ -95,41 +79,8 @@ if [ ! -f "$NGINX_CONF_SRC" ]; then
   exit 1
 fi
 
-if [ "$SSL_ENABLED" -eq 1 ]; then
-  sed "s/stockini-msp.tn/$SITE_NAME/g" "$NGINX_CONF_SRC" > "$NGINX_AVAILABLE"
-  log_ok "HTTPS config written to $NGINX_AVAILABLE"
-else
-  cat > "$NGINX_AVAILABLE" <<HTTP_ONLY
-server {
-    listen 80;
-    server_name $SITE_NAME www.$SITE_NAME;
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:3001/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        client_max_body_size 50M;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-HTTP_ONLY
-  log_ok "HTTP-only config written to $NGINX_AVAILABLE"
-fi
+cp "$NGINX_CONF_SRC" "$NGINX_AVAILABLE"
+log_ok "HTTP IP-only config written to $NGINX_AVAILABLE"
 
 # ── 7. Enable site ────────────────────────────────────────
 ln -sf "$NGINX_AVAILABLE" "$NGINX_ENABLED"
@@ -164,14 +115,10 @@ echo "========================================="
 echo -e "${GREEN}  Nginx setup complete!${NC}"
 echo "========================================="
 echo ""
-if [ "$SSL_ENABLED" -eq 1 ]; then
-  echo "  Site:     https://$SITE_NAME"
-else
-  echo "  Site:     http://$SITE_NAME (run deploy/setup.sh or certbot, then rerun setup_nginx.sh for HTTPS)"
-fi
+echo "  Site:     http://$SITE_NAME"
 echo "  Config:   $NGINX_AVAILABLE"
-echo "  Frontend: 127.0.0.1:3000       → /"
-echo "  Backend:  127.0.0.1:3001       → /api/"
+echo "  Frontend: 127.0.0.1:3010       → /"
+echo "  Backend:  127.0.0.1:4010       → /api/"
 echo ""
-echo "  Test:     curl -I https://$SITE_NAME"
+echo "  Test:     curl -I http://$SITE_NAME"
 echo ""
