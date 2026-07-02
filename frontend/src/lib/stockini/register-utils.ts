@@ -1,3 +1,5 @@
+import { generateClientId } from '@/lib/id';
+
 export const MIN_MARGIN_PERCENT = 20;
 export const DEFAULT_MARGIN_PERCENT = 40;
 
@@ -68,7 +70,7 @@ export interface SaleMargeTotals {
 
 export type DocumentType = 'DEVIS' | 'BON_COMMANDE' | 'BON_LIVRAISON' | 'FACTURE';
 
-export function createEmptyLine(id: string = crypto.randomUUID()): RegisterLine {
+export function createEmptyLine(id: string = generateClientId()): RegisterLine {
   return {
     id,
     productId: null,

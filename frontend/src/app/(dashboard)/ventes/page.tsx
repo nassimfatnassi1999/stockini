@@ -34,6 +34,7 @@ import { KebabMenu } from "@/components/stockini/shared/KebabMenu";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { generateClientId } from "@/lib/id";
 import { PermissionGuard } from "@/components/shared/PermissionGuard";
 import { usePermissions } from "@/lib/hooks/usePermissions";
 import { useDraftSave } from "@/lib/hooks/useDraftSave";
@@ -819,7 +820,7 @@ export default function VentesPage() {
             recalculateSaleLine({
               ...createEmptyLine(),
               ...line,
-              id: line.id || crypto.randomUUID(),
+              id: line.id || generateClientId(),
               productId: line.productId ?? null,
               quantity: Number(line.quantity) || 0,
               puHt: Number(line.puHt) || 0,

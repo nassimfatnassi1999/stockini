@@ -7,6 +7,7 @@ import { SlideOver } from '@/components/ui/SlideOver';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
+import { generateClientId } from '@/lib/id';
 import { useDraftSave } from '@/lib/hooks/useDraftSave';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -229,7 +230,7 @@ export default function AchatsPage() {
     const newLineMap: Record<string, { purchaseItemId: string; maxQty: number }> = {};
 
     const newLines: RegisterLine[] = remainingItems.map((item) => {
-      const lineId = crypto.randomUUID();
+      const lineId = generateClientId();
       const maxQty = item.quantity - item.receivedQuantity;
       newLineMap[lineId] = { purchaseItemId: item.id, maxQty };
 
