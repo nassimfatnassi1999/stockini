@@ -170,9 +170,16 @@ echo "Création de '$APP_EMAIL' avec le rôle '$APP_ROLE'..."
     printf '%s\n' "$APP_IS_ACTIVE"
 } | docker exec -i "$BACKEND_CONTAINER_NAME" node -e '
 const { PrismaClient } = require("@prisma/client");
+const { PrismaPg } = require("@prisma/adapter-pg");
 const bcrypt = require("bcryptjs");
 const readline = require("node:readline");
-const prisma = new PrismaClient();
+if (!process.env.DATABASE_URL) {
+  console.error("Erreur : DATABASE_URL est absent du conteneur backend.");
+  process.exit(1);
+}
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 const lines = [];
 readline.createInterface({ input: process.stdin })
   .on("line", line => lines.push(line))
