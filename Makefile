@@ -18,6 +18,8 @@ PROD_FRONTEND_CONTAINER := stockini-prod-frontend
 PROD_POSTGRES_CONTAINER := stockini-prod-postgres
 PROD_MINIO_CONTAINER := stockini-prod-minio
 PROD_NETWORK := stockini-prod-network
+PROD_WAIT_TIMEOUT ?= 60
+PROD_WAIT_FRONTEND ?= 1
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
 # le compose actuel peut encore utiliser "postgres".
@@ -322,9 +324,10 @@ prod-deploy: prod-env-check ## Builder et déployer Stockini, migrer puis prépa
 	@set -e; \
 	echo -e "$(BLUE)Build et démarrage des seuls services Stockini...$(NC)"; \
 	$(COMPOSE_PROD) up -d --build; \
-	$(MAKE) --no-print-directory prod-wait; \
+	$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=0; \
 	$(MAKE) --no-print-directory prod-migrate; \
 	$(MAKE) --no-print-directory prod-buckets; \
+	$(MAKE) --no-print-directory prod-wait; \
 	frontend_url="$$(awk -F= '/^CORS_ORIGIN=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
 	backend_url="$$(awk -F= '/^NEXT_PUBLIC_API_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
 	echo -e "$(GREEN)Stockini production est prêt.$(NC)"; \
@@ -358,30 +361,45 @@ prod-status: prod-env-check ## Afficher conteneurs, santé, ports et réseau Sto
 	@echo -e "\n$(BLUE)Réseau Stockini$(NC)"
 	@docker network inspect "$(PROD_NETWORK)" --format 'Nom={{.Name}} Driver={{.Driver}} Conteneurs={{len .Containers}}' 2>/dev/null || echo "$(PROD_NETWORK): absent"
 
-prod-wait: prod-env-check ## Attendre que tous les services Stockini soient healthy
-	@echo -e "$(BLUE)Attente de tous les healthchecks (maximum 180 secondes)...$(NC)"
+prod-wait: prod-env-check ## Attendre les healthchecks configurés (running sinon), maximum 60 s
+	@echo -e "$(BLUE)Attente des services requis (maximum $(PROD_WAIT_TIMEOUT) secondes)...$(NC)"
 	@set -e; \
-	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER) $(PROD_FRONTEND_CONTAINER)"; \
-	for attempt in $$(seq 1 90); do \
-		all_healthy=true; \
+	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER)"; \
+	if [ "$(PROD_WAIT_FRONTEND)" = "1" ]; then containers="$$containers $(PROD_FRONTEND_CONTAINER)"; fi; \
+	deadline=$$((SECONDS + $(PROD_WAIT_TIMEOUT))); \
+	while [ $$SECONDS -lt $$deadline ]; do \
+		all_ready=true; \
 		for container in $$containers; do \
-			if ! docker inspect "$$container" >/dev/null 2>&1; then all_healthy=false; continue; fi; \
+			if ! docker inspect "$$container" >/dev/null 2>&1; then \
+				echo "$$container: absent"; \
+				all_ready=false; \
+				continue; \
+			fi; \
 			status="$$(docker inspect --format '{{.State.Status}}' "$$container")"; \
-			health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$$container")"; \
+			running="$$(docker inspect --format '{{.State.Running}}' "$$container")"; \
+			health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$container")"; \
+			if [ "$$container" = "$(PROD_FRONTEND_CONTAINER)" ]; then \
+				[ "$$running" = "true" ] && ready=true || ready=false; \
+			elif [ "$$health" = "none" ]; then \
+				ready="$$running"; \
+			else \
+				[ "$$health" = "healthy" ] && ready=true || ready=false; \
+			fi; \
+			echo "$$container: status=$$status health=$$health running=$$running ready=$$ready"; \
 			if [ "$$status" = "exited" ] || [ "$$status" = "dead" ]; then \
-				echo -e "$(RED)$$container s'est arrêté avant de devenir healthy.$(NC)"; \
+				echo -e "$(RED)$$container s'est arrêté avant d'être prêt.$(NC)"; \
 				docker logs --tail 100 "$$container"; \
 				exit 1; \
 			fi; \
-			[ "$$health" = "healthy" ] || all_healthy=false; \
+			[ "$$ready" = "true" ] || all_ready=false; \
 		done; \
-		if [ "$$all_healthy" = true ]; then \
-			echo -e "$(GREEN)PostgreSQL, MinIO, backend et frontend sont healthy.$(NC)"; \
+		if [ "$$all_ready" = true ]; then \
+			echo -e "$(GREEN)Tous les services requis sont prêts.$(NC)"; \
 			exit 0; \
 		fi; \
 		sleep 2; \
 	done; \
-	echo -e "$(RED)Timeout: tous les services ne sont pas healthy après 180 secondes.$(NC)"; \
+	echo -e "$(RED)Timeout: services non prêts après $(PROD_WAIT_TIMEOUT) secondes.$(NC)"; \
 	for container in $$containers; do \
 		echo "--- $$container ---"; \
 		docker inspect --format '{{json .State.Health}}' "$$container" 2>/dev/null || true; \
@@ -389,13 +407,31 @@ prod-wait: prod-env-check ## Attendre que tous les services Stockini soient heal
 	done; \
 	exit 1
 
-prod-migrate: prod-env-check ## Appliquer les migrations puis régénérer Prisma dans le backend
+prod-migrate: prod-env-check ## Vérifier et appliquer uniquement les migrations Prisma nécessaires
 	@set -e; \
-	echo -e "$(BLUE)Application des migrations Prisma...$(NC)"; \
-	docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate deploy; \
-	echo -e "$(BLUE)Génération du client Prisma...$(NC)"; \
-	docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma generate; \
-	echo -e "$(GREEN)Migrations Prisma terminées.$(NC)"
+	echo -e "$(BLUE)Vérification des migrations Prisma...$(NC)"; \
+	status_output="$$(docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate status 2>&1)" && status_rc=0 || status_rc=$$?; \
+	echo "$$status_output"; \
+	if [ $$status_rc -eq 0 ]; then \
+		echo -e "$(GREEN)Migrations déjà à jour.$(NC)"; \
+	elif echo "$$status_output" | grep -Eqi 'not yet been applied|not yet applied|pending migration'; then \
+		echo -e "$(BLUE)Application des migrations en attente...$(NC)"; \
+		if docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate deploy; then \
+			echo -e "$(GREEN)Migrations appliquées.$(NC)"; \
+		else \
+			echo -e "$(RED)Erreur migration: prisma migrate deploy a échoué.$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo -e "$(RED)Erreur migration: prisma migrate status a échoué sans migration en attente identifiable.$(NC)"; \
+		exit $$status_rc; \
+	fi; \
+	if docker exec "$(PROD_BACKEND_CONTAINER)" node -e "require('@prisma/client').PrismaClient" >/dev/null 2>&1; then \
+		echo -e "$(GREEN)Client Prisma déjà généré.$(NC)"; \
+	else \
+		echo -e "$(BLUE)Génération du client Prisma nécessaire...$(NC)"; \
+		docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma generate || { echo -e "$(RED)Erreur: prisma generate a échoué.$(NC)"; exit 1; }; \
+	fi
 
 prod-buckets: prod-env-check ## Créer idempotemment les buckets MinIO nécessaires
 	@set -e; \
