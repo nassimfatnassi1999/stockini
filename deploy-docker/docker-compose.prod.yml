@@ -29,8 +29,10 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     ports:
-      - "${MINIO_HOST_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+      # Ports hôte volontairement distincts des installations MinIO existantes.
+      # Le backend utilise le réseau Docker et continue à joindre le port interne 9000.
+      - "${MINIO_HOST_PORT:-9010}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9011}:9001"
     volumes:
       - stockini-prod-minio-data:/data
     networks:
