@@ -239,7 +239,7 @@ export function DepensesPage() {
     },
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors de l\'enregistrement du paiement');
+      toast.error(msg ?? (error as Error).message ?? 'Erreur lors de l\'enregistrement du paiement');
     },
   });
 

@@ -2,7 +2,8 @@
 
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { isAuthenticated, setLastRoute } from '@/lib/auth';
+import { isAuthenticated, setAuthSession, setLastRoute, type AuthUser } from '@/lib/auth';
+import { api } from '@/lib/api';
 import { AppSidebar } from '@/components/shared/AppSidebar';
 import { AppTopbar } from '@/components/shared/AppTopbar';
 import { Toaster } from '@/components/shared/Toaster';
@@ -18,7 +19,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       window.location.href = '/login';
       return;
     }
-    setAuthChecked(true);
+    let active = true;
+    api.get<AuthUser>('/auth/me')
+      .then(({ data }) => {
+        if (!active) return;
+        setAuthSession({ accessToken: '', user: data });
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        // The shared API client refreshes once when possible and otherwise
+        // performs the single, deduplicated redirect to /login.
+      });
+    return () => { active = false; };
   }, []);
 
   // Persist the current route so we can restore it after login/refresh

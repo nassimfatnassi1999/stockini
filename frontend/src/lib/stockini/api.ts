@@ -48,6 +48,17 @@ import type {
 } from "./types";
 import type { CreditNotePayload } from "@/features/avoirs/utils/credit-note-calculation";
 
+const PAYABLE_METHODS = new Set(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK']);
+
+function validatePayment(data: { amount: number; method: string }) {
+  if (!Number.isFinite(data.amount) || data.amount <= 0) {
+    throw new Error('Le montant du paiement doit être supérieur à zéro.');
+  }
+  if (!PAYABLE_METHODS.has(data.method)) {
+    throw new Error('Choisissez un mode de paiement valide (espèces, carte, virement ou chèque).');
+  }
+}
+
 type ProductUpdatePayload = Omit<Partial<Product>, "quantity"> & {
   categoryId?: string;
   brandId?: string;
@@ -235,17 +246,21 @@ export const stockiniApi = {
   paySale: (
     saleId: string,
     data: { amount: number; method: string; note?: string },
-  ) =>
-    api
+  ) => {
+    validatePayment(data);
+    return api
       .post<Payment>(`/payments/sales/${saleId}/pay`, data)
-      .then((r) => r.data),
+      .then((r) => r.data);
+  },
   payPurchase: (
     purchaseId: string,
     data: { amount: number; method: string; note?: string },
-  ) =>
-    api
+  ) => {
+    validatePayment(data);
+    return api
       .post<Payment>(`/payments/purchases/${purchaseId}/pay`, data)
-      .then((r) => r.data),
+      .then((r) => r.data);
+  },
   alerts: () => api.get<Alert[]>("/alerts").then((r) => r.data),
   createAlert: (data: Partial<Alert>) =>
     api.post<Alert>("/alerts", data).then((r) => r.data),

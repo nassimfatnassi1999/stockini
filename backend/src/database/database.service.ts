@@ -115,7 +115,7 @@ export class DatabaseService {
         bucket: this.minio.bucket,
         backupVersion: 1,
       };
-      fs.writeFileSync(path.join(tmpDir, 'metadata.json'), JSON.stringify(metadata, null, 2));
+      fs.writeFileSync(path.join(tmpDir, 'manifest.json'), JSON.stringify(metadata, null, 2));
 
       // 5. Create ZIP
       const zipName = `backup-${stamp}.zip`;
@@ -254,13 +254,17 @@ export class DatabaseService {
       const dumpPath = ['database/dump.sql']
         .map((name) => path.join(extractDir, name))
         .find((candidate) => fs.existsSync(candidate));
-      const metadataPath = path.join(extractDir, 'metadata.json');
+      // New backups use manifest.json. Keep metadata.json readable so existing
+      // production archives remain restorable after this deployment.
+      const metadataPath = ['manifest.json', 'metadata.json']
+        .map((name) => path.join(extractDir, name))
+        .find((candidate) => fs.existsSync(candidate));
 
       if (!dumpPath) {
         throw new BadRequestException('database/dump.sql not found in backup');
       }
-      if (!fs.existsSync(metadataPath)) {
-        throw new BadRequestException('metadata.json not found in backup');
+      if (!metadataPath) {
+        throw new BadRequestException('manifest.json not found in backup');
       }
       try {
         const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as Record<string, unknown>;
@@ -273,7 +277,7 @@ export class DatabaseService {
           throw new Error('champs requis invalides');
         }
       } catch (error) {
-        throw new BadRequestException(`metadata.json invalide : ${(error as Error).message}`);
+        throw new BadRequestException(`manifest.json invalide : ${(error as Error).message}`);
       }
       const dumpStat = fs.statSync(dumpPath);
       if (dumpStat.size === 0) throw new BadRequestException(`Le dump ${path.basename(dumpPath)} est vide`);
@@ -843,7 +847,7 @@ export class DatabaseService {
       const zip = new AdmZip(zipPath);
       const entryNames = zip.getEntries().map((e) => e.entryName);
 
-      if (!entryNames.includes('metadata.json')) {
+      if (!entryNames.includes('manifest.json') && !entryNames.includes('metadata.json')) {
         return 'invalid';
       }
       if (!entryNames.includes('database/dump.sql')) {
@@ -1067,6 +1071,7 @@ export class DatabaseService {
         normalized === 'database' ||
         normalized === 'database/' ||
         normalized === 'database/dump.sql' ||
+        normalized === 'manifest.json' ||
         normalized === 'metadata.json' ||
         normalized === 'minio' ||
         normalized === 'minio/' ||
@@ -1077,7 +1082,7 @@ export class DatabaseService {
       if (isUnsafePath || !isAllowed) {
         this.logger.warn(`[RESTORE] Rejected unsafe/out-of-scope ZIP entry: ${normalized}`);
         throw new BadRequestException(
-          `Archive hors périmètre : ${normalized}. Seuls database/dump.sql, metadata.json et minio/${this.minio.bucket}/ sont autorisés.`,
+          `Archive hors périmètre : ${normalized}. Seuls database/dump.sql, manifest.json et minio/${this.minio.bucket}/ sont autorisés.`,
         );
       }
     }

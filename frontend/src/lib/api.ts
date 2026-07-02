@@ -21,6 +21,7 @@ function redirectToLogin() {
   loginRedirectStarted = true;
   processQueue(new Error('Session expirée'), null);
   clearAuthSession();
+  window.dispatchEvent(new Event('stockini:session-expired'));
   window.location.href = '/login';
 }
 

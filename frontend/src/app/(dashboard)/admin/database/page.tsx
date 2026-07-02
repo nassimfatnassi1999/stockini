@@ -266,7 +266,7 @@ function BackupsTab() {
     setCreating(true);
     try {
       const { data } = await api.post<{ success: boolean; filename: string; size: number }>(
-        '/admin/database/backups',
+        '/admin/database/backups/create',
         {},
       );
       toast.success(`Sauvegarde créée : ${data.filename}`);
@@ -280,16 +280,11 @@ function BackupsTab() {
   };
 
   const downloadBackup = async (filename: string) => {
-    const url = `/api/admin/database/backups/${encodeURIComponent(filename)}/download`;
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token ?? ''}` } });
-      if (!res.ok) {
-        let msg = `Erreur HTTP ${res.status}`;
-        try { const json = await res.json() as { message?: string }; msg = json.message ?? msg; } catch { /* ignore */ }
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
+      const { data: blob } = await api.get<Blob>(
+        `/admin/database/backups/${encodeURIComponent(filename)}/download`,
+        { responseType: 'blob' },
+      );
       if (blob.size === 0) throw new Error('Fichier reçu vide');
       const burl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -301,8 +296,15 @@ function BackupsTab() {
       URL.revokeObjectURL(burl);
       toast.success('Sauvegarde téléchargée');
     } catch (err) {
-      console.error('[DOWNLOAD] Backup error:', err);
-      toast.error(`Erreur téléchargement : ${(err as Error).message}`);
+      const response = (err as { response?: { data?: Blob; status?: number } }).response;
+      let message = (err as Error).message;
+      if (response?.data instanceof Blob && response.data.type.includes('json')) {
+        try {
+          const payload = JSON.parse(await response.data.text()) as { message?: string; details?: string };
+          message = payload.details ?? payload.message ?? message;
+        } catch { /* keep transport error */ }
+      }
+      toast.error(`Erreur téléchargement : ${message}`);
     }
   };
 
@@ -322,25 +324,9 @@ function BackupsTab() {
     window.sessionStorage.setItem('stockini_restore_in_progress', '1');
     let restoreSucceeded = false;
     try {
-      // Use fetch directly to avoid axios interceptor double-toast on 500 errors.
-      // Never set Content-Type manually with FormData — the browser must add the boundary.
-      const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') ?? '') : '';
       const form = new FormData();
       form.append('file', file);
-
-      const res = await fetch('/api/admin/database/restore', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-
-      type RestoreResponse = { success?: boolean; restored?: string[]; message?: string; details?: string; requiresReLogin?: boolean };
-      let json: RestoreResponse = {};
-      try { json = await res.json() as RestoreResponse; } catch { /* response may be plain text */ }
-
-      if (!res.ok) {
-        throw new Error(readRestoreError(json, res.status));
-      }
+      await api.post('/admin/database/restore', form);
 
       restoreSucceeded = true;
       clearAuthSession();
@@ -365,21 +351,7 @@ function BackupsTab() {
     window.sessionStorage.setItem('stockini_restore_in_progress', '1');
     let restoreSucceeded = false;
     try {
-      const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') ?? '') : '';
-      const res = await fetch(`/api/admin/database/backups/${encodeURIComponent(filename)}/restore`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}),
-      });
-      type RestoreResponse = { success?: boolean; restored?: string[]; message?: string; details?: string; requiresReLogin?: boolean };
-      let json: RestoreResponse = {};
-      try { json = await res.json() as RestoreResponse; } catch { /* ignore */ }
-      if (!res.ok) {
-        throw new Error(readRestoreError(json, res.status));
-      }
+      await api.post(`/admin/database/backups/${encodeURIComponent(filename)}/restore`, {});
       restoreSucceeded = true;
       clearAuthSession();
       window.sessionStorage.setItem(

@@ -56,7 +56,7 @@ export class DatabaseController {
   }
 
   @RequirePermissions('database.backup')
-  @Post('backups')
+  @Post('backups/create')
   async createBackup(
     @CurrentUser() user: AuthUser,
   ) {

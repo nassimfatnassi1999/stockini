@@ -1010,7 +1010,7 @@ function PayPurchaseModal({
     },
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
-      const text = Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur lors du paiement');
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? (error as Error).message ?? 'Erreur lors du paiement');
       toast.error(text);
     },
   });

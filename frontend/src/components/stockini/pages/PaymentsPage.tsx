@@ -314,7 +314,7 @@ export function PaymentsPage() {
     },
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors du paiement');
+      toast.error(msg ?? (error as Error).message ?? 'Erreur lors du paiement');
     },
   });
 
