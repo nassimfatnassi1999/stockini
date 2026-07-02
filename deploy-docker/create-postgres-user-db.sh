@@ -180,6 +180,45 @@ if (!process.env.DATABASE_URL) {
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
+const rolePermissions = {
+  ADMIN: ["*"],
+  SUPER_ADMIN: ["*"],
+  STOCK_MANAGER: [
+    "dashboard.view",
+    "products.view", "products.create", "products.update", "products.import",
+    "products.export", "products.view_margin",
+    "stock.view", "stock.adjust", "stock.transfer", "stock.movements.view", "stock.export",
+    "alerts.view", "alerts.create", "alerts.update", "alerts.delete", "alerts.mark_read",
+    "reports.view", "reports.stock_stats", "reports.export",
+    "trash.view", "trash.restore", "documentation.view",
+  ],
+  SELLER: [
+    "dashboard.view",
+    "clients.view", "clients.create", "clients.update", "clients.view_history",
+    "products.view", "stock.view", "stock.movements.view",
+    "sales.view", "sales.create", "sales.update", "sales.delete", "sales.view_details",
+    "sales.cancel", "sales.print", "sales.view_history", "sales.line.edit_unit_price_ht",
+    "documents.view", "documents.create", "documents.download", "documents.email",
+    "documents.view_history",
+    "payments.view", "payments.create", "payments.receive_client_payment",
+    "caisse.view", "caisse.operate", "alerts.view", "alerts.mark_read",
+    "documentation.view",
+  ],
+  PURCHASE_MANAGER: [
+    "dashboard.view", "products.view", "products.view_margin",
+    "stock.view", "stock.adjust", "stock.movements.view", "stock.export",
+    "suppliers.view", "suppliers.create", "suppliers.update", "suppliers.export",
+    "purchases.view", "purchases.create_order", "purchases.create_receipt",
+    "purchases.create_invoice", "purchases.update", "purchases.validate_receipt",
+    "purchases.cancel", "purchases.export",
+    "documents.view", "documents.create", "documents.download", "documents.email",
+    "payments.view", "payments.create",
+    "expenses.read", "expenses.view", "expenses.create", "expenses.update",
+    "expenses.cancel", "expenses.pay_supplier", "expenses.export",
+    "reports.view", "reports.purchases_stats", "reports.stock_stats", "reports.export",
+    "documentation.view",
+  ],
+};
 const lines = [];
 readline.createInterface({ input: process.stdin })
   .on("line", line => lines.push(line))
@@ -190,8 +229,20 @@ readline.createInterface({ input: process.stdin })
       const email = decode(email64);
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) throw new Error(`Un utilisateur avec l’e-mail ${email} existe déjà.`);
-      const role = await prisma.role.findUnique({ where: { name: roleName } });
-      if (!role) throw new Error(`Le rôle ${roleName} n’existe pas. Exécutez d’abord les migrations et le seed.`);
+      if (!["ADMIN", "STOCK_MANAGER", "SELLER", "PURCHASE_MANAGER"].includes(roleName)) {
+        throw new Error(`Le rôle ${roleName} n’est pas autorisé.`);
+      }
+      const roles = await Promise.all(
+        Object.entries(rolePermissions).map(([name, permissions]) =>
+          prisma.role.upsert({
+            where: { name },
+            update: {},
+            create: { name, permissions },
+          }),
+        ),
+      );
+      const role = roles.find(item => item.name === roleName);
+      if (!role) throw new Error(`Impossible d’initialiser le rôle ${roleName}.`);
       const user = await prisma.user.create({
         data: {
           fullName: decode(fullName64),
