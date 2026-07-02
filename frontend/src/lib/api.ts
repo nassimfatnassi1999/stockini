@@ -2,8 +2,11 @@ import axios from 'axios';
 import { toast } from './toast';
 import { clearAuthSession, setAuthSession } from './auth';
 
+const apiRoot = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
+const apiBaseURL = `${apiRoot}/api`;
+
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseURL,
   timeout: 15000,
   withCredentials: false,
 });
@@ -104,7 +107,7 @@ api.interceptors.response.use(
       try {
         // Use plain axios to avoid interceptor loop
         const { data } = await axios.post<{ accessToken: string; user: Parameters<typeof setAuthSession>[0]['user'] }>(
-          '/api/auth/refresh',
+          `${apiBaseURL}/auth/refresh`,
           { refreshToken },
         );
 

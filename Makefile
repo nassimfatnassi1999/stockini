@@ -10,14 +10,17 @@ FRONTEND := $(ROOT_DIR)/frontend
 ENV_FILE := $(ROOT_DIR)/.env
 
 COMPOSE := docker compose --env-file .env
-COMPOSE_PROD := docker compose -f docker-compose.prod.yml --env-file .env
+PROD_ENV_FILE := $(ROOT_DIR)/deploy-docker/.env.prod
+PROD_COMPOSE_FILE := $(ROOT_DIR)/deploy-docker/docker-compose.prod.yml
+COMPOSE_PROD := docker compose --env-file $(PROD_ENV_FILE) -f $(PROD_COMPOSE_FILE)
+PROD_BACKEND_CONTAINER := stockini-prod-backend
+PROD_FRONTEND_CONTAINER := stockini-prod-frontend
+PROD_NETWORK := stockini-prod-network
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
 # le compose actuel peut encore utiliser "postgres".
 COMPOSE_SERVICES := $(shell docker compose config --services 2>/dev/null)
 DB_SERVICE := $(if $(filter db,$(COMPOSE_SERVICES)),db,$(if $(filter postgres,$(COMPOSE_SERVICES)),postgres,db))
-PROD_COMPOSE_SERVICES := $(shell docker compose -f docker-compose.prod.yml config --services 2>/dev/null)
-PROD_DB_SERVICE := $(if $(filter db,$(PROD_COMPOSE_SERVICES)),db,$(if $(filter postgres,$(PROD_COMPOSE_SERVICES)),postgres,db))
 MINIO_SERVICE := minio
 MINIO_PORT ?= 9000
 DB_USER ?= stockpro
@@ -39,9 +42,9 @@ NC := \033[0m
 .PHONY: help install install-backend install-frontend dev preview stop \
 	db-up db-down db-wait db-migrate db-seed db-seed-only db-reset studio \
 	minio-up minio-down minio-wait \
-	logs logs-db logs-minio build clean clean-all \
-	prod prod-db prod-build prod-up prod-down prod-logs prod-logs-backend \
-	prod-restart prod-migrate prod-wait prod-clean \
+	logs logs-db logs-minio build clear clean-all \
+	prod prod-deploy prod-undeploy prod-logs prod-status prod-restart \
+	prod-migrate prod-buckets prod-wait prod-clean \
 	env-check deps-check backend-env-check frontend-env-check prod-env-check
 
 help: ## Afficher cette aide
@@ -87,9 +90,13 @@ frontend-env-check: env-check
 		exit 1; \
 	fi
 
-prod-env-check: env-check
-	@if [ ! -f "$(ROOT_DIR)/docker-compose.prod.yml" ]; then \
-		echo -e "$(RED)Erreur: docker-compose.prod.yml introuvable.$(NC)"; \
+prod-env-check:
+	@if [ ! -f "$(PROD_ENV_FILE)" ]; then \
+		echo -e "$(RED)Erreur: deploy-docker/.env.prod introuvable. Créez-le avant tout déploiement.$(NC)"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(PROD_COMPOSE_FILE)" ]; then \
+		echo -e "$(RED)Erreur: deploy-docker/docker-compose.prod.yml introuvable.$(NC)"; \
 		exit 1; \
 	fi
 
@@ -277,15 +284,24 @@ build: backend-env-check frontend-env-check ## Builder backend et frontend
 	@cd "$(FRONTEND)" && set -a && source "$(ENV_FILE)" && set +a && NEXT_TELEMETRY_DISABLED=1 npm run build
 	@echo -e "$(GREEN)Build Stockini terminé.$(NC)"
 
-clean: ## Nettoyer les artefacts locaux
-	@read -p "Confirmer le nettoyage local Stockini ? [y/N] " confirm; \
-	if [[ "$$confirm" =~ ^[Yy]$$ ]]; then \
-		echo -e "$(YELLOW)Nettoyage local...$(NC)"; \
-		rm -rf "$(BACKEND)/dist" "$(BACKEND)/coverage" "$(FRONTEND)/.next" "$(FRONTEND)/dist" "$(FRONTEND)/out"; \
-		echo -e "$(GREEN)Nettoyage local terminé.$(NC)"; \
-	else \
+clear: ## Supprimer uniquement les ressources Docker stockini-prod (confirmation obligatoire)
+	@echo -e "$(RED)Cette action supprime les conteneurs, images, volumes et le réseau préfixés stockini-prod.$(NC)"; \
+	read -r -p "Tapez SUPPRIMER pour confirmer : " confirm; \
+	if [ "$$confirm" != "SUPPRIMER" ]; then \
 		echo "Annulé."; \
-	fi
+		exit 0; \
+	fi; \
+	set -e; \
+	echo -e "$(YELLOW)Suppression strictement limitée aux ressources stockini-prod...$(NC)"; \
+	for container in "$(PROD_BACKEND_CONTAINER)" "$(PROD_FRONTEND_CONTAINER)"; do docker rm -f "$$container" 2>/dev/null || true; done; \
+	docker images --format '{{.Repository}} {{.ID}}' | awk '$$1 ~ /^stockini-prod-/ {print $$2}' | sort -u | while read -r id; do [ -z "$$id" ] || docker image rm "$$id"; done; \
+	docker volume ls --filter 'label=com.docker.compose.project=stockini-prod' --format '{{.Name}}' | awk '$$1 ~ /^stockini-prod-/ {print $$1}' | while read -r volume; do [ -z "$$volume" ] || docker volume rm "$$volume"; done; \
+	if docker network inspect "$(PROD_NETWORK)" >/dev/null 2>&1; then \
+		if ! docker network rm "$(PROD_NETWORK)"; then \
+			echo -e "$(YELLOW)Réseau conservé car encore utilisé (les conteneurs externes ne sont jamais déconnectés).$(NC)"; \
+		fi; \
+	fi; \
+	echo -e "$(GREEN)Nettoyage stockini-prod terminé. PostgreSQL et MinIO externes n'ont pas été touchés.$(NC)"
 
 clean-all: env-check ## Nettoyer node_modules, builds et volumes Docker
 	@read -p "Confirmer le nettoyage complet Stockini ? [y/N] " confirm; \
@@ -298,53 +314,92 @@ clean-all: env-check ## Nettoyer node_modules, builds et volumes Docker
 		echo "Annulé."; \
 	fi
 
-prod: prod-db prod-build prod-up prod-wait prod-migrate ## Déployer Stockini en production
-	@echo -e "$(GREEN)Stockini production est prêt.$(NC)"
+prod: prod-deploy ## Alias de prod-deploy
 
-prod-db: prod-env-check ## Démarrer uniquement PostgreSQL en production
-	@echo -e "$(BLUE)Démarrage DB production...$(NC)"
-	@$(COMPOSE_PROD) up -d $(PROD_DB_SERVICE)
+prod-deploy: prod-env-check ## Builder et déployer Stockini, migrer puis préparer MinIO
+	@set -e; \
+	echo -e "$(BLUE)Build et démarrage des seuls services Stockini...$(NC)"; \
+	$(COMPOSE_PROD) up -d --build; \
+	$(MAKE) --no-print-directory prod-wait; \
+	$(MAKE) --no-print-directory prod-migrate; \
+	$(MAKE) --no-print-directory prod-buckets; \
+	frontend_url="$$(awk -F= '/^CORS_ORIGIN=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
+	backend_url="$$(awk -F= '/^NEXT_PUBLIC_API_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
+	echo -e "$(GREEN)Stockini production est prêt.$(NC)"; \
+	echo "Frontend : $${frontend_url:-http://IP_VPS:3010}"; \
+	echo "Backend  : $${backend_url:-http://IP_VPS:4010}"
 
-prod-build: prod-env-check ## Builder les images Docker de production
-	@echo -e "$(BLUE)Build Docker production...$(NC)"
-	@$(COMPOSE_PROD) build
+prod-undeploy: prod-env-check ## Arrêter uniquement frontend/backend Stockini, sans volume
+	@set -e; \
+	echo -e "$(YELLOW)Arrêt des conteneurs Stockini production...$(NC)"; \
+	$(COMPOSE_PROD) down; \
+	echo -e "$(GREEN)Stockini arrêté. Aucun volume, PostgreSQL ou MinIO n'a été supprimé.$(NC)"
 
-prod-up: prod-env-check ## Démarrer les services de production
-	@echo -e "$(BLUE)Démarrage production...$(NC)"
-	@$(COMPOSE_PROD) up -d
-
-prod-down: prod-env-check ## Arrêter les services de production
-	@echo -e "$(YELLOW)Arrêt production...$(NC)"
-	@$(COMPOSE_PROD) down
-
-prod-logs: prod-env-check ## Afficher les logs production
+prod-logs: prod-env-check ## Suivre les logs frontend/backend production
 	@$(COMPOSE_PROD) logs -f
 
-prod-logs-backend: prod-env-check ## Afficher les logs backend production
-	@$(COMPOSE_PROD) logs -f backend
-
-prod-restart: prod-env-check ## Redémarrer les services de production
-	@echo -e "$(YELLOW)Redémarrage production...$(NC)"
-	@$(COMPOSE_PROD) restart
-
-prod-migrate: prod-env-check ## Appliquer les migrations Prisma en production
-	@echo -e "$(BLUE)Migrations Prisma production...$(NC)"
-	@$(COMPOSE_PROD) exec -T backend sh -lc 'npx prisma generate && npx prisma migrate deploy'
-
-prod-wait: prod-env-check ## Attendre que PostgreSQL production soit prêt
-	@echo -e "$(BLUE)Attente PostgreSQL production...$(NC)"
-	@until $(COMPOSE_PROD) exec -T $(PROD_DB_SERVICE) pg_isready -U "$(DB_USER)" >/dev/null 2>&1; do \
-		sleep 2; \
+prod-status: prod-env-check ## Afficher conteneurs, santé, ports et réseau Stockini
+	@echo -e "$(BLUE)Conteneurs Stockini$(NC)"
+	@docker ps -a --filter "name=^/stockini-prod-" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+	@echo -e "\n$(BLUE)Healthchecks$(NC)"
+	@for container in "$(PROD_BACKEND_CONTAINER)" "$(PROD_FRONTEND_CONTAINER)"; do \
+		if docker inspect "$$container" >/dev/null 2>&1; then \
+			health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}non configuré{{end}}' "$$container")"; \
+			echo "$$container: $$health"; \
+		else \
+			echo "$$container: absent"; \
+		fi; \
 	done
-	@echo -e "$(GREEN)PostgreSQL production est prêt.$(NC)"
+	@echo -e "\n$(BLUE)Ports publiés$(NC)"
+	@docker port "$(PROD_BACKEND_CONTAINER)" 2>/dev/null || true
+	@docker port "$(PROD_FRONTEND_CONTAINER)" 2>/dev/null || true
+	@echo -e "\n$(BLUE)Réseau Stockini$(NC)"
+	@docker network inspect "$(PROD_NETWORK)" --format 'Nom={{.Name}} Driver={{.Driver}} Conteneurs={{len .Containers}}' 2>/dev/null || echo "$(PROD_NETWORK): absent"
 
-prod-clean: prod-env-check ## Nettoyer les ressources Docker de production
-	@read -p "Confirmer le nettoyage Docker production Stockini ? [y/N] " confirm; \
-	if [[ "$$confirm" =~ ^[Yy]$$ ]]; then \
-		echo -e "$(RED)Nettoyage production...$(NC)"; \
-		$(COMPOSE_PROD) down --remove-orphans; \
-		docker image prune -f; \
-		echo -e "$(GREEN)Nettoyage production terminé.$(NC)"; \
-	else \
-		echo "Annulé."; \
-	fi
+prod-wait: prod-env-check ## Attendre que le backend Stockini soit healthy
+	@echo -e "$(BLUE)Attente du healthcheck backend (maximum 120 secondes)...$(NC)"
+	@set -e; \
+	for attempt in $$(seq 1 60); do \
+		if ! docker inspect "$(PROD_BACKEND_CONTAINER)" >/dev/null 2>&1; then \
+			echo -e "$(RED)Erreur: conteneur $(PROD_BACKEND_CONTAINER) introuvable.$(NC)"; \
+			exit 1; \
+		fi; \
+		status="$$(docker inspect --format '{{.State.Status}}' "$(PROD_BACKEND_CONTAINER)")"; \
+		health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$(PROD_BACKEND_CONTAINER)")"; \
+		if [ "$$health" = "healthy" ]; then \
+			echo -e "$(GREEN)Backend healthy.$(NC)"; \
+			exit 0; \
+		fi; \
+		if [ "$$status" = "exited" ] || [ "$$status" = "dead" ]; then \
+			echo -e "$(RED)Le backend s'est arrêté avant de devenir healthy.$(NC)"; \
+			docker logs --tail 100 "$(PROD_BACKEND_CONTAINER)"; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+	done; \
+	echo -e "$(RED)Timeout: le backend n'est pas devenu healthy en 120 secondes.$(NC)"; \
+	docker logs --tail 100 "$(PROD_BACKEND_CONTAINER)"; \
+	exit 1
+
+prod-migrate: prod-env-check ## Appliquer les migrations puis régénérer Prisma dans le backend
+	@set -e; \
+	echo -e "$(BLUE)Application des migrations Prisma...$(NC)"; \
+	docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate deploy; \
+	echo -e "$(BLUE)Génération du client Prisma...$(NC)"; \
+	docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma generate; \
+	echo -e "$(GREEN)Migrations Prisma terminées.$(NC)"
+
+prod-buckets: prod-env-check ## Créer idempotemment les buckets MinIO nécessaires
+	@set -e; \
+	echo -e "$(BLUE)Préparation des buckets MinIO...$(NC)"; \
+	docker exec "$(PROD_BACKEND_CONTAINER)" npm run storage:ensure-buckets; \
+	echo -e "$(GREEN)Buckets MinIO prêts.$(NC)"
+
+prod-restart: prod-env-check ## Arrêter puis redéployer complètement Stockini
+	@$(MAKE) --no-print-directory prod-undeploy
+	@$(MAKE) --no-print-directory prod-deploy
+
+# Alias historiques conservés, limités au compose deploy-docker sans base de données.
+prod-up: prod-deploy
+prod-down: prod-undeploy
+prod-clean: clear

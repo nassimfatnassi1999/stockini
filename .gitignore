@@ -27,6 +27,7 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 !.env.example
+!deploy-docker/.env.prod
 
 # OS / Editor
 .DS_Store

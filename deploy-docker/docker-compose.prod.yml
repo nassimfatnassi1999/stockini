@@ -1,0 +1,55 @@
+name: stockini-prod
+
+services:
+  stockini-prod-backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: stockini-prod-backend
+    restart: unless-stopped
+    env_file:
+      - ./.env.prod
+    ports:
+      - "${BACKEND_HOST_PORT:-4010}:${BACKEND_PORT:-4000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - stockini-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${BACKEND_PORT:-4000}/api >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  stockini-prod-frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    container_name: stockini-prod-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: ${FRONTEND_PORT:-3000}
+      FRONTEND_PORT: ${FRONTEND_PORT:-3000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    ports:
+      - "${FRONTEND_HOST_PORT:-3010}:${FRONTEND_PORT:-3000}"
+    networks:
+      - stockini-prod-network
+    depends_on:
+      stockini-prod-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${FRONTEND_PORT:-3000}/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  stockini-prod-network:
+    name: stockini-prod-network
+    driver: bridge
