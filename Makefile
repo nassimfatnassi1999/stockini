@@ -15,6 +15,8 @@ PROD_COMPOSE_FILE := $(ROOT_DIR)/deploy-docker/docker-compose.prod.yml
 COMPOSE_PROD := docker compose --env-file $(PROD_ENV_FILE) -f $(PROD_COMPOSE_FILE)
 PROD_BACKEND_CONTAINER := stockini-prod-backend
 PROD_FRONTEND_CONTAINER := stockini-prod-frontend
+PROD_POSTGRES_CONTAINER := stockini-prod-postgres
+PROD_MINIO_CONTAINER := stockini-prod-minio
 PROD_NETWORK := stockini-prod-network
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
@@ -356,29 +358,35 @@ prod-status: prod-env-check ## Afficher conteneurs, santé, ports et réseau Sto
 	@echo -e "\n$(BLUE)Réseau Stockini$(NC)"
 	@docker network inspect "$(PROD_NETWORK)" --format 'Nom={{.Name}} Driver={{.Driver}} Conteneurs={{len .Containers}}' 2>/dev/null || echo "$(PROD_NETWORK): absent"
 
-prod-wait: prod-env-check ## Attendre que le backend Stockini soit healthy
-	@echo -e "$(BLUE)Attente du healthcheck backend (maximum 120 secondes)...$(NC)"
+prod-wait: prod-env-check ## Attendre que tous les services Stockini soient healthy
+	@echo -e "$(BLUE)Attente de tous les healthchecks (maximum 180 secondes)...$(NC)"
 	@set -e; \
-	for attempt in $$(seq 1 60); do \
-		if ! docker inspect "$(PROD_BACKEND_CONTAINER)" >/dev/null 2>&1; then \
-			echo -e "$(RED)Erreur: conteneur $(PROD_BACKEND_CONTAINER) introuvable.$(NC)"; \
-			exit 1; \
-		fi; \
-		status="$$(docker inspect --format '{{.State.Status}}' "$(PROD_BACKEND_CONTAINER)")"; \
-		health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$(PROD_BACKEND_CONTAINER)")"; \
-		if [ "$$health" = "healthy" ]; then \
-			echo -e "$(GREEN)Backend healthy.$(NC)"; \
+	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER) $(PROD_FRONTEND_CONTAINER)"; \
+	for attempt in $$(seq 1 90); do \
+		all_healthy=true; \
+		for container in $$containers; do \
+			if ! docker inspect "$$container" >/dev/null 2>&1; then all_healthy=false; continue; fi; \
+			status="$$(docker inspect --format '{{.State.Status}}' "$$container")"; \
+			health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$$container")"; \
+			if [ "$$status" = "exited" ] || [ "$$status" = "dead" ]; then \
+				echo -e "$(RED)$$container s'est arrêté avant de devenir healthy.$(NC)"; \
+				docker logs --tail 100 "$$container"; \
+				exit 1; \
+			fi; \
+			[ "$$health" = "healthy" ] || all_healthy=false; \
+		done; \
+		if [ "$$all_healthy" = true ]; then \
+			echo -e "$(GREEN)PostgreSQL, MinIO, backend et frontend sont healthy.$(NC)"; \
 			exit 0; \
-		fi; \
-		if [ "$$status" = "exited" ] || [ "$$status" = "dead" ]; then \
-			echo -e "$(RED)Le backend s'est arrêté avant de devenir healthy.$(NC)"; \
-			docker logs --tail 100 "$(PROD_BACKEND_CONTAINER)"; \
-			exit 1; \
 		fi; \
 		sleep 2; \
 	done; \
-	echo -e "$(RED)Timeout: le backend n'est pas devenu healthy en 120 secondes.$(NC)"; \
-	docker logs --tail 100 "$(PROD_BACKEND_CONTAINER)"; \
+	echo -e "$(RED)Timeout: tous les services ne sont pas healthy après 180 secondes.$(NC)"; \
+	for container in $$containers; do \
+		echo "--- $$container ---"; \
+		docker inspect --format '{{json .State.Health}}' "$$container" 2>/dev/null || true; \
+		docker logs --tail 100 "$$container" 2>/dev/null || true; \
+	done; \
 	exit 1
 
 prod-migrate: prod-env-check ## Appliquer les migrations puis régénérer Prisma dans le backend

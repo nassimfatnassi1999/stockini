@@ -23,8 +23,9 @@ export class MinioService implements OnModuleInit {
     );
   }
 
-  async onModuleInit() {
-    await this.ensureBucket(this.bucket);
+  onModuleInit(): void {
+    // Storage availability must never delay or prevent the HTTP server startup.
+    void this.ensureBucket(this.bucket);
   }
 
   async ensureBucket(bucket: string): Promise<void> {
@@ -120,5 +121,9 @@ export class MinioService implements OnModuleInit {
 
   async bucketExists(bucket: string): Promise<boolean> {
     return this.client.bucketExists(bucket);
+  }
+
+  async ping(): Promise<void> {
+    await this.client.bucketExists(this.bucket);
   }
 }

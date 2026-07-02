@@ -9,4 +9,10 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  // Liveness only: deliberately independent from PostgreSQL and MinIO.
+  @Get('health')
+  getHealth(): { status: 'ok' } {
+    return { status: 'ok' };
+  }
 }

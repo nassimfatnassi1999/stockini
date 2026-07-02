@@ -1,6 +1,47 @@
 name: stockini-prod
 
 services:
+  stockini-prod-postgres:
+    image: postgres:16-alpine
+    container_name: stockini-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - stockini-prod-postgres-data:/var/lib/postgresql/data
+    networks:
+      - stockini-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  stockini-prod-minio:
+    image: minio/minio:latest
+    container_name: stockini-prod-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "${MINIO_HOST_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    volumes:
+      - stockini-prod-minio-data:/data
+    networks:
+      - stockini-prod-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   stockini-prod-backend:
     build:
       context: ../backend
@@ -9,18 +50,25 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.prod
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@stockini-prod-postgres:5432/${DB_NAME}?schema=public
+      MINIO_ENDPOINT: stockini-prod-minio
+      MINIO_PORT: 9000
     ports:
       - "${BACKEND_HOST_PORT:-4010}:${BACKEND_PORT:-4000}"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - stockini-prod-network
+    depends_on:
+      stockini-prod-postgres:
+        condition: service_healthy
+      stockini-prod-minio:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:$${BACKEND_PORT:-4000}/api >/dev/null || exit 1"]
-      interval: 15s
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:'+(process.env.BACKEND_PORT||4000)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 20s
+      retries: 10
+      start_period: 40s
 
   stockini-prod-frontend:
     build:
@@ -43,11 +91,15 @@ services:
       stockini-prod-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:$${FRONTEND_PORT:-3000}/ >/dev/null || exit 1"]
-      interval: 15s
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:'+(process.env.FRONTEND_PORT||3000)+'/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 20s
+      retries: 10
+      start_period: 40s
+
+volumes:
+  stockini-prod-postgres-data:
+  stockini-prod-minio-data:
 
 networks:
   stockini-prod-network:
