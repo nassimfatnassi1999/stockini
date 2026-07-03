@@ -308,8 +308,7 @@ export default function AchatsPage() {
       filledLines.every((l) => l.productId !== null) &&
       !!supplierId;
 
-  const resetForm = (confirmIfFilled = true) => {
-    if (confirmIfFilled && !isDraftEmpty(draftData) && !window.confirm('Vider le brouillon et réinitialiser le formulaire ?')) return false;
+  const resetForm = (notify = false) => {
     setLines([createEmptyLine()]);
     setSupplierId('');
     setPaidAmount('');
@@ -318,18 +317,18 @@ export default function AchatsPage() {
     setCommandeLineMap({});
     setPurchaseDate(new Date().toISOString());
     clearDraft();
-    return true;
+    if (notify) toast.success('Brouillon supprimé.');
   };
 
   const handleDocTypeChange = (type: PurchaseDocType) => {
     if (type === docType) return;
-    if (!resetForm()) return;
+    resetForm();
     setDocType(type);
   };
 
   const handleReceptionModeChange = (mode: ReceptionMode) => {
     if (mode === receptionMode) return;
-    if (!resetForm()) return;
+    resetForm();
     setReceptionMode(mode);
   };
 
@@ -417,7 +416,7 @@ export default function AchatsPage() {
             : 'Facture enregistrée';
       toast.success(label);
       clearDraft();
-      resetForm(false);
+      resetForm();
     },
     onError: (error: unknown) => {
       if (error instanceof Error) {
@@ -677,7 +676,7 @@ export default function AchatsPage() {
             )}
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => resetForm()}>
+            <Button type="button" variant="outline" size="sm" onClick={() => resetForm(true)}>
               Réinitialiser
             </Button>
             {can('purchases.create') && (

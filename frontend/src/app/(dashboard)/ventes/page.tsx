@@ -911,8 +911,7 @@ export default function VentesPage() {
     !hasMissingPurchasePrice &&
     !hasInvalidQuantity;
 
-  const resetForm = (confirmIfFilled = true) => {
-    if (confirmIfFilled && !isDraftEmpty(draftData) && !window.confirm("Vider le brouillon et réinitialiser le formulaire ?")) return;
+  const resetForm = (notify = false) => {
     setLines([createEmptyLine()]);
     setCustomerId("");
     setClientInfoName("");
@@ -926,6 +925,7 @@ export default function VentesPage() {
     setShowCounterPanel(false);
     setSaleDate(new Date().toISOString());
     clearDraft();
+    if (notify) toast.success("Brouillon supprimé.");
   };
 
   const handleCustomerChange = (nextCustomerId: string) => {
@@ -1130,7 +1130,7 @@ export default function VentesPage() {
       toast.success(`Document ${typeLabel} N°${num} enregistré`);
       setShowValidateModal(false);
       clearDraft();
-      resetForm(false);
+      resetForm();
     },
     onError: (error: unknown) => {
       if (error instanceof Error) {
@@ -1780,7 +1780,7 @@ export default function VentesPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => resetForm()}
+                  onClick={() => resetForm(true)}
                 >
                   Réinitialiser
                 </Button>
