@@ -88,9 +88,14 @@ export class BackupStorageService implements OnModuleInit {
   }
 
   async resolveExisting(filename: string): Promise<string> {
-    this.assertFilename(filename);
+    const safeFilename = this.assertFilename(filename);
     await this.ensureAccessible();
-    const filePath = path.join(this.directory, filename);
+    const filePath = path.resolve(this.directory, safeFilename);
+    if (!filePath.startsWith(`${this.directory}${path.sep}`)) {
+      throw new BadRequestException('Nom de fichier invalide');
+    }
+    this.logger.log(`[BACKUP_STORAGE] Fichier demandé: ${safeFilename}`);
+    this.logger.log(`[BACKUP_STORAGE] Chemin local résolu: ${filePath}`);
     try {
       const fileStat = await stat(filePath);
       if (!fileStat.isFile()) throw new Error('Not a file');
@@ -119,14 +124,17 @@ export class BackupStorageService implements OnModuleInit {
     return createReadStream(await this.resolveExisting(filename));
   }
 
-  private assertFilename(filename: string): void {
+  private assertFilename(filename: string): string {
+    const safeFilename = path.basename(filename);
     if (
+      safeFilename !== filename ||
       !/^backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d{2}(?:-\d{3})?)?\.zip$/.test(
-        filename,
+        safeFilename,
       )
     ) {
       throw new BadRequestException('Nom de fichier invalide');
     }
+    return safeFilename;
   }
 
   private throwDirectoryError(error: unknown): never {

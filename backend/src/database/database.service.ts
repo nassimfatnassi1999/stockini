@@ -198,8 +198,9 @@ export class DatabaseService {
       let zip: AdmZip;
       try {
         zip = new AdmZip(zipPath);
-      } catch {
-        throw new BadRequestException('Archive ZIP invalide ou corrompue');
+        zip.getEntries();
+      } catch (error) {
+        throw new BadRequestException(`Archive ZIP invalide ou corrompue : ${(error as Error).message}`);
       }
 
       if (zipBuffer.length === 0) {
@@ -214,11 +215,15 @@ export class DatabaseService {
       // 3. Extract to sub-directory to avoid mixing with restore.zip
       const extractDir = path.join(tmpDir, 'extracted');
       fs.mkdirSync(extractDir, { recursive: true });
-      zip.extractAllTo(extractDir, true);
+      try {
+        zip.extractAllTo(extractDir, true);
+      } catch (error) {
+        throw new BadRequestException(`Impossible d'extraire le fichier ZIP : ${(error as Error).message}`);
+      }
       this.logger.log(`[RESTORE] ZIP validated and extracted to: ${extractDir}`);
 
       // 4. Validate required files
-      const dumpPath = ['database/dump.sql']
+      const dumpPath = ['database/dump.sql', 'database/dump.dump', 'database/dump.backup']
         .map((name) => path.join(extractDir, name))
         .find((candidate) => fs.existsSync(candidate));
       // New backups use manifest.json. Keep metadata.json readable so existing
@@ -228,10 +233,10 @@ export class DatabaseService {
         .find((candidate) => fs.existsSync(candidate));
 
       if (!dumpPath) {
-        throw new BadRequestException('database/dump.sql not found in backup');
+        throw new BadRequestException('Dump PostgreSQL absent (attendu : database/dump.sql, dump.dump ou dump.backup)');
       }
       if (!metadataPath) {
-        throw new BadRequestException('manifest.json not found in backup');
+        throw new BadRequestException('Métadonnées absentes (manifest.json ou metadata.json)');
       }
       try {
         const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as Record<string, unknown>;
@@ -264,16 +269,17 @@ export class DatabaseService {
       const restored: string[] = [];
 
       // 6. Restore SQL
-      this.logger.log(`[RESTORE] SQL restore started`);
+      this.logger.log(`[RESTORE][STEP=postgres] Restore started`);
       await this.prisma.$disconnect();
       try {
         this.preparePostgresForRestore();
         this.restorePostgres(dumpPath);
+        this.deployCurrentMigrations();
       } finally {
         await this.prisma.$connect();
       }
       restored.push(path.basename(dumpPath));
-      this.logger.log(`[RESTORE] SQL restore completed`);
+      this.logger.log(`[RESTORE][STEP=postgres] Restore completed`);
 
       // The dump may come from an older release. Reconnect the Prisma pool,
       // apply current migrations, and verify the restored schema before success.
@@ -330,6 +336,8 @@ export class DatabaseService {
 
   async restoreBackupByFilename(filename: string, user?: AuthUser, options: RestoreOptions = {}): Promise<{ restored: string[] }> {
     try {
+      this.logger.log(`[RESTORE][SOURCE=local] Backup filename: ${filename}`);
+      this.logger.log(`[RESTORE][SOURCE=local] Backup directory: ${this.backupStorage.directory}`);
       const zipBuffer = await this.backupStorage.read(filename);
       return await this.restoreBackup(zipBuffer, user, {
         ...options,
@@ -816,11 +824,13 @@ export class DatabaseService {
       if (!entryNames.includes('manifest.json') && !entryNames.includes('metadata.json')) {
         return 'invalid';
       }
-      if (!entryNames.includes('database/dump.sql')) {
+      const dumpEntryName = ['database/dump.sql', 'database/dump.dump', 'database/dump.backup']
+        .find((name) => entryNames.includes(name));
+      if (!dumpEntryName) {
         return 'missing-sql';
       }
 
-      const sqlEntry = zip.getEntry('database/dump.sql');
+      const sqlEntry = zip.getEntry(dumpEntryName);
       if (!sqlEntry) return 'missing-sql';
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1027,9 +1037,10 @@ export class DatabaseService {
       const isAllowed =
         normalized === 'database' ||
         normalized === 'database/' ||
-        normalized === 'database/dump.sql' ||
+        ['database/dump.sql', 'database/dump.dump', 'database/dump.backup'].includes(normalized) ||
         normalized === 'manifest.json' ||
         normalized === 'metadata.json' ||
+        normalized === 'version.json' ||
         normalized === 'minio' ||
         normalized === 'minio/' ||
         normalized === `minio/${this.minio.bucket}` ||
@@ -1039,7 +1050,7 @@ export class DatabaseService {
       if (isUnsafePath || !isAllowed) {
         this.logger.warn(`[RESTORE] Rejected unsafe/out-of-scope ZIP entry: ${normalized}`);
         throw new BadRequestException(
-          `Archive hors périmètre : ${normalized}. Seuls database/dump.sql, manifest.json et minio/${this.minio.bucket}/ sont autorisés.`,
+          `Archive hors périmètre : ${normalized}. Seuls le dump PostgreSQL, les métadonnées et minio/${this.minio.bucket}/ sont autorisés.`,
         );
       }
     }
@@ -1156,6 +1167,36 @@ export class DatabaseService {
         `${operation} échouée : ${stderr || stdout || result.error?.message || `exit ${result.status ?? 'interrompu'}`}`,
       );
     }
+  }
+
+  private deployCurrentMigrations(): void {
+    this.logger.log('[RESTORE][STEP=prisma-migrate] Applying pending migrations');
+    const prismaCli = path.join(process.cwd(), 'node_modules', 'prisma', 'build', 'index.js');
+    if (!fs.existsSync(prismaCli)) {
+      throw new InternalServerErrorException(
+        'Migration Prisma impossible : CLI Prisma absent du conteneur',
+      );
+    }
+    const result = spawnSync(
+      process.execPath,
+      [prismaCli, 'migrate', 'deploy'],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: 'utf8',
+        maxBuffer: 50 * 1024 * 1024,
+      },
+    );
+    const stdout = result.stdout?.trim() ?? '';
+    const stderr = result.stderr?.trim() ?? '';
+    this.logger.log(`[RESTORE][STEP=prisma-migrate] Exit code: ${result.status ?? 'interrupted'}`);
+    if (stdout) this.logger.log(`[RESTORE][STEP=prisma-migrate] ${stdout}`);
+    if (result.error || result.status !== 0) {
+      throw new InternalServerErrorException(
+        `Migration Prisma après restauration échouée : ${stderr || stdout || result.error?.message || `exit ${result.status ?? 'interrompu'}`}`,
+      );
+    }
+    this.logger.log('[RESTORE][STEP=prisma-migrate] Schema is current');
   }
 
   private async dumpPostgres(outputPath: string): Promise<void> {

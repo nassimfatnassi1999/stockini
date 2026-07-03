@@ -340,7 +340,8 @@ function BackupsTab() {
       window.setTimeout(() => window.location.reload(), 500);
     } catch (err) {
       window.sessionStorage.removeItem('stockini_restore_in_progress');
-      toast.error(`Erreur restauration : ${(err as Error).message}`);
+      const response = (err as { response?: { data?: unknown; status?: number } }).response;
+      toast.error(`Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`);
     } finally {
       if (!restoreSucceeded) setRestoring(false);
       if (restoreRef.current) restoreRef.current.value = '';
@@ -364,7 +365,8 @@ function BackupsTab() {
       window.setTimeout(() => window.location.reload(), 500);
     } catch (err) {
       window.sessionStorage.removeItem('stockini_restore_in_progress');
-      toast.error(`Erreur restauration : ${(err as Error).message}`);
+      const response = (err as { response?: { data?: unknown; status?: number } }).response;
+      toast.error(`Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`);
     } finally {
       if (!restoreSucceeded) setRestoring(false);
     }
