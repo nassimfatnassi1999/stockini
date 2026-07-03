@@ -1,6 +1,17 @@
 import { calculateSalesLine } from './sales-calculations';
 
 describe('calculateSalesLine', () => {
+  it('PA 30, marge 40, remise 20, TVA 19, quantité 1', () => {
+    expect(calculateSalesLine({ purchasePriceHt: 30, marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 }))
+      .toMatchObject({
+        netMarginPercent: 20,
+        marginAmount: 6,
+        unitPriceHt: 36,
+        unitPriceTtc: 42.84,
+        totalTtc: 42.84,
+      });
+  });
+
   it.each([
     ['40%, remise 0%', 100, 40, 0, 19, 1, 40, 140, 166.6],
     ['40%, remise 15%', 100, 40, 15, 19, 2, 25, 125, 297.5],
