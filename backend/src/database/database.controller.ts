@@ -26,8 +26,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { DatabaseService } from './database.service';
-import * as fs from 'fs';
 import * as path from 'path';
+import { BackupStorageService } from './backup-storage.service';
 
 type MulterFile = Express.Multer.File;
 
@@ -37,7 +37,10 @@ type MulterFile = Express.Multer.File;
 export class DatabaseController {
   private readonly logger = new Logger(DatabaseController.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly backupStorage: BackupStorageService,
+  ) {}
 
   // ─── Health ───────────────────────────────────────────────────────────────────
 
@@ -51,8 +54,8 @@ export class DatabaseController {
 
   @RequirePermissions('database.view')
   @Get('backups')
-  listBackups() {
-    return this.db.listBackups().map(({ path: _path, ...backup }) => backup);
+  async listBackups() {
+    return (await this.db.listBackups()).map(({ path: _path, ...backup }) => backup);
   }
 
   @RequirePermissions('database.backup')
@@ -73,8 +76,7 @@ export class DatabaseController {
   async downloadBackup(@Param('filename') filename: string, @Res() res: Response) {
     this.logger.log(`[DOWNLOAD] Backup requested: ${filename}`);
     try {
-      const filePath = this.db.downloadBackup(filename);
-      const stat = fs.statSync(filePath);
+      const stat = await this.backupStorage.fileStat(filename);
 
       if (stat.size === 0) {
         this.logger.warn(`[DOWNLOAD] File is empty: ${filename}`);
@@ -82,14 +84,14 @@ export class DatabaseController {
         return;
       }
 
-      this.logger.log(`[DOWNLOAD] File exists: ${filePath} (${stat.size} bytes)`);
+      this.logger.log(`[DOWNLOAD] File exists: ${filename} (${stat.size} bytes)`);
       res.set({
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Content-Length': String(stat.size),
       });
 
-      const stream = fs.createReadStream(filePath);
+      const stream = await this.backupStorage.openReadStream(filename);
       stream.on('error', (err) => {
         this.logger.error(`[DOWNLOAD] Stream error for ${filename}: ${err.message}`);
         if (!res.headersSent) {

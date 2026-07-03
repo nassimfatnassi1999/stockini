@@ -56,6 +56,9 @@ services:
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@stockini-prod-postgres:5432/${DB_NAME}?schema=public
       MINIO_ENDPOINT: stockini-prod-minio
       MINIO_PORT: 9000
+      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/opt/stockini/backups}
+    volumes:
+      - ${BACKUP_DIRECTORY:-/opt/stockini/backups}:${BACKUP_DIRECTORY:-/opt/stockini/backups}
     ports:
       - "${BACKEND_HOST_PORT:-4010}:${BACKEND_PORT:-4000}"
     networks:

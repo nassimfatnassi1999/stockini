@@ -255,8 +255,9 @@ function BackupsTab() {
     try {
       const { data } = await api.get<BackupInfo[]>('/admin/database/backups');
       setBackups(data);
-    } catch {
-      toast.error('Erreur lors du chargement des sauvegardes');
+    } catch (error) {
+      const payload = (error as { response?: { data?: unknown; status?: number } }).response;
+      toast.error(readRestoreError(payload?.data, payload?.status ?? 500));
     } finally {
       setLoading(false);
     }

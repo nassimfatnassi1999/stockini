@@ -5,6 +5,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { DatabaseController } from './database.controller';
 import { DatabaseService } from './database.service';
+import { BackupStorageService } from './backup-storage.service';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { DatabaseService } from './database.service';
     DocumentsModule,
   ],
   controllers: [DatabaseController],
-  providers: [DatabaseService],
+  providers: [DatabaseService, BackupStorageService],
   exports: [DatabaseService],
 })
 export class DatabaseModule {}

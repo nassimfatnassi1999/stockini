@@ -1,7 +1,6 @@
 import {
   Injectable,
   Logger,
-  NotFoundException,
   BadRequestException,
   InternalServerErrorException,
   ConflictException,
@@ -14,10 +13,11 @@ import { MinioService } from '../documents/minio.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import AdmZip from 'adm-zip';
 import * as ExcelJS from 'exceljs';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { BackupStorageService } from './backup-storage.service';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +73,7 @@ export class DatabaseService {
     private readonly config: ConfigService,
     private readonly audit: AuditLogsService,
     private readonly minio: MinioService,
+    private readonly backupStorage: BackupStorageService,
   ) {}
 
   // ════════════════════════════════════════════════════════════
@@ -83,8 +84,7 @@ export class DatabaseService {
     if (this.restoreInProgress) throw new ConflictException('Une restauration est en cours');
     if (this.backupInProgress) throw new ConflictException('Une sauvegarde est déjà en cours');
     this.backupInProgress = true;
-    const backupDir = this.getBackupDir();
-    this.ensureDir(backupDir);
+    await this.backupStorage.ensureAccessible();
 
     const now = new Date();
     const stamp = this.dateStamp(now);
@@ -119,7 +119,7 @@ export class DatabaseService {
 
       // 5. Create ZIP
       const zipName = `backup-${stamp}.zip`;
-      const zipPath = path.join(backupDir, zipName);
+      const zipPath = await this.backupStorage.destination(zipName);
       this.createZip(tmpDir, zipPath);
       this.logger.log(`[BACKUP] ZIP created`);
 
@@ -144,58 +144,25 @@ export class DatabaseService {
     }
   }
 
-  listBackups(): BackupInfo[] {
-    const backupDir = this.getBackupDir();
-    this.ensureDir(backupDir);
-
-    return fs
-      .readdirSync(backupDir)
-      .filter((f) => f.endsWith('.zip') && f.startsWith('backup-'))
-      .map((filename) => {
-        const full = path.join(backupDir, filename);
-        const stat = fs.statSync(full);
-        const dateStr = filename.replace('backup-', '').replace('.zip', '');
+  async listBackups(): Promise<BackupInfo[]> {
+    const files = await this.backupStorage.listZipFiles();
+    return files
+      .map(({ filename, path: full, size, createdAt }) => {
         return {
           filename,
-          size: stat.size,
-          createdAt: stat.birthtime.toISOString(),
+          size,
+          createdAt,
           createdBy: 'system',
           type: 'full',
           path: full,
           status: this.inspectBackupStatus(full),
-          dateStr,
         };
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  getBackupPath(filename: string): string {
-    const backupDir = path.resolve(this.getBackupDir());
-    this.logger.log(`[RESTORE] Requested filename: ${filename}`);
-    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      throw new BadRequestException('Nom de fichier invalide');
-    }
-    const safeName = filename;
-    // Keep minute-only archives restorable while all new archives use seconds/ms.
-    if (!/^backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d{2}-\d{3})?\.zip$/.test(safeName)) {
-      throw new BadRequestException('Nom de fichier invalide');
-    }
-    const full = path.join(backupDir, safeName);
-    this.logger.log(`[RESTORE] Absolute backup path: ${full}`);
-    this.logger.log(`[RESTORE] ZIP exists: ${fs.existsSync(full)}`);
-    if (!fs.existsSync(full)) {
-      throw new NotFoundException('Sauvegarde introuvable');
-    }
-    return full;
-  }
-
-  downloadBackup(filename: string): string {
-    return this.getBackupPath(filename);
-  }
-
   async deleteBackup(filename: string, user?: AuthUser): Promise<void> {
-    const full = this.getBackupPath(filename);
-    fs.rmSync(full);
+    await this.backupStorage.remove(filename);
     await this.audit.create({
       userId: user?.id,
       action: 'database.backup.deleted',
@@ -363,8 +330,7 @@ export class DatabaseService {
 
   async restoreBackupByFilename(filename: string, user?: AuthUser, options: RestoreOptions = {}): Promise<{ restored: string[] }> {
     try {
-      const filePath = this.getBackupPath(filename);
-      const zipBuffer = fs.readFileSync(filePath);
+      const zipBuffer = await this.backupStorage.read(filename);
       return await this.restoreBackup(zipBuffer, user, {
         ...options,
         uploadedFilename: path.basename(filename),
@@ -782,7 +748,7 @@ export class DatabaseService {
       database: dbHealth,
       minio: minioHealth,
       smtp: smtpHealth,
-      disk: { backupsSize: this.getDirSize(this.getBackupDir()), uploadsSize: 0 },
+      disk: { backupsSize: await this.getBackupsSize(), uploadsSize: 0 },
       stats,
       lastBackup,
       uptime: process.uptime(),
@@ -873,20 +839,19 @@ export class DatabaseService {
     }
   }
 
-  private getLastBackupDate(): string | null {
+  private async getLastBackupDate(): Promise<string | null> {
     try {
-      const backups = this.listBackups();
+      const backups = await this.listBackups();
       return backups[0]?.createdAt ?? null;
     } catch {
       return null;
     }
   }
 
-  private getDirSize(dir: string): number {
-    if (!fs.existsSync(dir)) return 0;
+  private async getBackupsSize(): Promise<number> {
     try {
-      const result = execSync(`du -sb "${dir}" 2>/dev/null || echo 0`, { encoding: 'utf8' });
-      return parseInt(result.split('\t')[0], 10) || 0;
+      const backups = await this.backupStorage.listZipFiles();
+      return backups.reduce((total, backup) => total + backup.size, 0);
     } catch {
       return 0;
     }
@@ -1029,11 +994,11 @@ export class DatabaseService {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - keepDays);
 
-    const backups = this.listBackups();
+    const backups = await this.listBackups();
     for (const b of backups) {
       if (new Date(b.createdAt) < cutoff) {
         try {
-          fs.rmSync(b.path);
+          await this.backupStorage.remove(b.filename);
           this.logger.log(`Old backup removed: ${b.filename}`);
         } catch (err) {
           this.logger.warn(`Failed to remove old backup: ${b.filename}: ${(err as Error).message}`);
@@ -1045,14 +1010,6 @@ export class DatabaseService {
   // ════════════════════════════════════════════════════════════
   // HELPERS
   // ════════════════════════════════════════════════════════════
-
-  private getBackupDir(): string {
-    return this.config.get<string>('BACKUP_STORAGE_PATH', path.join(process.cwd(), 'storage', 'backups'));
-  }
-
-  private ensureDir(dir: string) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
 
   private dateStamp(d: Date): string {
     const pad = (n: number) => String(n).padStart(2, '0');
