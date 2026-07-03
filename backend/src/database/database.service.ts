@@ -1122,7 +1122,6 @@ export class DatabaseService {
     const result = this.runPostgresCommand(
       'psql',
       args,
-      ['-U', connection.user, '-d', connection.database, '--set=ON_ERROR_STOP=1', '-c', sql],
     );
     this.assertPostgresCommandSucceeded('Préparation PostgreSQL', result);
   }
@@ -1130,24 +1129,17 @@ export class DatabaseService {
   private runPostgresCommand(
     tool: 'psql' | 'pg_restore',
     nativeArgs: string[],
-    dockerArgs = nativeArgs,
-    input?: Buffer,
   ) {
     const connection = this.getPostgresConnection();
-    let result = spawnSync(tool, nativeArgs, {
+    const result = spawnSync(tool, nativeArgs, {
       env: { ...process.env, PGPASSWORD: connection.password },
-      input,
-      encoding: input ? undefined : 'utf8',
+      encoding: 'utf8',
       maxBuffer: 500 * 1024 * 1024,
     });
     if (result.error) {
-      const container = this.config.get<string>('POSTGRES_CONTAINER_NAME', 'stockini-postgres');
-      this.logger.warn(`[RESTORE] ${tool} unavailable locally: ${result.error.message}`);
-      this.logger.log(`[RESTORE] Fallback command: docker exec -i ${container} ${tool} ${dockerArgs.join(' ')}`);
-      result = spawnSync(
-        'docker',
-        ['exec', '-i', '-e', `PGPASSWORD=${connection.password}`, container, tool, ...dockerArgs],
-        { input, maxBuffer: 500 * 1024 * 1024 },
+      this.logger.error(`[RESTORE] Impossible d'exécuter ${tool}: ${result.error.message}`);
+      throw new InternalServerErrorException(
+        "postgresql-client n'est pas installé dans l'image backend.",
       );
     }
     return result;
@@ -1162,9 +1154,14 @@ export class DatabaseService {
     this.logger.log(`[RESTORE] ${operation} exit code: ${result.status ?? 'interrupted'}`);
     this.logger.log(`[RESTORE] ${operation} stdout: ${stdout || '(empty)'}`);
     this.logger.log(`[RESTORE] ${operation} stderr: ${stderr || '(empty)'}`);
-    if (result.error || result.status !== 0) {
+    if (result.status !== 0) {
+      if (/could not connect|connection refused|connection.*failed|password authentication failed|no pg_hba\.conf entry|could not translate host name/i.test(stderr)) {
+        throw new InternalServerErrorException(
+          'Connexion PostgreSQL impossible. Vérifier POSTGRES_HOST/PORT/USER/PASSWORD/DB.',
+        );
+      }
       throw new InternalServerErrorException(
-        `${operation} échouée : ${stderr || stdout || result.error?.message || `exit ${result.status ?? 'interrompu'}`}`,
+        `${operation} échouée : ${stderr || stdout || `exit ${result.status ?? 'interrompu'}`}`,
       );
     }
   }
@@ -1205,9 +1202,8 @@ export class DatabaseService {
     this.logger.log(`[PG_DUMP] Starting — db=${dbName} host=${host} port=${port} user=${user}`);
     this.logger.log(`[PG_DUMP] Output path: ${outputPath}`);
 
-    // ── Strategy 1: native pg_dump (works when postgresql-client is installed) ──
-    this.logger.log(`[PG_DUMP] Trying native pg_dump...`);
-    let result = spawnSync(
+    this.logger.log(`[PG_DUMP] Command: pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName}`);
+    const result = spawnSync(
       'pg_dump',
       [
         '--no-password',
@@ -1225,48 +1221,26 @@ export class DatabaseService {
       { env: { ...process.env, PGPASSWORD: password }, maxBuffer: 500 * 1024 * 1024, encoding: 'buffer' },
     );
 
-    // ── Strategy 2: docker exec (dev mode — backend on host, postgres in Docker) ──
     if (result.error) {
-      this.logger.warn(`[PG_DUMP] Native pg_dump not found (${result.error.message}), trying docker exec...`);
-      const containerName = this.config.get<string>('POSTGRES_CONTAINER_NAME', 'stockini-postgres');
-      this.logger.log(`[PG_DUMP] docker exec ${containerName} pg_dump ...`);
-
-      result = spawnSync(
-        'docker',
-        [
-          'exec',
-          '-e', `PGPASSWORD=${password}`,
-          containerName,
-          'pg_dump',
-          '--no-password',
-          '--format=plain',
-          '--encoding=UTF8',
-          '--clean',
-          '--if-exists',
-          '--no-owner',
-          '--no-privileges',
-          '-U', user,
-          '-d', dbName,
-        ],
-        { maxBuffer: 500 * 1024 * 1024, encoding: 'buffer' },
+      this.logger.error(`[PG_DUMP] Impossible d'exécuter pg_dump: ${result.error.message}`);
+      throw new InternalServerErrorException(
+        "postgresql-client n'est pas installé dans l'image backend.",
       );
-
-      if (result.error) {
-        throw new InternalServerErrorException(
-          `pg_dump introuvable et docker exec échoué : ${result.error.message}. ` +
-          `Installez postgresql-client ou définissez POSTGRES_CONTAINER_NAME.`,
-        );
-      }
     }
 
     const stderr = result.stderr ? Buffer.from(result.stderr).toString('utf8').trim() : '';
     const stdout = result.stdout ? Buffer.from(result.stdout) : Buffer.alloc(0);
 
     this.logger.log(`[PG_DUMP] Exit code: ${result.status}`);
-    if (stderr) this.logger.log(`[PG_DUMP] STDERR: ${stderr.substring(0, 1000)}`);
+    if (stderr) this.logger.log(`[PG_DUMP] STDERR: ${stderr}`);
     this.logger.log(`[PG_DUMP] SQL size: ${stdout.length} bytes`);
 
     if (result.status !== 0) {
+      if (/could not connect|connection refused|connection.*failed|password authentication failed|no pg_hba\.conf entry|could not translate host name/i.test(stderr)) {
+        throw new InternalServerErrorException(
+          'Connexion PostgreSQL impossible. Vérifier POSTGRES_HOST/PORT/USER/PASSWORD/DB.',
+        );
+      }
       throw new InternalServerErrorException(
         `pg_dump a échoué (exit ${result.status ?? 'null'}): ${stderr || 'pas de message'}`,
       );
@@ -1297,18 +1271,13 @@ export class DatabaseService {
     const nativeArgs = isPlainSql
       ? [...common, '--set=ON_ERROR_STOP=1', '-f', dumpPath]
       : [...common, '--clean', '--if-exists', '--no-owner', '--no-privileges', dumpPath];
-    const dockerArgs = isPlainSql
-      ? ['-U', connection.user, '-d', connection.database, '--set=ON_ERROR_STOP=1']
-      : ['-U', connection.user, '-d', connection.database, '--clean', '--if-exists', '--no-owner', '--no-privileges'];
-    const input = fs.readFileSync(dumpPath);
-
     this.logger.log(
       `[RESTORE] Dump format: ${isPlainSql ? 'plain SQL' : 'PostgreSQL custom'} (extension=${extension}, signature=${signature === 'PGDMP' ? 'PGDMP' : 'text'})`,
     );
     this.logger.log(
       `[RESTORE] Command: ${tool} ${nativeArgs.join(' ')} (PGPASSWORD hidden)`,
     );
-    const result = this.runPostgresCommand(tool, nativeArgs, dockerArgs, input);
+    const result = this.runPostgresCommand(tool, nativeArgs);
     this.assertPostgresCommandSucceeded(`${tool} restore`, result);
     this.logger.log(`[RESTORE] PostgreSQL restore completed successfully`);
   }
