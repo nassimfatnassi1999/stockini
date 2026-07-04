@@ -32,6 +32,7 @@ export interface PdfSaleData {
   customerTaxId?: string | null;
   customerNote?: string | null;
   representant?: string | null;
+  supplierReference?: string | null;
   items: PdfSaleItem[];
 }
 
@@ -616,6 +617,7 @@ export class PdfService {
       if (sale.customerAddress) rightRows.push({ label: 'Adresse', value: sale.customerAddress });
       if (sale.customerPhone) rightRows.push({ label: 'Tél', value: sale.customerPhone });
       if (sale.customerNote) rightRows.push({ label: 'Note', value: sale.customerNote, italic: true });
+      if (sale.supplierReference) rightRows.push({ label: 'Référence fournisseur', value: sale.supplierReference });
 
       y = drawInfoBlocks(doc, y + 6, pageW, title, leftRows, rightRows) + 10;
 

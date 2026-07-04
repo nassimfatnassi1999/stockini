@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useState, useRef } from 'react';
+import { useCallback, useId, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
@@ -41,6 +41,7 @@ interface AchatDraft {
   selectedCommandeId: string;
   commandeLineMap: Record<string, { purchaseItemId: string; maxQty: number }>;
   purchaseDate: string;
+  supplierReference: string;
 }
 
 function round3(v: number) {
@@ -121,8 +122,11 @@ export default function AchatsPage() {
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString());
+  const [supplierReference, setSupplierReference] = useState('');
   const [showHistory, setShowHistory] = useState(true);
-  const restoredCommandeRef = useRef('');
+  // Only an explicit selection in the source-order picker may replace form
+  // lines. A docType change can enable the query, but must never hydrate it.
+  const explicitCommandeLoadRef = useRef<string | null>(null);
 
   // ── Purchases history pagination + filters ────────────────────────────────
   const [purchasesPage, setPurchasesPage] = useState(1);
@@ -171,12 +175,12 @@ export default function AchatsPage() {
   const commandeDetailQuery = useQuery({
     queryKey: ['stockini-purchase', selectedCommandeId],
     queryFn: () => stockiniApi.purchase(selectedCommandeId),
-    enabled: !!selectedCommandeId && docType === 'BON_RECEPTION' && receptionMode === 'FROM_COMMANDE',
+    enabled: !!selectedCommandeId && receptionMode === 'FROM_COMMANDE',
   });
 
   const draftData = useMemo<AchatDraft>(
-    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate }),
-    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate],
+    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate, supplierReference }),
+    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate, supplierReference],
   );
   const restoreDraft = useCallback((draft: AchatDraft) => {
     setDocType(draft.docType ?? 'BON_COMMANDE');
@@ -201,7 +205,8 @@ export default function AchatsPage() {
     setSelectedCommandeId(draft.selectedCommandeId ?? '');
     setCommandeLineMap(draft.commandeLineMap ?? {});
     setPurchaseDate(draft.purchaseDate ?? new Date().toISOString());
-    restoredCommandeRef.current = draft.selectedCommandeId ?? '';
+    setSupplierReference(draft.supplierReference ?? '');
+    explicitCommandeLoadRef.current = null;
   }, []);
   const isDraftEmpty = useCallback(
     (draft: AchatDraft) =>
@@ -209,7 +214,8 @@ export default function AchatsPage() {
       !draft.supplierId &&
       !draft.paidAmount &&
       !draft.paymentMethod &&
-      !draft.selectedCommandeId,
+      !draft.selectedCommandeId &&
+      !draft.supplierReference,
     [],
   );
   const { clearDraft, status: draftStatus } = useFormDraft<AchatDraft>({
@@ -224,16 +230,23 @@ export default function AchatsPage() {
     (p) => p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED',
   );
 
-  // Populate form lines when a commande detail loads
-  useEffect(() => {
-    const detail = commandeDetailQuery.data;
-    if (!detail || !selectedCommandeId) return;
-    if (restoredCommandeRef.current === selectedCommandeId) {
-      restoredCommandeRef.current = '';
-      return;
-    }
+  // Loading a source order is an explicit user action. Keeping this out of an
+  // effect is important: enabling/disabling a query after a tab switch must not
+  // be able to mutate the shared form state.
+  const handleCommandeSelection = async (commandeId: string) => {
+    explicitCommandeLoadRef.current = commandeId || null;
+    setSelectedCommandeId(commandeId);
+    if (!commandeId) return;
+
+    const detail = await queryClient.fetchQuery({
+      queryKey: ['stockini-purchase', commandeId],
+      queryFn: () => stockiniApi.purchase(commandeId),
+    });
+    if (explicitCommandeLoadRef.current !== commandeId) return;
+    explicitCommandeLoadRef.current = null;
 
     setSupplierId(detail.supplier?.id ?? '');
+    setSupplierReference(detail.supplierReference ?? '');
 
     const remainingItems = detail.items.filter(
       (item) => item.receivedQuantity < item.quantity,
@@ -276,16 +289,7 @@ export default function AchatsPage() {
 
     setLines(newLines);
     setCommandeLineMap(newLineMap);
-  }, [commandeDetailQuery.data, selectedCommandeId]);
-
-  // Clear lines when commande is deselected
-  useEffect(() => {
-    if (!selectedCommandeId && receptionMode === 'FROM_COMMANDE') {
-      setLines([createEmptyLine()]);
-      setCommandeLineMap({});
-      setSupplierId('');
-    }
-  }, [selectedCommandeId, receptionMode]);
+  };
 
   const isFromCommande = docType === 'BON_RECEPTION' && receptionMode === 'FROM_COMMANDE';
 
@@ -317,19 +321,23 @@ export default function AchatsPage() {
     setSelectedCommandeId('');
     setCommandeLineMap({});
     setPurchaseDate(new Date().toISOString());
+    setSupplierReference('');
     clearDraft();
     if (notify) toast.success('Brouillon supprimé.');
   };
 
-  const handleDocTypeChange = (type: PurchaseDocType) => {
-    if (type === docType) return;
-    resetForm();
-    setDocType(type);
+  const handleDocTypeChange = (nextType: PurchaseDocType) => {
+    console.log('DOC SWITCH', {
+      from: docType,
+      to: nextType,
+      linesBefore: lines.length,
+      linesPreview: lines,
+    });
+    setDocType(nextType);
   };
 
   const handleReceptionModeChange = (mode: ReceptionMode) => {
     if (mode === receptionMode) return;
-    resetForm();
     setReceptionMode(mode);
   };
 
@@ -361,7 +369,9 @@ export default function AchatsPage() {
 
         if (receiveItems.length === 0) throw new Error('Aucune ligne à réceptionner');
 
-        return stockiniApi.receivePurchase(selectedCommandeId, receiveItems);
+        return stockiniApi.receivePurchase(selectedCommandeId, receiveItems, {
+          supplierReference,
+        });
       }
 
       // Standard flow: LIBRE / BON_COMMANDE / FACTURE
@@ -377,6 +387,7 @@ export default function AchatsPage() {
         supplierId,
         discount: round3(totals.totalRemise),
         tax: round3(totals.totalTva),
+        supplierReference,
         items: filledLines.map((l) => ({
           productId: l.productId!,
           quantity: l.quantity,
@@ -494,6 +505,7 @@ export default function AchatsPage() {
             return (
               <Button
                 key={type}
+                type="button"
                 variant={isActive ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleDocTypeChange(type)}
@@ -555,7 +567,7 @@ export default function AchatsPage() {
                 <select
                   id="commande-picker"
                   value={selectedCommandeId}
-                  onChange={(e) => setSelectedCommandeId(e.target.value)}
+                  onChange={(e) => handleCommandeSelection(e.target.value)}
                   className="app-select"
                 >
                   <option value="">— Sélectionner un bon de commande —</option>
@@ -574,10 +586,10 @@ export default function AchatsPage() {
         </div>
       )}
 
-      {/* Document header: supplier + date */}
+      {/* Document header: supplier, date and original supplier references */}
       <div className="rounded-lg border border-border/70 bg-white p-4">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div className="flex-1 min-w-[200px] max-w-sm space-y-1.5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="min-w-[200px] space-y-1.5">
             <Label htmlFor="purchase-supplier">Fournisseur</Label>
             {isFromCommande && selectedCommandeId ? (
               <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-text-secondary whitespace-nowrap">
@@ -608,6 +620,10 @@ export default function AchatsPage() {
             <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-text-secondary whitespace-nowrap">
               {today}
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="supplier-reference">Référence fournisseur</Label>
+            <Input id="supplier-reference" value={supplierReference} onChange={(e) => setSupplierReference(e.target.value)} placeholder="Ex : FAC-2026-001254, BL-45879, BC-2026-785..." />
           </div>
         </div>
       </div>
@@ -709,7 +725,7 @@ export default function AchatsPage() {
           <HistoryToolbar
             search={purchasesLocalSearch}
             onSearch={handlePurchasesSearchChange}
-            searchPlaceholder="Rechercher document, fournisseur…"
+            searchPlaceholder="Référence document ou fournisseur…"
             filters={[
               {
                 key: 'status',
@@ -742,6 +758,7 @@ export default function AchatsPage() {
                   {[
                     'N° Document',
                     'Fournisseur',
+                    'Réf. fournisseur',
                     'Date',
                     'Articles',
                     'Total TTC',
@@ -761,13 +778,13 @@ export default function AchatsPage() {
               <tbody className="divide-y divide-border/40">
                 {purchasesQuery.isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-text-muted">
+                    <td colSpan={9} className="px-4 py-8 text-center text-sm text-text-muted">
                       Chargement…
                     </td>
                   </tr>
                 ) : purchasesList.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-text-muted">
+                    <td colSpan={9} className="px-4 py-8 text-center text-sm text-text-muted">
                       Aucun achat enregistré
                     </td>
                   </tr>
@@ -779,6 +796,9 @@ export default function AchatsPage() {
                       </td>
                       <td className="px-4 py-3 text-text-secondary">
                         {purchase.supplier?.name ?? '—'}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-text-secondary">
+                        {purchase.supplierReference || '—'}
                       </td>
                       <td className="px-4 py-3 text-text-secondary text-xs">
                         {new Date(purchase.createdAt).toLocaleDateString('fr-TN')}
@@ -972,6 +992,12 @@ function PurchaseDetailsModal({
               <p className="font-mono font-semibold text-emerald-600">{money(data.paidAmount)}</p>
             </div>
           </div>
+          {data.supplierReference && (
+            <div className="rounded-lg border border-border/60 bg-surface p-3">
+              <span className="text-sm text-text-muted">Référence fournisseur</span>
+              <p className="font-mono font-medium">{data.supplierReference}</p>
+            </div>
+          )}
           <table className="w-full text-xs border border-border/60 rounded">
             <thead className="bg-surface">
               <tr>

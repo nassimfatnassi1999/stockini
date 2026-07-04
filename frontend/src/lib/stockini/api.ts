@@ -211,9 +211,12 @@ export const stockiniApi = {
   receivePurchase: (
     id: string,
     items: Array<{ purchaseItemId: string; quantity: number }>,
+    references?: {
+      supplierReference?: string;
+    },
   ) =>
     api
-      .patch<Purchase>(`/purchases/${id}/receive`, { items })
+      .patch<Purchase>(`/purchases/${id}/receive`, { items, ...references })
       .then((r) => r.data),
   updatePurchase: (id: string, data: Partial<Purchase>) =>
     api.patch<Purchase>(`/purchases/${id}`, data).then((r) => r.data),

@@ -104,8 +104,12 @@ export class PurchasesController {
 
   @RequirePermissions('purchases.update')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePurchaseDto) {
-    return this.purchasesService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePurchaseDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.purchasesService.update(id, dto, user?.id);
   }
 
   @RequirePermissions('purchases.delete')

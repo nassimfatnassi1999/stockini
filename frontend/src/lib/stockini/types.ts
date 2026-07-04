@@ -212,6 +212,7 @@ export interface Purchase {
   totalTTC?: number | string;
   stampDuty: number | string;
   totalFinal: number | string;
+  supplierReference?: string | null;
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: string;
@@ -255,6 +256,7 @@ export interface PurchaseDetail {
   totalTTC: number | string;
   stampDuty: number | string;
   totalFinal: number | string;
+  supplierReference?: string | null;
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: string;

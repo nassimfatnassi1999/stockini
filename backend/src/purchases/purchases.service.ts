@@ -62,6 +62,7 @@ export class PurchasesService {
         data: {
           orderNumber: await this.references.generate('ACH', 'purchase', tx),
           supplierId: dto.supplierId,
+          supplierReference: this.optionalReference(dto.supplierReference),
           subtotal,
           discount,
           tax,
@@ -89,6 +90,7 @@ export class PurchasesService {
           status: purchase.status,
           total: Number(purchase.total),
           supplierId: purchase.supplierId,
+          supplierReference: purchase.supplierReference,
         },
         metadata: {
           orderNumber: purchase.orderNumber,
@@ -122,6 +124,7 @@ export class PurchasesService {
       ...(query?.search && {
         OR: [
           { orderNumber: { contains: query.search, mode: 'insensitive' } },
+          { supplierReference: { contains: query.search, mode: 'insensitive' } },
           {
             supplier: { name: { contains: query.search, mode: 'insensitive' } },
           },
@@ -178,6 +181,7 @@ export class PurchasesService {
       ...(query?.search && {
         OR: [
           { orderNumber: { contains: query.search, mode: 'insensitive' } },
+          { supplierReference: { contains: query.search, mode: 'insensitive' } },
           {
             supplier: { name: { contains: query.search, mode: 'insensitive' } },
           },
@@ -230,6 +234,7 @@ export class PurchasesService {
         customerAddress: purchase.supplier?.address,
         customerPhone: purchase.supplier?.phone,
         customerEmail: purchase.supplier?.email,
+        supplierReference: purchase.supplierReference,
         items: purchase.items.map((item) => ({
           reference: item.product?.reference ?? '—',
           name: item.product?.name ?? '—',
@@ -326,9 +331,13 @@ export class PurchasesService {
             }
           : {};
 
+      const supplierReferenceUpdate = {
+        ...(dto.supplierReference !== undefined && { supplierReference: this.optionalReference(dto.supplierReference) }),
+      };
+
       const updated = await tx.purchase.update({
         where: { id },
-        data: { status: newStatus, ...docActivation },
+        data: { status: newStatus, ...docActivation, ...supplierReferenceUpdate },
         include: { supplier: true, items: { include: { product: true } } },
       });
 
@@ -341,6 +350,7 @@ export class PurchasesService {
         newValue: {
           documentType: updated.documentType,
           status: newStatus,
+          supplierReference: updated.supplierReference,
           ...(Object.keys(docActivation).length > 0 && { paymentStatus: PaymentStatus.UNPAID }),
         },
         metadata: {
@@ -443,20 +453,44 @@ export class PurchasesService {
     });
   }
 
-  async update(id: string, dto: UpdatePurchaseDto) {
+  async update(id: string, dto: UpdatePurchaseDto, userId?: string) {
     if (dto.status === PurchaseStatus.CANCELLED) {
       return this.cancel(id);
     }
-    await this.settings.assertActiveOption('purchase_statuses', dto.status);
-    return this.prisma.purchase.update({
+    if (dto.status) {
+      await this.settings.assertActiveOption('purchase_statuses', dto.status);
+    }
+    const previous = await this.prisma.purchase.findFirstOrThrow({
+      where: { id, deletedAt: null },
+    });
+    const updated = await this.prisma.purchase.update({
       where: { id },
-      data: { status: dto.status },
+      data: {
+        ...(dto.status && { status: dto.status }),
+        ...(dto.supplierReference !== undefined && { supplierReference: this.optionalReference(dto.supplierReference) }),
+      },
       include: {
         supplier: true,
         items: { include: { product: true } },
         payments: true,
       },
     });
+    await this.auditLogs.audit({
+      action: 'purchase.updated',
+      entity: 'Purchase',
+      entityId: id,
+      userId,
+      oldValue: {
+        status: previous.status,
+        supplierReference: previous.supplierReference,
+      },
+      newValue: {
+        status: updated.status,
+        supplierReference: updated.supplierReference,
+      },
+      metadata: { orderNumber: updated.orderNumber },
+    });
+    return updated;
   }
 
   async remove(id: string, userId?: string) {
@@ -577,6 +611,7 @@ export class PurchasesService {
           paymentStatus: PaymentStatus.UNPAID,
           supplierId: purchase.supplierId,
           supplierName: purchase.supplier?.name ?? null,
+          supplierReference: purchase.supplierReference,
         },
       }, tx);
 
@@ -630,5 +665,10 @@ export class PurchasesService {
     if (paidAmount <= 0) return PaymentStatus.UNPAID;
     if (paidAmount < total) return PaymentStatus.PARTIAL;
     return PaymentStatus.PAID;
+  }
+
+  private optionalReference(value: string | null | undefined): string | null {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
   }
 }

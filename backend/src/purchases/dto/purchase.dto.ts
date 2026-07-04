@@ -36,6 +36,10 @@ export class CreatePurchaseDto {
   supplierId!: string;
 
   @IsOptional()
+  @IsString()
+  supplierReference?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -68,6 +72,10 @@ export class ReceivePurchaseDto {
   @ValidateNested({ each: true })
   @Type(() => ReceivePurchaseItemDto)
   items!: ReceivePurchaseItemDto[];
+
+  @IsOptional()
+  @IsString()
+  supplierReference?: string;
 }
 
 /**
@@ -84,6 +92,10 @@ export class UpdatePurchaseDto {
   @IsOptional()
   @IsEnum(PurchaseStatus)
   status?: PurchaseStatus;
+
+  @IsOptional()
+  @IsString()
+  supplierReference?: string;
 }
 
 /**
