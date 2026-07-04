@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
 import { ClearPaymentHistoryDto, PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
+import { commercialTotalFinal } from '../common/utils/commercial-document';
 
 @Injectable()
 export class PaymentsService {
@@ -106,8 +107,8 @@ export class PaymentsService {
       const payment = await tx.payment.findFirstOrThrow({
         where: { id, deletedAt: null },
         include: {
-          sale: { select: { id: true, total: true, invoiceNumber: true } },
-          purchase: { select: { id: true, total: true, orderNumber: true } },
+          sale: { select: { id: true, total: true, stampDuty: true, invoiceNumber: true } },
+          purchase: { select: { id: true, total: true, stampDuty: true, orderNumber: true } },
         },
       });
 
@@ -147,7 +148,7 @@ export class PaymentsService {
           _sum: { amount: true },
         });
         const newPaid = Number(agg._sum.amount ?? 0);
-        const saleTotal = Number(payment.sale.total);
+        const saleTotal = commercialTotalFinal(payment.sale.total, payment.sale.stampDuty);
         await tx.sale.update({
           where: { id: payment.saleId },
           data: {
@@ -165,7 +166,7 @@ export class PaymentsService {
           _sum: { amount: true },
         });
         const newPaid = Number(agg._sum.amount ?? 0);
-        const purchaseTotal = Number(payment.purchase.total);
+        const purchaseTotal = commercialTotalFinal(payment.purchase.total, payment.purchase.stampDuty);
         await tx.purchase.update({
           where: { id: payment.purchaseId },
           data: {
@@ -250,12 +251,13 @@ export class PaymentsService {
       }
 
       const newPaidAmount = Number(sale.paidAmount) + dto.amount;
+      const saleTotalFinal = commercialTotalFinal(sale.total, sale.stampDuty);
       const newRemainingAmount = Math.max(
-        Number(sale.total) - newPaidAmount,
+        saleTotalFinal - newPaidAmount,
         0,
       );
       const newStatus = this.computePaymentStatus(
-        Number(sale.total),
+        saleTotalFinal,
         newPaidAmount,
       );
 
@@ -354,12 +356,13 @@ export class PaymentsService {
       }
 
       const newPaidAmount = Number(purchase.paidAmount) + dto.amount;
+      const purchaseTotalFinal = commercialTotalFinal(purchase.total, purchase.stampDuty);
       const newRemainingAmount = Math.max(
-        Number(purchase.total) - newPaidAmount,
+        purchaseTotalFinal - newPaidAmount,
         0,
       );
       const newStatus = this.computePaymentStatus(
-        Number(purchase.total),
+        purchaseTotalFinal,
         newPaidAmount,
       );
 

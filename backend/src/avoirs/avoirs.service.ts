@@ -28,6 +28,7 @@ import {
   calculateCreditNoteLineTotals,
   calculateCreditNoteTotals,
 } from '../credit-notes/utils/credit-note-calculation.util';
+import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
 
 const AVOIR_INCLUDE = {
   sale: { select: { invoiceNumber: true, customerId: true } },
@@ -278,7 +279,9 @@ export class AvoirsService {
         const subtotal = totals.totalHt;
         const tax = totals.totalTva;
         const total = totals.totalTtc;
-        const montantRembourse = refundMethod === 'NONE' ? 0 : total;
+        const stampDuty = DEFAULT_STAMP_DUTY;
+        const totalFinal = commercialTotalFinal(total, stampDuty);
+        const montantRembourse = refundMethod === 'NONE' ? 0 : totalFinal;
 
         const documentDate = new Date();
         const numero = await this.references.generateSalesDocumentNumber(
@@ -300,6 +303,7 @@ export class AvoirsService {
             subtotal,
             tax,
             total,
+            stampDuty,
             montantRembourse,
             statut:
               refundMethod === 'NONE'
@@ -490,6 +494,7 @@ export class AvoirsService {
         subtotal: Number(avoir.subtotal),
         tax: Number(avoir.tax),
         total: Number(avoir.total),
+        stampDuty: Number(avoir.stampDuty),
         montantRembourse: Number(avoir.montantRembourse),
       },
       companySettings,
@@ -544,6 +549,8 @@ export class AvoirsService {
             totalHt: avoir.subtotal,
             totalTva: avoir.tax,
             totalTtc: avoir.total,
+            stampDuty: avoir.stampDuty,
+            totalFinal: new Prisma.Decimal(avoir.total).plus(avoir.stampDuty),
             generatedBy: user?.id,
             status: DocumentStatus.GENERATED,
           },
@@ -617,15 +624,17 @@ export class AvoirsService {
 
     const refundedTotals = await tx.creditNote.aggregate({
       where: { saleId, statut: { not: 'CANCELLED' } },
-      _sum: { total: true },
+      _sum: { total: true, stampDuty: true },
     });
-    const refundedTotal = Number(refundedTotals._sum.total ?? 0);
+    const refundedTotal =
+      Number(refundedTotals._sum.total ?? 0) +
+      Number(refundedTotals._sum.stampDuty ?? 0);
 
     // Snapshot the original total on the very first avoir (never overwrite after that).
     const initialTtc =
       sale.totalInitialTtc != null
         ? Number(sale.totalInitialTtc)
-        : Number(sale.total);
+        : commercialTotalFinal(sale.total, sale.stampDuty);
     const currentTtc = Math.max(0, initialTtc - refundedTotal);
 
     const nextStatus =
@@ -639,7 +648,9 @@ export class AvoirsService {
         status: nextStatus,
         totalRefunded: refundedTotal,
         // Only set the initial snapshot once (first avoir).
-        ...(sale.totalInitialTtc == null && { totalInitialTtc: sale.total }),
+        ...(sale.totalInitialTtc == null && {
+          totalInitialTtc: commercialTotalFinal(sale.total, sale.stampDuty),
+        }),
         totalCurrentTtc: currentTtc,
       },
     });

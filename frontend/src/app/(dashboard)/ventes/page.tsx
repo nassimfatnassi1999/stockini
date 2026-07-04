@@ -572,7 +572,7 @@ function ValidateDocumentModal({
             </p>
           </div>
           <span className="text-lg font-bold tabular-nums text-text-primary">
-            {money(totals.totalTtc)} DT
+            {money(totals.totalFinal)} DT
           </span>
         </div>
 
@@ -1075,8 +1075,8 @@ export default function VentesPage() {
       const paymentAllowed =
         docType === "FACTURE" || docType === "BON_LIVRAISON";
       const submittedPaidAmount = paymentAllowed ? round3(paid) : 0;
-      if (submittedPaidAmount > round3(totals.totalTtc) + 0.001) {
-        throw new Error("Le montant payé ne peut pas dépasser le total TTC.");
+      if (submittedPaidAmount > round3(totals.totalFinal) + 0.001) {
+        throw new Error("Le montant payé ne peut pas dépasser le total à payer.");
       }
       if (submittedPaidAmount > 0 && !method) {
         throw new Error("Veuillez sélectionner une méthode de paiement.");
@@ -2094,12 +2094,12 @@ export default function VentesPage() {
                                 </td>
                                 <td className="px-4 py-2.5 tabular-nums">
                                   <span className="font-medium text-slate-800">
-                                    {money(sale.totalCurrentTtc ?? sale.total)}
+                                    {money(sale.totalCurrentTtc ?? sale.totalFinal)}
                                   </span>
                                   {sale.totalCurrentTtc != null &&
-                                    Number(sale.totalCurrentTtc) < Number(sale.total) && (
+                                    Number(sale.totalCurrentTtc) < Number(sale.totalFinal) && (
                                       <span className="ml-1 text-[11px] text-slate-400 line-through">
-                                        {money(sale.total)}
+                                        {money(sale.totalFinal)}
                                       </span>
                                     )}
                                 </td>

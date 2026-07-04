@@ -167,6 +167,14 @@ export function ProductRegisterGrid({ lines, hasLowMarginPermission, canEditUnit
               {fmt3(totals.totalTtc)} DT
             </div>
           </div>
+          <div className="text-right">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Timbre fiscal</div>
+            <div className="mt-0.5 font-semibold tabular-nums text-text-primary">{fmt3(totals.stampDuty)} DT</div>
+          </div>
+          <div className="text-right border-l border-border pl-5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Total à payer</div>
+            <div className="mt-0.5 text-lg font-bold tabular-nums text-primary">{fmt3(totals.totalFinal)} DT</div>
+          </div>
         </div>
       </div>
     </div>

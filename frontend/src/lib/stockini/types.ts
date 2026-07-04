@@ -126,6 +126,11 @@ export interface Sale {
   id: Id;
   invoiceNumber: string;
   total: number | string;
+  totalHT?: number | string;
+  totalTVA?: number | string;
+  totalTTC?: number | string;
+  stampDuty: number | string;
+  totalFinal: number | string;
   totalInitialTtc?: number | string | null;
   totalCurrentTtc?: number | string | null;
   paidAmount: number | string;
@@ -178,6 +183,11 @@ export interface SaleDetail {
   discount: number | string;
   tax: number | string;
   total: number | string;
+  totalHT: number | string;
+  totalTVA: number | string;
+  totalTTC: number | string;
+  stampDuty: number | string;
+  totalFinal: number | string;
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: string | null;
@@ -197,6 +207,11 @@ export interface Purchase {
   id: Id;
   orderNumber: string;
   total: number | string;
+  totalHT?: number | string;
+  totalTVA?: number | string;
+  totalTTC?: number | string;
+  stampDuty: number | string;
+  totalFinal: number | string;
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: string;
@@ -235,6 +250,11 @@ export interface PurchaseDetail {
   discount: number | string;
   tax: number | string;
   total: number | string;
+  totalHT: number | string;
+  totalTVA: number | string;
+  totalTTC: number | string;
+  stampDuty: number | string;
+  totalFinal: number | string;
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: string;
@@ -333,6 +353,8 @@ export interface GeneratedDocument {
   totalHt?: number | string | null;
   totalTva?: number | string | null;
   totalTtc?: number | string | null;
+  stampDuty: number | string;
+  totalFinal?: number | string | null;
   generatedBy?: Id | null;
   generatedAt: string;
   status: DocumentStatus;
@@ -345,6 +367,8 @@ export interface GeneratedDocument {
     subtotal?: number | string | null;
     tax?: number | string | null;
     total?: number | string | null;
+    stampDuty?: number | string | null;
+    totalFinal?: number | string | null;
     customer?: { name: string; email?: string | null } | null;
   } | null;
   generator?: { fullName: string } | null;
@@ -575,6 +599,11 @@ export interface CreditNote {
   subtotal: number | string;
   tax: number | string;
   total: number | string;
+  totalHT: number | string;
+  totalTVA: number | string;
+  totalTTC: number | string;
+  stampDuty: number | string;
+  totalFinal: number | string;
   montantRembourse: number | string;
   motif?: string | null;
   statut: CreditNoteStatus;

@@ -26,6 +26,7 @@ import {
 import { isPurchaseOrder, money } from '@/lib/stockini/format';
 import type { DropdownOption, PaginatedResponse, Purchase, PurchasesQueryParams, Supplier } from '@/lib/stockini/types';
 import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
+import { openPdfInNewTab } from '@/lib/openPdf';
 
 type PurchaseDocType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE';
 type ReceptionMode = 'LIBRE' | 'FROM_COMMANDE';
@@ -99,7 +100,7 @@ const PURCHASE_STATUS_COLORS: Record<string, string> = {
 function fmtCommandeOption(p: Purchase): string {
   const supplier = p.supplier?.name ?? 'Fournisseur inconnu';
   const count = p.items?.length ?? 0;
-  const totalStr = money(p.total);
+  const totalStr = money(p.totalFinal);
   const partial = p.status === 'PARTIALLY_RECEIVED' ? ' · partiel' : '';
   return `${p.orderNumber} — ${supplier} — ${count} article${count !== 1 ? 's' : ''} — ${totalStr}${partial}`;
 }
@@ -786,7 +787,7 @@ export default function AchatsPage() {
                         {purchase.items?.length ?? 0}
                       </td>
                       <td className="px-4 py-3 tabular-nums font-medium">
-                        {money(purchase.total)}
+                        {money(purchase.totalFinal)}
                       </td>
                       <td className="px-4 py-3">
                         {isPurchaseOrder(purchase.documentType) ? (
@@ -813,6 +814,11 @@ export default function AchatsPage() {
                               label: 'Voir les détails',
                               icon: <Eye size={14} />,
                               onClick: () => setSelectedPurchaseId(purchase.id),
+                            },
+                            {
+                              label: 'Imprimer le PDF',
+                              icon: <ReceiptText size={14} />,
+                              onClick: () => void openPdfInNewTab(() => stockiniApi.purchasePdf(purchase.id)),
                             },
                             {
                               label: 'Payer',
@@ -954,6 +960,14 @@ function PurchaseDetailsModal({
               <p className="font-mono font-semibold">{money(data.total)}</p>
             </div>
             <div>
+              <span className="text-text-muted">Timbre fiscal</span>
+              <p className="font-mono font-semibold">{money(data.stampDuty)}</p>
+            </div>
+            <div>
+              <span className="text-text-muted">Total à payer</span>
+              <p className="font-mono font-bold">{money(data.totalFinal)}</p>
+            </div>
+            <div>
               <span className="text-text-muted">Montant payé</span>
               <p className="font-mono font-semibold text-emerald-600">{money(data.paidAmount)}</p>
             </div>
@@ -999,7 +1013,7 @@ function PayPurchaseModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const remaining = Number(purchase.remainingAmount ?? purchase.total) - Number(purchase.paidAmount ?? 0);
+  const remaining = Number(purchase.remainingAmount ?? purchase.totalFinal) - Number(purchase.paidAmount ?? 0);
   const resteAPayer = Math.max(remaining, 0);
 
   const [montant, setMontant] = useState(String(resteAPayer.toFixed(3)));
@@ -1050,7 +1064,7 @@ function PayPurchaseModal({
           </div>
           <div>
             <p className="text-text-muted text-xs uppercase tracking-wide">Total TTC</p>
-            <p className="font-mono font-semibold">{money(purchase.total)}</p>
+            <p className="font-mono font-semibold">{money(purchase.totalFinal)}</p>
           </div>
           <div>
             <p className="text-text-muted text-xs uppercase tracking-wide">Déjà payé</p>

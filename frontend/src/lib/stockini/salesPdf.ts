@@ -297,6 +297,8 @@ export function generateSalesPDF(
   const taxAmount = Number(sale.tax);
   const discountAmount = Number(sale.discount);
   const total = Number(sale.total);
+  const stampDuty = Number(sale.stampDuty);
+  const totalFinal = Number(sale.totalFinal);
 
   const summaryRows: Array<{ label: string; value: string; bold?: boolean }> = [
     { label: 'Total HT', value: `${fmt3(subtotal)} DT` },
@@ -305,7 +307,9 @@ export function generateSalesPDF(
     summaryRows.push({ label: 'Remise incluse', value: `${fmt3(discountAmount)} DT` });
   }
   summaryRows.push({ label: 'Total TVA (19%)', value: `${fmt3(taxAmount)} DT` });
-  summaryRows.push({ label: 'Total TTC', value: `${fmt3(total)} DT`, bold: true });
+  summaryRows.push({ label: 'Total TTC', value: `${fmt3(total)} DT` });
+  summaryRows.push({ label: 'Timbre fiscal', value: `${fmt3(stampDuty)} DT` });
+  summaryRows.push({ label: 'Total à payer', value: `${fmt3(totalFinal)} DT`, bold: true });
 
   const summaryW = 68;
   const summaryX = pageW - MARGIN - summaryW;

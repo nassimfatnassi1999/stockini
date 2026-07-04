@@ -23,6 +23,7 @@ import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '../common/utils/sales-calculations';
+import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
 import {
   CreateSaleDto,
   SalePaginationDto,
@@ -266,15 +267,17 @@ export class SalesService {
         rawItems.reduce((sum, item) => sum + item.tax, 0),
       );
       const total = this.round3(subtotal + tax);
+      const stampDuty = DEFAULT_STAMP_DUTY;
+      const totalFinal = commercialTotalFinal(total, stampDuty);
 
       const rawPaidAmount = acceptsPayment ? this.round3(dto.paidAmount ?? 0) : 0;
       // CREDIT = vente à crédit, aucun encaissement immédiat — paidAmount reste 0.
       const paidAmount = dto.paymentMethod === 'CREDIT' ? 0 : rawPaidAmount;
 
       // Guard: paidAmount cannot exceed total
-      if (paidAmount > total + 0.001) {
+      if (paidAmount > totalFinal + 0.001) {
         throw new BadRequestException(
-          `Le montant payé (${paidAmount.toFixed(3)}) dépasse le total (${total.toFixed(3)})`,
+          `Le montant payé (${paidAmount.toFixed(3)}) dépasse le total à payer (${totalFinal.toFixed(3)})`,
         );
       }
 
@@ -285,9 +288,9 @@ export class SalesService {
         );
       }
 
-      const remainingAmount = Math.max(total - paidAmount, 0);
+      const remainingAmount = Math.max(totalFinal - paidAmount, 0);
       // Only FACTURE carries a payment status; other document types are not payable
-      const paymentStatus = acceptsPayment ? this.paymentStatus(total, paidAmount) : null;
+      const paymentStatus = acceptsPayment ? this.paymentStatus(totalFinal, paidAmount) : null;
       const items = rawItems.map((item) => {
         return {
           productId: item.productId,
@@ -321,6 +324,7 @@ export class SalesService {
           discount,
           tax,
           total,
+          stampDuty,
           paidAmount,
           remainingAmount,
           paymentStatus,
@@ -702,7 +706,7 @@ export class SalesService {
           status: SaleStatus.CANCELLED,
           lastSalePriceImpactDone: false,
           paidAmount: 0,
-          remainingAmount: sale.total,
+          remainingAmount: commercialTotalFinal(sale.total, sale.stampDuty),
           paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType)
             ? PaymentStatus.UNPAID
             : null,
@@ -900,8 +904,9 @@ export class SalesService {
           discount: source.discount,
           tax: source.tax,
           total: source.total,
+          stampDuty: source.stampDuty,
           paidAmount: 0,
-          remainingAmount: source.total,
+          remainingAmount: commercialTotalFinal(source.total, source.stampDuty),
           paymentStatus: PAYMENT_ACCEPTING_TYPES.has(targetType) ? PaymentStatus.UNPAID : null,
           status: targetAppliesStock ? SaleStatus.COMPLETED : SaleStatus.DRAFT,
           documentType: targetType,

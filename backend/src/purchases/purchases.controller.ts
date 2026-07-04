@@ -8,7 +8,9 @@ import {
   Post,
   Query,
   UseGuards,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
@@ -53,6 +55,18 @@ export class PurchasesController {
   @Get('integrity-check')
   integrityCheck() {
     return this.purchasesService.integrityCheck();
+  }
+
+  @RequirePermissions('purchases.view')
+  @Get(':id/pdf')
+  async getPdf(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, fileName } = await this.purchasesService.generatePdf(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${fileName}"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @RequirePermissions('purchases.view')

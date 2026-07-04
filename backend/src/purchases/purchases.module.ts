@@ -6,9 +6,10 @@ import { SettingsModule } from '../settings/settings.module';
 import { StockModule } from '../stock/stock.module';
 import { PurchasesController } from './purchases.controller';
 import { PurchasesService } from './purchases.service';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [StockModule, ReferencesModule, SettingsModule, CaisseModule, AuditLogsModule],
+  imports: [StockModule, ReferencesModule, SettingsModule, CaisseModule, AuditLogsModule, DocumentsModule],
   controllers: [PurchasesController],
   providers: [PurchasesService],
 })

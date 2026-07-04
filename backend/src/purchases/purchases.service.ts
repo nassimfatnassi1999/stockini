@@ -13,6 +13,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
+import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
+import { PdfService } from '../documents/pdf.service';
 import {
   CreatePurchaseDto,
   PayablePurchaseQueryDto,
@@ -33,6 +35,7 @@ export class PurchasesService {
     private readonly settings: SettingsService,
     private readonly caisseService: CaisseService,
     private readonly auditLogs: AuditLogsService,
+    private readonly pdf: PdfService,
   ) {}
 
   async create(dto: CreatePurchaseDto, createdById?: string) {
@@ -50,6 +53,8 @@ export class PurchasesService {
     const discount = dto.discount ?? 0;
     const tax = dto.tax ?? 0;
     const total = subtotal - discount + tax;
+    const stampDuty = DEFAULT_STAMP_DUTY;
+    const totalFinal = commercialTotalFinal(total, stampDuty);
 
     // All purchases start UNPAID — payments go through /payments/purchases/:id/pay
     return this.prisma.$transaction(async (tx) => {
@@ -61,8 +66,9 @@ export class PurchasesService {
           discount,
           tax,
           total,
+          stampDuty,
           paidAmount: 0,
-          remainingAmount: total,
+          remainingAmount: totalFinal,
           paymentStatus: PaymentStatus.UNPAID,
           status: PurchaseStatus.ORDERED,
           documentType: PurchaseDocumentType.BON_COMMANDE,
@@ -209,6 +215,37 @@ export class PurchasesService {
     });
   }
 
+  async generatePdf(id: string): Promise<{ buffer: Buffer; fileName: string }> {
+    const purchase = await this.findOne(id);
+    const buffer = await this.pdf.generateSaleDocument(
+      {
+        invoiceNumber: purchase.orderNumber,
+        createdAt: purchase.createdAt,
+        subtotal: Number(purchase.subtotal),
+        discount: Number(purchase.discount),
+        tax: Number(purchase.tax),
+        total: Number(purchase.total),
+        timbreFiscal: Number(purchase.stampDuty),
+        customerName: purchase.supplier?.name ?? 'Fournisseur',
+        customerAddress: purchase.supplier?.address,
+        customerPhone: purchase.supplier?.phone,
+        customerEmail: purchase.supplier?.email,
+        items: purchase.items.map((item) => ({
+          reference: item.product?.reference ?? '—',
+          name: item.product?.name ?? '—',
+          quantity: item.quantity,
+          unitPrice: Number(item.unitCost),
+          tvaPercent: Number(purchase.tax) > 0 && Number(purchase.subtotal) > 0
+            ? (Number(purchase.tax) / Math.max(Number(purchase.subtotal) - Number(purchase.discount), 0.001)) * 100
+            : 0,
+          total: Number(item.total),
+        })),
+      },
+      purchase.documentType,
+    );
+    return { buffer, fileName: `${purchase.orderNumber}.pdf` };
+  }
+
   receive(id: string, dto: ReceivePurchaseDto, userId?: string) {
     if (!dto.items.length) {
       throw new BadRequestException('Reception must include at least one item');
@@ -285,7 +322,7 @@ export class PurchasesService {
               documentType: PurchaseDocumentType.BON_RECEPTION,
               paymentStatus: PaymentStatus.UNPAID,
               paidAmount: 0,
-              remainingAmount: purchase.total,
+              remainingAmount: commercialTotalFinal(purchase.total, purchase.stampDuty),
             }
           : {};
 
@@ -374,7 +411,7 @@ export class PurchasesService {
         data: {
           status: PurchaseStatus.CANCELLED,
           paidAmount: 0,
-          remainingAmount: purchase.total,
+          remainingAmount: commercialTotalFinal(purchase.total, purchase.stampDuty),
           paymentStatus: PaymentStatus.UNPAID,
         },
         include: {
@@ -519,7 +556,7 @@ export class PurchasesService {
           status: newStatus,
           paymentStatus: PaymentStatus.UNPAID,
           paidAmount: 0,
-          remainingAmount: purchase.total,
+          remainingAmount: commercialTotalFinal(purchase.total, purchase.stampDuty),
         },
         include: { supplier: true, items: { include: { product: true } } },
       });

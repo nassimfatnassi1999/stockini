@@ -120,6 +120,7 @@ export class DocumentsService {
           discount: Number(sale.discount),
           tax: Number(sale.tax),
           total: Number(sale.total),
+          timbreFiscal: Number(sale.stampDuty),
           customerName: clientName,
           isCounterClient: isComptoir,
           customerAddress: sale.counterClientAddress ?? sale.customer?.address ?? null,
@@ -162,6 +163,8 @@ export class DocumentsService {
         totalHt: sale.subtotal,
         totalTva: sale.tax,
         totalTtc: sale.total,
+        stampDuty: sale.stampDuty,
+        totalFinal: new Prisma.Decimal(sale.total).plus(sale.stampDuty),
         generatedBy: user?.id,
         status: DocumentStatus.GENERATED,
       };
@@ -665,6 +668,8 @@ export class DocumentsService {
       documentNumber: doc.documentNumber,
       documentType: docTypeLabel,
       totalTtc: doc.totalTtc ? Number(doc.totalTtc) : null,
+      stampDuty: Number(doc.stampDuty),
+      totalFinal: doc.totalFinal ? Number(doc.totalFinal) : null,
       presignedUrl,
       expiresAt,
       customMessage: dto.message,
@@ -731,6 +736,8 @@ export class DocumentsService {
     documentNumber: string;
     documentType: string;
     totalTtc: number | null;
+    stampDuty: number;
+    totalFinal: number | null;
     presignedUrl: string;
     expiresAt: Date;
     customMessage?: string;
@@ -740,6 +747,8 @@ export class DocumentsService {
       documentNumber,
       documentType,
       totalTtc,
+      stampDuty,
+      totalFinal,
       presignedUrl,
       expiresAt,
       customMessage,
@@ -757,6 +766,15 @@ export class DocumentsService {
             <td style="color:#1d4ed8;font-size:15px;font-weight:700;text-align:right;">${totalTtc.toFixed(3)} TND</td>
           </tr>`
         : '';
+    const finalRows = totalFinal !== null
+      ? `${ttcRow}<tr>
+          <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Timbre fiscal</td>
+          <td style="color:#111827;font-size:13px;text-align:right;">${stampDuty.toFixed(3)} TND</td>
+        </tr><tr>
+          <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Total à payer</td>
+          <td style="color:#1d4ed8;font-size:15px;font-weight:700;text-align:right;">${totalFinal.toFixed(3)} TND</td>
+        </tr>`
+      : ttcRow;
 
     const customMsgHtml = customMessage
       ? `<p style="margin:0 0 24px;color:#374151;font-size:14px;line-height:1.6;">${customMessage}</p>`
@@ -805,7 +823,7 @@ export class DocumentsService {
                         <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Référence</td>
                         <td style="color:#111827;font-size:13px;font-weight:600;text-align:right;">${documentNumber}</td>
                       </tr>
-                      ${ttcRow}
+                      ${finalRows}
                     </table>
                   </td>
                 </tr>
@@ -917,6 +935,7 @@ export class DocumentsService {
         discount: Number(sale.discount),
         tax: Number(sale.tax),
         total: Number(sale.total),
+        timbreFiscal: Number(sale.stampDuty),
         customerName:
           sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir',
         isCounterClient: isRegenerateComptoir,

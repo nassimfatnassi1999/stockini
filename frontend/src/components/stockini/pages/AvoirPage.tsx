@@ -167,6 +167,14 @@ function AvoirDetailModal({
               <span>Total TTC</span>
               <span>{money(avoir.total)}</span>
             </div>
+            <div className="flex justify-between gap-8">
+              <span>Timbre fiscal</span>
+              <span>{money(avoir.stampDuty)}</span>
+            </div>
+            <div className="flex justify-between gap-8 font-semibold border-t pt-1">
+              <span>Total à payer</span>
+              <span>{money(avoir.totalFinal)}</span>
+            </div>
             <div className="flex justify-between gap-8 font-bold text-red-700 border-t pt-1">
               <span>Remboursé</span>
               <span>{money(avoir.montantRembourse)}</span>
@@ -640,10 +648,18 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
                 <span className="text-gray-500">TVA</span>
                 <span>{money(totals.totalTva)}</span>
               </div>
+              <div className="flex justify-between gap-8">
+                <span>Total TTC</span>
+                <span>{money(totals.totalTtc)}</span>
+              </div>
+              <div className="flex justify-between gap-8">
+                <span>Timbre fiscal</span>
+                <span>{money(1)}</span>
+              </div>
               <div className="flex justify-between gap-8 font-bold text-red-700 border-t pt-1">
                 <span>Remboursement</span>
                 <span>
-                  {money(refundMethod === "NONE" ? 0 : totals.totalTtc)}
+                  {money(refundMethod === "NONE" ? 0 : totals.totalTtc + 1)}
                 </span>
               </div>
             </div>

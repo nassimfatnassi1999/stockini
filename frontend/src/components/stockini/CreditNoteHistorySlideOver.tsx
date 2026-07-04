@@ -79,7 +79,7 @@ function AvoirCard({ avoir }: { avoir: CreditNote }) {
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div className="rounded bg-slate-50 p-2 text-center">
           <div className="text-slate-500 mb-0.5">Total TTC</div>
-          <div className="font-semibold">{money(avoir.total)}</div>
+          <div className="font-semibold">{money(avoir.totalFinal)}</div>
         </div>
         <div className="rounded bg-red-50 p-2 text-center">
           <div className="text-slate-500 mb-0.5">Remboursé</div>
@@ -157,12 +157,12 @@ export function CreditNoteHistorySlideOver({ sale, onClose }: Props) {
   // correct even if the parent passed a slightly stale sale object.
   const activeAvoirs = avoirs.filter((av) => av.statut !== "CANCELLED");
   const computedRefunded = activeAvoirs.reduce(
-    (sum, av) => sum + Number(av.total),
+    (sum, av) => sum + Number(av.totalFinal),
     0,
   );
 
   // Prefer server-computed fields; fall back to local computation while loading.
-  const initialTtc = Number(sale.totalInitialTtc ?? sale.total);
+  const initialTtc = Number(sale.totalInitialTtc ?? sale.totalFinal);
   const totalRefunded =
     query.isFetched ? computedRefunded : Number(sale.totalRefunded ?? 0);
   const currentTtc = Math.max(0, initialTtc - totalRefunded);

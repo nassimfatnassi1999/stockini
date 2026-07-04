@@ -744,7 +744,7 @@ export default function DocumentsPage() {
               ) : (
                 docs.map((doc) => {
                   const clientDisplay = doc.clientName ?? doc.sale?.customer?.name ?? 'Comptoir';
-                  const totalTtc = doc.totalTtc ?? doc.sale?.total;
+                  const totalTtc = doc.totalFinal ?? doc.sale?.totalFinal;
                   return (
                     <tr key={doc.id} className="hover:bg-muted/40 transition-colors">
                       <td className="px-4 py-3">

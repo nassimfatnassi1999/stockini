@@ -225,7 +225,9 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                   <TotalRow label="TVA" value={`+ ${money(sale.tax)}`} />
                 )}
                 <div className="border-t border-border/60 pt-1.5">
-                  <TotalRow label="Total TTC" value={money(sale.total)} bold />
+                  <TotalRow label="Total TTC" value={money(sale.totalTTC ?? sale.total)} />
+                  <TotalRow label="Timbre fiscal" value={money(sale.stampDuty)} />
+                  <TotalRow label="Total à payer" value={money(sale.totalFinal)} bold />
                 </div>
               </div>
             </div>

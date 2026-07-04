@@ -62,7 +62,11 @@ export interface DocumentTotals {
   totalRemise: number;
   totalTva: number;
   totalTtc: number;
+  stampDuty: number;
+  totalFinal: number;
 }
+
+export const DEFAULT_STAMP_DUTY = 1;
 
 export interface SaleMargeTotals {
   margeTotaleDt: number;
@@ -153,7 +157,8 @@ export function calculateSalesDocumentTotals(lines: RegisterLine[]): DocumentTot
   const totalHt = round3(calculations.reduce((sum, line) => sum + line.totalHt, 0));
   const totalRemise = round3(calculations.reduce((sum, line) => sum + line.discountAmount, 0));
   const totalTva = round3(calculations.reduce((sum, line) => sum + line.taxAmount, 0));
-  return { totalHt, totalRemise, totalTva, totalTtc: round3(totalHt + totalTva) };
+  const totalTtc = round3(totalHt + totalTva);
+  return { totalHt, totalRemise, totalTva, totalTtc, stampDuty: DEFAULT_STAMP_DUTY, totalFinal: round3(totalTtc + DEFAULT_STAMP_DUTY) };
 }
 
 export function isFilledLine(line: RegisterLine): boolean {
@@ -171,7 +176,7 @@ export function calculateDocumentTotals(lines: RegisterLine[]): DocumentTotals {
   const totalRemise = round3(totalGrossHt - totalHt);
   const totalTva = round3(filled.reduce((s, l) => s + round3(l.netHt * l.tvaPercent / 100), 0));
   const totalTtc = round3(totalHt + totalTva);
-  return { totalHt, totalRemise, totalTva, totalTtc };
+  return { totalHt, totalRemise, totalTva, totalTtc, stampDuty: DEFAULT_STAMP_DUTY, totalFinal: round3(totalTtc + DEFAULT_STAMP_DUTY) };
 }
 
 /**

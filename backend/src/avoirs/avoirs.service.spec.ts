@@ -149,7 +149,8 @@ describe('AvoirsService', () => {
           subtotal: 100,
           tax: 19,
           total: 119,
-          montantRembourse: 119,
+          montantRembourse: 120,
+          stampDuty: 1,
           statut: CreditNoteStatus.REFUNDED,
         }),
       }),
@@ -174,7 +175,7 @@ describe('AvoirsService', () => {
       tx,
       expect.objectContaining({
         type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -119,
+        montant: -120,
         paymentMethod: 'CASH',
       }),
     );
@@ -234,7 +235,7 @@ describe('AvoirsService', () => {
 
     expect(tx.customer.update).toHaveBeenCalledWith({
       where: { id: sale.customerId },
-      data: { creditBalance: { increment: 119 } },
+      data: { creditBalance: { increment: 120 } },
     });
     expect(caisseService.recordMovement).not.toHaveBeenCalled();
   });
@@ -294,7 +295,7 @@ describe('AvoirsService', () => {
       tx,
       expect.objectContaining({
         type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -119,
+        montant: -120,
         paymentMethod: 'BANK_TRANSFER',
       }),
     );
@@ -322,7 +323,7 @@ describe('AvoirsService', () => {
       tx,
       expect.objectContaining({
         type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -119,
+        montant: -120,
         paymentMethod: 'CHECK',
       }),
     );
@@ -350,7 +351,7 @@ describe('AvoirsService', () => {
       tx,
       expect.objectContaining({
         type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -119,
+        montant: -120,
         paymentMethod: 'CARD',
       }),
     );
@@ -377,7 +378,7 @@ describe('AvoirsService', () => {
     expect(caisseService.recordMovement).not.toHaveBeenCalled();
     expect(tx.customer.update).toHaveBeenCalledWith({
       where: { id: sale.customerId },
-      data: { creditBalance: { increment: 119 } },
+      data: { creditBalance: { increment: 120 } },
     });
   });
 

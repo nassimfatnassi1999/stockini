@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { AlertsModule } from './alerts/alerts.module';
 import { AdminModule } from './admin/admin.module';
@@ -27,6 +28,7 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { SystemMonitorModule } from './system-monitor/system-monitor.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
+import { CommercialDocumentInterceptor } from './common/interceptors/commercial-document.interceptor';
 
 @Module({
   imports: [
@@ -58,6 +60,9 @@ import { UsersModule } from './users/users.module';
     SystemMonitorModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_INTERCEPTOR, useClass: CommercialDocumentInterceptor },
+  ],
 })
 export class AppModule {}

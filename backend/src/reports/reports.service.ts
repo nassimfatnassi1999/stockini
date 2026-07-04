@@ -265,22 +265,22 @@ export class ReportsService {
     ] = await Promise.all([
       this.prisma.sale.aggregate({
         where: { ...salesFilter, createdAt: range },
-        _sum: { total: true, totalRefunded: true, paidAmount: true, remainingAmount: true },
+        _sum: { total: true, stampDuty: true, totalRefunded: true, paidAmount: true, remainingAmount: true },
         _count: true,
       }),
       this.prisma.sale.aggregate({
         where: { ...salesFilter, createdAt: prevRange },
-        _sum: { total: true, totalRefunded: true },
+        _sum: { total: true, stampDuty: true, totalRefunded: true },
         _count: true,
       }),
       this.prisma.purchase.aggregate({
         where: { ...purchasesFilter, createdAt: range },
-        _sum: { total: true, remainingAmount: true, paidAmount: true },
+        _sum: { total: true, stampDuty: true, remainingAmount: true, paidAmount: true },
         _count: true,
       }),
       this.prisma.purchase.aggregate({
         where: { ...purchasesFilter, createdAt: prevRange },
-        _sum: { total: true },
+        _sum: { total: true, stampDuty: true },
         _count: true,
       }),
       this.prisma.payment.aggregate({
@@ -311,7 +311,7 @@ export class ReportsService {
       }),
       this.prisma.creditNote.aggregate({
         where: { statut: { not: 'CANCELLED' }, dateAvoir: range },
-        _sum: { total: true, montantRembourse: true },
+        _sum: { total: true, stampDuty: true, montantRembourse: true },
         _count: true,
       }),
       this.prisma.sale.count({
@@ -378,7 +378,7 @@ export class ReportsService {
       this.prisma.purchase.groupBy({
         by: ['supplierId'],
         where: { ...purchasesFilter, createdAt: range },
-        _sum: { total: true, remainingAmount: true },
+        _sum: { total: true, stampDuty: true, remainingAmount: true },
         orderBy: { _sum: { total: 'desc' } },
         take: 10,
       }),
@@ -399,7 +399,7 @@ export class ReportsService {
         this.prisma.sale.groupBy({
           by: ['customerId'],
           where: { ...salesFilter, customerId: { not: null }, createdAt: range },
-          _sum: { total: true, totalRefunded: true, remainingAmount: true },
+          _sum: { total: true, stampDuty: true, totalRefunded: true, remainingAmount: true },
           orderBy: { _sum: { total: 'desc' } },
           take: 10,
         }),
@@ -421,9 +421,9 @@ export class ReportsService {
     const series = await this.buildTimeSeries(buckets, salesFilter, purchasesFilter);
 
     // ── Scalar KPIs ───────────────────────────────────────────────────────────
-    const caNet = num(salesAgg._sum.total) - num(salesAgg._sum.totalRefunded);
-    const prevCaNet = num(prevSalesAgg._sum.total) - num(prevSalesAgg._sum.totalRefunded);
-    const totalAchats = num(purchasesAgg._sum.total);
+    const caNet = num(salesAgg._sum.total) + num(salesAgg._sum.stampDuty) - num(salesAgg._sum.totalRefunded);
+    const prevCaNet = num(prevSalesAgg._sum.total) + num(prevSalesAgg._sum.stampDuty) - num(prevSalesAgg._sum.totalRefunded);
+    const totalAchats = num(purchasesAgg._sum.total) + num(purchasesAgg._sum.stampDuty);
     const panierMoyen = salesAgg._count > 0 ? caNet / salesAgg._count : 0;
 
     // Stock value (all active products)
@@ -482,12 +482,12 @@ export class ReportsService {
 
       financier: {
         caNet: +caNet.toFixed(3),
-        caGross: +num(salesAgg._sum.total).toFixed(3),
+        caGross: +(num(salesAgg._sum.total) + num(salesAgg._sum.stampDuty)).toFixed(3),
         caTrend: trend(caNet, prevCaNet),
         encaissementsClients: +num(customerPaymentsAgg._sum.amount).toFixed(3),
         impayesClients: +num(salesAgg._sum.remainingAmount).toFixed(3),
         totalAchats: +totalAchats.toFixed(3),
-        achatsTrend: trend(totalAchats, num(prevPurchasesAgg._sum.total)),
+        achatsTrend: trend(totalAchats, num(prevPurchasesAgg._sum.total) + num(prevPurchasesAgg._sum.stampDuty)),
         paiementsFournisseurs: +num(supplierPaymentsAgg._sum.amount).toFixed(3),
         impayesFournisseurs: +num(purchasesAgg._sum.remainingAmount).toFixed(3),
         depenses: +num(depensesAgg._sum.montant).toFixed(3),
@@ -515,7 +515,7 @@ export class ReportsService {
         },
         avoirs: {
           count: avoirsAgg._count,
-          total: +num(avoirsAgg._sum.total).toFixed(3),
+          total: +(num(avoirsAgg._sum.total) + num(avoirsAgg._sum.stampDuty)).toFixed(3),
           montantRembourse: +num(avoirsAgg._sum.montantRembourse).toFixed(3),
         },
       },
@@ -562,13 +562,13 @@ export class ReportsService {
 
       topClients: topClientSales.map((item) => ({
         customer: clientById.get(item.customerId!) ?? null,
-        ca: +(num(item._sum.total) - num(item._sum.totalRefunded)).toFixed(3),
+        ca: +(num(item._sum.total) + num(item._sum.stampDuty) - num(item._sum.totalRefunded)).toFixed(3),
         impaye: +num(item._sum.remainingAmount).toFixed(3),
       })),
 
       topFournisseurs: topSuppliersRaw.map((item) => ({
         supplier: supplierById.get(item.supplierId) ?? null,
-        totalAchats: +num(item._sum.total).toFixed(3),
+        totalAchats: +(num(item._sum.total) + num(item._sum.stampDuty)).toFixed(3),
         impaye: +num(item._sum.remainingAmount).toFixed(3),
       })),
 
@@ -587,11 +587,11 @@ export class ReportsService {
         const [s, p, enc, dep] = await Promise.all([
           this.prisma.sale.aggregate({
             where: { ...salesFilter, createdAt: range },
-            _sum: { total: true, totalRefunded: true },
+            _sum: { total: true, stampDuty: true, totalRefunded: true },
           }),
           this.prisma.purchase.aggregate({
             where: { ...purchasesFilter, createdAt: range },
-            _sum: { total: true },
+            _sum: { total: true, stampDuty: true },
           }),
           this.prisma.payment.aggregate({
             where: {
@@ -612,8 +612,8 @@ export class ReportsService {
           }),
         ]);
 
-        const ca = num(s._sum.total) - num(s._sum.totalRefunded);
-        const achats = num(p._sum.total);
+        const ca = num(s._sum.total) + num(s._sum.stampDuty) - num(s._sum.totalRefunded);
+        const achats = num(p._sum.total) + num(p._sum.stampDuty);
         return {
           label: bucket.label,
           ca: +ca.toFixed(3),
@@ -640,7 +640,7 @@ export class ReportsService {
             status: SaleStatus.COMPLETED,
             deletedAt: null,
           },
-          _sum: { total: true, paidAmount: true },
+          _sum: { total: true, stampDuty: true, paidAmount: true },
           _count: true,
         }),
         this.prisma.sale.count({
@@ -658,7 +658,7 @@ export class ReportsService {
       lowStockCount: lowStockList.length,
       customersCount,
       salesCount: salesAggregate._count,
-      salesTotal: salesAggregate._sum.total ?? 0,
+      salesTotal: num(salesAggregate._sum.total) + num(salesAggregate._sum.stampDuty),
       paidTotal: salesAggregate._sum.paidAmount ?? 0,
       unpaidSales,
     };

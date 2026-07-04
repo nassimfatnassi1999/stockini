@@ -204,6 +204,8 @@ export const stockiniApi = {
       .then((r) => r.data),
   purchase: (id: string) =>
     api.get<PurchaseDetail>(`/purchases/${id}`).then((r) => r.data),
+  purchasePdf: (id: string) =>
+    api.get<Blob>(`/purchases/${id}/pdf`, { responseType: 'blob' }).then((r) => r.data),
   createPurchase: (data: unknown) =>
     api.post<Purchase>("/purchases", data).then((r) => r.data),
   receivePurchase: (

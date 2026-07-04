@@ -512,7 +512,7 @@ export function DepensesPage() {
                     <TableCell className="font-mono font-semibold text-primary">{purchase.orderNumber}</TableCell>
                     <TableCell>{purchase.supplier?.name ?? '-'}</TableCell>
                     <TableCell className="text-text-secondary">{dateTime(purchase.createdAt)}</TableCell>
-                    <TableCell className="text-right font-mono">{money(purchase.total)}</TableCell>
+                    <TableCell className="text-right font-mono">{money(purchase.totalFinal)}</TableCell>
                     <TableCell className="text-right font-mono text-emerald-600">{money(purchase.paidAmount)}</TableCell>
                     <TableCell className="text-right font-mono font-semibold text-red-600">{money(purchase.remainingAmount)}</TableCell>
                     <TableCell><PaymentStatusBadge status={purchase.paymentStatus} /></TableCell>
@@ -785,6 +785,8 @@ export function DepensesPage() {
               <div className="flex justify-between"><span className="text-text-muted">Fournisseur</span><span className="font-medium">{payTarget.supplier?.name ?? '-'}</span></div>
               <div className="flex justify-between"><span className="text-text-muted">Document achat</span><span className="font-mono font-medium">{payTarget.orderNumber}</span></div>
               <div className="flex justify-between"><span className="text-text-muted">Total TTC</span><span className="font-mono font-medium">{money(payTarget.total)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Timbre fiscal</span><span className="font-mono font-medium">{money(payTarget.stampDuty)}</span></div>
+              <div className="flex justify-between font-semibold"><span>Total à payer</span><span className="font-mono">{money(payTarget.totalFinal)}</span></div>
               <div className="flex justify-between"><span className="text-text-muted">Déjà payé</span><span className="font-mono font-medium text-emerald-600">{money(payTarget.paidAmount)}</span></div>
               <div className="flex justify-between border-t border-border pt-2"><span className="font-semibold">Reste à payer</span><span className="font-mono font-bold text-red-600">{money(payTarget.remainingAmount)}</span></div>
             </div>

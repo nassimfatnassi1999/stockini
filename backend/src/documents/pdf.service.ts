@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
-import type { DocumentType } from '@prisma/client';
+import type { DocumentType, PurchaseDocumentType } from '@prisma/client';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -62,6 +62,7 @@ export interface PdfAvoirData {
   subtotal: number;
   tax: number;
   total: number;
+  stampDuty: number;
   montantRembourse: number;
 }
 
@@ -94,12 +95,14 @@ const INFO_ROW_H = 15;
 const INFO_PAD = 8;
 const DEFAULT_COMPANY = 'Moumna spare part';
 
-const DOC_TITLES: Record<DocumentType, string> = {
+const DOC_TITLES: Record<DocumentType | PurchaseDocumentType, string> = {
   DEVIS: 'DEVIS',
   BON_COMMANDE: 'BON DE COMMANDE',
   BON_LIVRAISON: 'BON DE LIVRAISON',
   FACTURE: 'FACTURE',
   AVOIR: 'AVOIR',
+  BON_RECEPTION: 'BON DE RÉCEPTION',
+  FACTURE_FOURNISSEUR: 'FACTURE FOURNISSEUR',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -573,7 +576,7 @@ export class PdfService {
 
   generateSaleDocument(
     sale: PdfSaleData,
-    documentType: DocumentType,
+    documentType: DocumentType | PurchaseDocumentType,
     company: PdfCompanyInfo = {},
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
@@ -681,10 +684,12 @@ export class PdfService {
         summaryRows.push({ label: 'Remise incluse', value: `${fmt3(sale.discount)} DT`, color: MSP_RED });
       }
       summaryRows.push({ label: 'TOTAL TVA', value: `${fmt3(sale.tax)} DT` });
+      summaryRows.push({ label: 'TOTAL TTC', value: `${fmt3(sale.total)} DT`, bold: true });
       if ((sale.timbreFiscal ?? 0) > 0) {
-        summaryRows.push({ label: 'TIMBRE', value: `${fmt3(sale.timbreFiscal!)} DT` });
+        summaryRows.push({ label: 'TIMBRE FISCAL', value: `${fmt3(sale.timbreFiscal!)} DT` });
       }
-      summaryRows.push({ label: 'TOTAL TTC', value: `${fmt3(sale.total)} DT`, highlight: true });
+      const totalFinal = sale.total + (sale.timbreFiscal ?? 0);
+      summaryRows.push({ label: 'TOTAL À PAYER', value: `${fmt3(totalFinal)} DT`, highlight: true });
 
       const totH = summaryRows.length * 17 + 4;
       if (y + totH + 24 > contentBottom(doc)) {
@@ -699,7 +704,7 @@ export class PdfService {
 
       // ── Montant en lettres ─────────────────────────────────────────────────
       if (y + 14 < contentBottom(doc)) {
-        const words = numberToFrenchWords(sale.total);
+        const words = numberToFrenchWords(totalFinal);
         doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Oblique')
           .text(
             `Arrêté le présent ${title.toLowerCase()} à la somme de : ${words}`,
@@ -826,6 +831,7 @@ export class PdfService {
         { label: 'TOTAL HT', value: `${fmt3(avoir.subtotal)} DT` },
         { label: 'TOTAL TVA', value: `${fmt3(avoir.tax)} DT` },
         { label: 'TOTAL TTC', value: `${fmt3(avoir.total)} DT`, bold: true },
+        { label: 'TIMBRE FISCAL', value: `${fmt3(avoir.stampDuty)} DT` },
         { label: 'MONTANT REMBOURSÉ', value: `${fmt3(avoir.montantRembourse)} DT`, highlight: true },
       ];
 
@@ -842,7 +848,7 @@ export class PdfService {
 
       // ── Montant en lettres ─────────────────────────────────────────────────
       if (y + 14 < contentBottom(doc)) {
-        const words = numberToFrenchWords(avoir.total);
+        const words = numberToFrenchWords(avoir.total + avoir.stampDuty);
         doc.fontSize(7).fillColor(MSP_DARK_GRAY).font('Helvetica-Oblique')
           .text(
             `Arrêté le présent avoir à la somme de : ${words}`,
