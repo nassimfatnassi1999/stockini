@@ -19,6 +19,8 @@ import * as ExcelJS from 'exceljs';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { BackupStorageService } from './backup-storage.service';
 
+export const MAX_BACKUPS = 3;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface BackupInfo {
@@ -136,6 +138,11 @@ export class DatabaseService {
         entity: 'database',
         metadata: { filename: zipName, size, createdBy: user?.email ?? 'system' },
       });
+
+      // Retention runs only after the ZIP and its metadata have been saved.
+      // It is deliberately best-effort: cleanup must never turn a successful
+      // backup into a failed one.
+      await this.applyBackupRetention();
 
       return { filename: zipName, size, path: zipPath };
     } finally {
@@ -993,27 +1000,38 @@ export class DatabaseService {
     try {
       const result = await this.createBackup();
       this.logger.log(`Auto-backup completed: ${result.filename} (${result.size} bytes)`);
-      await this.cleanOldBackups();
     } catch (err) {
       this.logger.error('Auto-backup failed', (err as Error).message);
     }
   }
 
-  private async cleanOldBackups() {
-    const keepDays = parseInt(this.config.get<string>('AUTO_BACKUP_KEEP_DAYS', '30'), 10);
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - keepDays);
+  private async applyBackupRetention(): Promise<void> {
+    try {
+      // listBackups sorts by the real filesystem creation date, newest first.
+      const backups = await this.listBackups();
+      const expiredBackups = backups.slice(MAX_BACKUPS);
+      let deleted = 0;
 
-    const backups = await this.listBackups();
-    for (const b of backups) {
-      if (new Date(b.createdAt) < cutoff) {
+      for (const backup of expiredBackups) {
         try {
-          await this.backupStorage.remove(b.filename);
-          this.logger.log(`Old backup removed: ${b.filename}`);
-        } catch (err) {
-          this.logger.warn(`Failed to remove old backup: ${b.filename}: ${(err as Error).message}`);
+          await this.backupStorage.remove(backup.filename);
+          deleted += 1;
+        } catch (error) {
+          this.logger.error(
+            `[BackupRetention] Échec de suppression de ${backup.filename}: ${(error as Error).message}`,
+            (error as Error).stack,
+          );
         }
       }
+
+      this.logger.log(
+        `[BackupRetention]\nTotal avant : ${backups.length}\nConservés : ${Math.min(backups.length, MAX_BACKUPS)}\nSupprimés : ${deleted}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[BackupRetention] Impossible d'appliquer la politique de rétention: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
     }
   }
 
