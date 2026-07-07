@@ -18,6 +18,7 @@ interface UseFormDraftOptions<T> {
   isEmpty: (data: T) => boolean;
   onRestore: (data: T) => void;
   debounceMs?: number;
+  enabled?: boolean;
 }
 
 export function useFormDraft<T>({
@@ -26,6 +27,7 @@ export function useFormDraft<T>({
   isEmpty,
   onRestore,
   debounceMs = 400,
+  enabled = true,
 }: UseFormDraftOptions<T>) {
   const [status, setStatus] = useState<FormDraftStatus>('idle');
   const restoredRef = useRef(false);
@@ -78,7 +80,7 @@ export function useFormDraft<T>({
   }, [key]);
 
   useEffect(() => {
-    if (!restoredRef.current || typeof window === 'undefined') return;
+    if (!restoredRef.current || typeof window === 'undefined' || !enabled) return;
     if (timerRef.current) clearTimeout(timerRef.current);
 
     if (isEmptyRef.current(data)) {
@@ -103,7 +105,7 @@ export function useFormDraft<T>({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [data, debounceMs, key]);
+  }, [data, debounceMs, enabled, key]);
 
   return { clearDraft, status };
 }

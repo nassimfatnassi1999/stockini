@@ -370,6 +370,8 @@ model Sale {
   counterClientNote       String?               @map("counter_client_note")
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
+  isEdited                Boolean               @default(false)
+  editedAt                DateTime?
   deletedAt               DateTime?
   deletedBy               String?
   customer                Customer?             @relation(fields: [customerId], references: [id])

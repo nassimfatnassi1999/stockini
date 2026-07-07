@@ -22,6 +22,7 @@ import {
   FileText,
   Loader2,
   Mail,
+  Pencil,
   Receipt,
   RotateCcw,
   Trash2,
@@ -76,6 +77,7 @@ const PERMISSION_LOW_MARGIN = "sales.allow_low_margin";
 const PERMISSION_EDIT_UNIT_PRICE_HT = "sales.line.edit_unit_price_ht";
 const PERMISSION_VIEW_DETAILS = "sales.view_details";
 const PERMISSION_DELETE_SALE = "sales.delete";
+const PERMISSION_UPDATE_SALE = "sales.update";
 
 function round3(v: number) {
   return Math.round(v * 1000) / 1000;
@@ -491,6 +493,8 @@ interface ValidateDocModalProps {
   isPending: boolean;
   paymentMethods: DropdownOption[];
   totals: DocumentTotals;
+  isEditMode?: boolean;
+  initialPaidAmount?: number;
   onConfirm: (paidAmount: number, paymentMethod: string) => void;
   onCancel: () => void;
 }
@@ -500,10 +504,12 @@ function ValidateDocumentModal({
   isPending,
   paymentMethods,
   totals,
+  isEditMode = false,
+  initialPaidAmount = 0,
   onConfirm,
   onCancel,
 }: ValidateDocModalProps) {
-  const [paidAmount, setPaidAmount] = useState("");
+  const [paidAmount, setPaidAmount] = useState(initialPaidAmount ? String(initialPaidAmount) : "");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [pmtError, setPmtError] = useState("");
 
@@ -513,7 +519,7 @@ function ValidateDocumentModal({
   const tabCfg = DOC_TAB_CONFIG.find((t) => t.id === docType);
 
   const handleConfirm = () => {
-    if (paymentAllowed && paidAmountNum > 0 && !paymentMethod) {
+    if (!isEditMode && paymentAllowed && paidAmountNum > 0 && !paymentMethod) {
       setPmtError("Veuillez sélectionner une méthode de paiement");
       return;
     }
@@ -547,7 +553,7 @@ function ValidateDocumentModal({
 
   return (
     <SlideOver
-      title={tabCfg?.saveLabel ?? "Valider le document"}
+      title={isEditMode ? `Mettre à jour ${DOC_TYPE_SHORT[docType] ?? "le document"}` : (tabCfg?.saveLabel ?? "Valider le document")}
       open={true}
       onClose={onCancel}
       width={460}
@@ -588,6 +594,7 @@ function ValidateDocumentModal({
               </Label>
               <Input
                 id="vm-paid"
+                disabled={isEditMode}
                 type="number"
                 min={0}
                 step={0.001}
@@ -699,6 +706,11 @@ export default function VentesPage() {
 
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [originalDocumentNumber, setOriginalDocumentNumber] = useState<string | null>(null);
+  const [editingPaidAmount, setEditingPaidAmount] = useState(0);
+  const creationDraftRef = useRef<VenteDraft | null>(null);
+  const isEditMode = editingSaleId !== null;
 
   useEffect(() => {
     setSaleDate(new Date().toISOString());
@@ -727,6 +739,7 @@ export default function VentesPage() {
   const canEditUnitPriceHt = can(PERMISSION_EDIT_UNIT_PRICE_HT);
   const canViewDetails = can(PERMISSION_VIEW_DETAILS);
   const canDeleteSale = can(PERMISSION_DELETE_SALE);
+  const canEditSale = can(PERMISSION_UPDATE_SALE);
 
   const customersQuery = useQuery<Customer[]>({
     queryKey: ["customers"],
@@ -843,7 +856,61 @@ export default function VentesPage() {
     isEmpty: isDraftEmpty,
     onRestore: restoreDraft,
     debounceMs: 400,
+    enabled: !isEditMode,
   });
+
+  const cancelEdit = useCallback(() => {
+    const draft = creationDraftRef.current;
+    setEditingSaleId(null);
+    setOriginalDocumentNumber(null);
+    setEditingPaidAmount(0);
+    creationDraftRef.current = null;
+    if (draft) restoreDraft(draft);
+  }, [restoreDraft]);
+
+  const startEditing = useCallback(async (sale: Sale) => {
+    try {
+      const detail = await stockiniApi.sale(sale.id);
+      if (!SALES_API_DOCUMENT_TYPES.has(detail.documentType)) {
+        throw new Error("Ce type de document se modifie depuis son écran dédié.");
+      }
+      if (!editingSaleId) creationDraftRef.current = draftData;
+      const nextLines = detail.items.map((item) =>
+        recalculateSaleLine({
+          ...createEmptyLine(),
+          id: item.id || generateClientId(),
+          productId: item.productId,
+          reference: item.product?.reference ?? "",
+          designation: item.designation ?? item.product?.name ?? "",
+          quantity: Number(item.quantity),
+          puHt: Number(item.unitPrice),
+          purchasePriceHt: Number(item.product?.purchasePrice ?? 0),
+          defaultMarginPercent: Number(item.marginPercent ?? 40),
+          remisePercent: Number(item.discountPercent ?? 0),
+          tvaPercent: Number(item.tvaPercent ?? 0),
+          manualUnitPriceHt: true,
+        }),
+      );
+      setLines(nextLines.length ? nextLines : [createEmptyLine()]);
+      setCustomerId(detail.customer?.id ?? "");
+      setClientInfoName(detail.customer?.name ?? "");
+      setCounterClientName(detail.counterClientFullName ?? detail.counterClientLastName ?? "");
+      setCounterClientEmail(detail.counterClientEmail ?? "");
+      setCounterClientPhone(detail.counterClientPhone ?? "");
+      setCounterClientAddress(detail.counterClientAddress ?? "");
+      setCounterClientTaxId(detail.counterClientTaxId ?? "");
+      setCounterClientNote(detail.counterClientNote ?? "");
+      setSaleDate(detail.createdAt);
+      setActiveTab(detail.documentType);
+      setEditingPaidAmount(Number(detail.paidAmount));
+      setEditingSaleId(detail.id);
+      setOriginalDocumentNumber(detail.invoiceNumber);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error: unknown) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message ?? (error instanceof Error ? error.message : "Impossible de charger le document"));
+    }
+  }, [draftData, editingSaleId]);
 
   const salesQueryParams: SalesQueryParams = {
     page: salesPage,
@@ -1086,10 +1153,10 @@ export default function VentesPage() {
       const trimmedPhone = counterClientPhone.trim();
       const trimmedAddress = counterClientAddress.trim();
 
-      return api
-        .post<Sale>("/sales", {
+      const payload = {
           documentType: docType,
-          customerId: customerId || undefined,
+          date: saleDate,
+          customerId: customerId || null,
           clientType: isComptoir ? "COMPTOIR" : "PERSISTENT",
           counterClientFirstName: null,
           counterClientLastName: isComptoir ? trimmedName || null : null,
@@ -1111,8 +1178,10 @@ export default function VentesPage() {
             discountPercent: l.remisePercent,
             marginPercent: l.defaultMarginPercent,
           })),
-        })
-        .then((r) => r.data);
+        };
+      return editingSaleId
+        ? api.patch<Sale>(`/sales/${editingSaleId}`, payload).then((r) => r.data)
+        : api.post<Sale>("/sales", payload).then((r) => r.data);
     },
     onSuccess: (newSale) => {
       queryClient.invalidateQueries({ queryKey: ["stockini-sales"] });
@@ -1127,10 +1196,21 @@ export default function VentesPage() {
         DOC_TYPE_SHORT[(newSale as { documentType: string }).documentType] ??
         "Document";
       const num = (newSale as { invoiceNumber: string }).invoiceNumber ?? "";
-      toast.success(`Document ${typeLabel} N°${num} enregistré`);
+      toast.success(
+        editingSaleId
+          ? `Document ${num} mis à jour`
+          : `Document ${typeLabel} N°${num} enregistré`,
+      );
       setShowValidateModal(false);
-      clearDraft();
-      resetForm();
+      if (editingSaleId) {
+        cancelEdit();
+        if (selectedSaleId === editingSaleId) {
+          queryClient.invalidateQueries({ queryKey: ["sale-detail", editingSaleId] });
+        }
+      } else {
+        clearDraft();
+        resetForm();
+      }
     },
     onError: (error: unknown) => {
       if (error instanceof Error) {
@@ -1142,7 +1222,7 @@ export default function VentesPage() {
       )?.response?.data?.message;
       const text = Array.isArray(msg)
         ? msg[0]
-        : (msg ?? "Erreur lors de l'enregistrement");
+        : (msg ?? (editingSaleId ? "Erreur lors de la mise à jour" : "Erreur lors de l'enregistrement"));
       toast.error(text);
     },
   });
@@ -1444,6 +1524,16 @@ export default function VentesPage() {
         {/* All content below only shown on non-Avoir tabs */}
         {activeTab !== "AVOIR" && (
           <>
+            {isEditMode && originalDocumentNumber && (
+              <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
+                <span className="inline-flex items-center gap-2 font-medium">
+                  <Pencil size={14} /> Modification de {originalDocumentNumber}
+                </span>
+                <Button type="button" variant="outline" size="sm" onClick={cancelEdit}>
+                  Annuler modification
+                </Button>
+              </div>
+            )}
             {/* Document header: client + date */}
             <div className="rounded-lg border border-border/70 bg-white p-4 space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-[2fr_120px] gap-4">
@@ -1468,9 +1558,12 @@ export default function VentesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Date</Label>
-                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-text-secondary whitespace-nowrap">
-                    {today}
-                  </div>
+                  <Input
+                    type="date"
+                    value={saleDate ? saleDate.slice(0, 10) : ""}
+                    onChange={(event) => setSaleDate(`${event.target.value}T12:00:00.000Z`)}
+                    aria-label={`Date du document, ${today}`}
+                  />
                 </div>
               </div>
 
@@ -1781,18 +1874,20 @@ export default function VentesPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => resetForm(true)}
+                  disabled={isEditMode}
                 >
                   Réinitialiser
                 </Button>
-                {can("sales.create") && (
+                {(isEditMode ? canEditSale : can("sales.create")) && (
                   <Button
                     type="button"
                     size="sm"
                     onClick={handleValidate}
                     disabled={!canSave || createMutation.isPending}
                   >
-                    {DOC_TAB_CONFIG.find((t) => t.id === activeTab)
-                      ?.saveLabel ?? "Valider"}
+                    {isEditMode
+                      ? `Mettre à jour ${activeTab === "FACTURE" ? "la facture" : activeTab === "BON_LIVRAISON" ? "le bon de livraison" : activeTab === "BON_COMMANDE" ? "le bon de commande" : "le devis"}`
+                      : (DOC_TAB_CONFIG.find((t) => t.id === activeTab)?.saveLabel ?? "Valider")}
                   </Button>
                 )}
               </div>
@@ -2088,6 +2183,11 @@ export default function VentesPage() {
                                   {new Date(sale.createdAt).toLocaleDateString(
                                     "fr-TN",
                                   )}
+                                  {sale.isEdited && (
+                                    <span className="ml-1 inline-flex rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                                      Modifié
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="px-4 py-2.5 text-center text-xs text-slate-500">
                                   {sale.items?.length ?? 0}
@@ -2142,6 +2242,12 @@ export default function VentesPage() {
                                             hidden:
                                               !canViewDetails &&
                                               !canDeleteSale,
+                                          },
+                                          {
+                                            label: "Modifier",
+                                            icon: <Pencil size={14} />,
+                                            onClick: () => void startEditing(sale),
+                                            hidden: !canEditSale,
                                           },
                                           {
                                             label: "Voir les détails",
@@ -2355,6 +2461,8 @@ export default function VentesPage() {
                 isPending={createMutation.isPending}
                 paymentMethods={paymentMethodsQuery.data ?? []}
                 totals={totals}
+                isEditMode={isEditMode}
+                initialPaidAmount={editingPaidAmount}
                 onConfirm={(paid, method) =>
                   createMutation.mutate({ docType: activeTab, paid, method })
                 }

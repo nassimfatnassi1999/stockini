@@ -60,6 +60,9 @@ export interface CaisseMovement {
   expenseId?: string | null;
   userId?: string | null;
   createdAt: string;
+  updatedAt?: string;
+  isEdited?: boolean;
+  editedAt?: string | null;
   user?: { id: Id; fullName: string; email: string } | null;
 }
 
@@ -146,6 +149,9 @@ export interface Sale {
   sourceDocumentId?: string | null;
   transformedToId?: string | null;
   createdAt: string;
+  updatedAt?: string;
+  isEdited?: boolean;
+  editedAt?: string | null;
   customer?: Customer | null;
   clientType?: "PERSISTENT" | "COMPTOIR" | null;
   counterClientFirstName?: string | null;
@@ -193,11 +199,19 @@ export interface SaleDetail {
   paymentStatus: string | null;
   status: string;
   createdAt: string;
+  updatedAt?: string;
+  isEdited?: boolean;
+  editedAt?: string | null;
   customer?: Customer | null;
   clientType?: "PERSISTENT" | "COMPTOIR" | null;
   counterClientFirstName?: string | null;
   counterClientLastName?: string | null;
   counterClientFullName?: string | null;
+  counterClientEmail?: string | null;
+  counterClientPhone?: string | null;
+  counterClientAddress?: string | null;
+  counterClientTaxId?: string | null;
+  counterClientNote?: string | null;
   items: SaleItemDetail[];
 }
 

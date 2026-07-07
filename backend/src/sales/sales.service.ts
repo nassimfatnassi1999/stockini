@@ -156,7 +156,7 @@ export class SalesService {
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
     const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
-    const documentDate = new Date();
+    const documentDate = dto.date ? new Date(dto.date) : new Date();
     const counterClientFullName = isComptoir
       ? (dto.counterClientFirstName && dto.counterClientLastName)
         ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
@@ -755,14 +755,123 @@ export class SalesService {
     if (dto.status === SaleStatus.CANCELLED) {
       return this.cancel(id, user);
     }
-    return this.prisma.sale.update({
-      where: { id },
-      data: { status: dto.status },
-      include: {
-        customer: true,
-        items: { include: { product: true } },
-        payments: true,
-      },
+    if (!dto.items) {
+      return this.prisma.sale.update({
+        where: { id },
+        data: { status: dto.status },
+        include: { customer: true, items: { include: { product: true } }, payments: true },
+      });
+    }
+    if (!dto.items.length) {
+      throw new BadRequestException('Le document doit contenir au moins une ligne');
+    }
+    const requestedItems = dto.items;
+
+    const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
+    const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
+    const userId = user?.id;
+
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findFirst({
+        where: { id, deletedAt: null },
+        include: { items: true, payments: { where: { deletedAt: null } } },
+      });
+      if (!sale) throw new BadRequestException('Document introuvable ou placé dans la corbeille');
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('Impossible de modifier un document annulé');
+      }
+      if (dto.documentType && dto.documentType !== sale.documentType) {
+        throw new BadRequestException('Le type d’un document existant ne peut pas être changé');
+      }
+
+      const productIds = [...new Set(requestedItems.map((item) => item.productId))];
+      const products = await tx.product.findMany({ where: { id: { in: productIds }, deletedAt: null } });
+      const productsById = new Map(products.map((product) => [product.id, product]));
+      const calculated = requestedItems.map((item) => {
+        const product = productsById.get(item.productId);
+        if (!product) throw new BadRequestException(`Produit ${item.productId} introuvable`);
+        const purchasePriceHt = Number(product.purchasePrice);
+        const marginPercent = item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
+        const discountPercent = item.discountPercent ?? 0;
+        const tvaRate = Number(product.tva ?? 0);
+        const values = calculateSalesLine({ purchasePriceHt, marginPercent, discountPercent, taxPercent: tvaRate, quantity: item.quantity });
+        if (Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 && !allowEditUnitPriceHt) {
+          throw new ForbiddenException(`Vous n'avez pas la permission de modifier la marge pour "${product.name}".`);
+        }
+        if (sale.documentType !== DocumentType.DEVIS && purchasePriceHt <= 0) {
+          throw new BadRequestException(`Le produit "${product.name}" n'a pas de prix d'achat défini.`);
+        }
+        if (sale.documentType !== DocumentType.DEVIS && values.netMarginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
+          throw new BadRequestException(`Vente refusée : marge insuffisante pour "${product.name}".`);
+        }
+        return {
+          productId: item.productId,
+          designation: item.designation?.trim() || product.name,
+          quantity: item.quantity,
+          unitPrice: values.unitPriceHt,
+          discountPercent,
+          marginPercent,
+          tvaPercent: tvaRate,
+          finalUnitPrice: values.totalHt / item.quantity,
+          total: values.totalHt,
+          discountAmount: values.discountAmount,
+          taxAmount: values.taxAmount,
+        };
+      });
+
+      const subtotal = this.round3(calculated.reduce((sum, item) => sum + item.total, 0));
+      const discount = this.round3(calculated.reduce((sum, item) => sum + item.discountAmount, 0));
+      const tax = this.round3(calculated.reduce((sum, item) => sum + item.taxAmount, 0));
+      const total = this.round3(subtotal + tax);
+      const totalFinal = commercialTotalFinal(total, Number(sale.stampDuty));
+      const paidAmount = Number(sale.paidAmount);
+      if (dto.paidAmount !== undefined && Math.abs(dto.paidAmount - paidAmount) > 0.001) {
+        throw new BadRequestException('Modifiez les encaissements depuis le module Paiements');
+      }
+      if (paidAmount > totalFinal + 0.001) {
+        throw new BadRequestException('Le nouveau total ne peut pas être inférieur au montant déjà payé');
+      }
+
+      if (sale.stockImpactDone) {
+        for (const item of sale.items) {
+          await this.stockService.applyMovement(tx, { productId: item.productId, type: StockMovementType.CUSTOMER_RETURN, quantity: item.quantity, reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`, userId });
+        }
+        for (const item of calculated) {
+          const current = await tx.product.findUnique({ where: { id: item.productId }, select: { quantity: true, name: true } });
+          if (!current || current.quantity < item.quantity) {
+            throw new BadRequestException(`Stock insuffisant pour "${current?.name ?? item.designation}"`);
+          }
+          await this.stockService.applyMovement(tx, { productId: item.productId, type: StockMovementType.SALE, quantity: item.quantity, reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`, userId });
+        }
+      }
+
+      await tx.saleItem.deleteMany({ where: { saleId: id } });
+      const updated = await tx.sale.update({
+        where: { id },
+        data: {
+          customerId: dto.customerId === undefined ? sale.customerId : dto.customerId,
+          clientType: dto.clientType ?? sale.clientType,
+          counterClientFirstName: dto.counterClientFirstName,
+          counterClientLastName: dto.counterClientLastName,
+          counterClientFullName: dto.counterClientFullName,
+          counterClientEmail: dto.counterClientEmail,
+          counterClientPhone: dto.counterClientPhone,
+          counterClientAddress: dto.counterClientAddress,
+          counterClientTaxId: dto.counterClientTaxId,
+          counterClientNote: dto.counterClientNote,
+          ...(dto.date && { createdAt: new Date(dto.date) }),
+          subtotal, discount, tax, total,
+          remainingAmount: this.round3(Math.max(totalFinal - paidAmount, 0)),
+          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType) ? this.paymentStatus(totalFinal, paidAmount) : null,
+          isEdited: true,
+          editedAt: new Date(),
+          items: { create: calculated.map(({ discountAmount: _discountAmount, taxAmount: _taxAmount, ...item }) => item) },
+        },
+        include: { customer: true, items: { include: { product: true } }, payments: true },
+      });
+
+      await this.auditLogs.audit({ action: 'sale.updated', entity: 'Sale', entityId: id, userId, userName: user?.email, oldValue: { total: Number(sale.total), itemCount: sale.items.length }, newValue: { total, itemCount: calculated.length }, metadata: { invoiceNumber: sale.invoiceNumber, documentType: sale.documentType } }, tx);
+      return updated;
     });
   }
 

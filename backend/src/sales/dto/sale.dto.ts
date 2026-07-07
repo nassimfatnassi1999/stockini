@@ -75,6 +75,10 @@ export class CreateSaleDto {
   documentType!: DocumentType;
 
   @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
   @IsBoolean()
   reserveStock?: boolean;
 
@@ -157,11 +161,45 @@ export class TransformDocumentDto {
   targetType!: DocumentType;
 }
 
-/** Only status changes are allowed via PATCH. Financial state is managed through payment endpoints. */
 export class UpdateSaleDto {
   @IsOptional()
   @IsEnum(SaleStatus)
   status?: SaleStatus;
+
+  @IsOptional()
+  @IsIn(SALES_DOCUMENT_TYPES)
+  documentType?: DocumentType;
+
+  @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string | null;
+
+  @IsOptional()
+  @IsIn(['PERSISTENT', 'COMPTOIR'])
+  clientType?: 'PERSISTENT' | 'COMPTOIR';
+
+  @IsOptional() @IsString() counterClientFirstName?: string | null;
+  @IsOptional() @IsString() counterClientLastName?: string | null;
+  @IsOptional() @IsString() counterClientFullName?: string | null;
+  @IsOptional() @IsEmail() counterClientEmail?: string | null;
+  @IsOptional() @IsString() counterClientPhone?: string | null;
+  @IsOptional() @IsString() counterClientAddress?: string | null;
+  @IsOptional() @IsString() counterClientTaxId?: string | null;
+  @IsOptional() @IsString() counterClientNote?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateSaleItemDto)
+  items?: CreateSaleItemDto[];
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) discount?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) paidAmount?: number;
+  @IsOptional() @IsEnum(PaymentMethod) paymentMethod?: PaymentMethod;
 }
 
 export class SalePaginationDto {
