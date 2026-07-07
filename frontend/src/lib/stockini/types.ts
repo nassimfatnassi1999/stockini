@@ -233,6 +233,9 @@ export interface Purchase {
   status: string;
   documentType: PurchaseDocumentType;
   createdAt: string;
+  updatedAt?: string;
+  isEdited?: boolean;
+  editedAt?: string | null;
   supplier?: Supplier | null;
   items?: Array<{
     id: Id;
@@ -250,11 +253,16 @@ export interface PurchaseItemDetail {
   quantity: number;
   receivedQuantity: number;
   unitCost: number | string;
+  designation?: string | null;
+  discountPercent?: number | string;
+  tvaPercent?: number | string | null;
   total: number | string;
   product?: {
     id: Id;
     reference: string;
     name: string;
+    purchasePrice?: number | string;
+    tva?: number | string;
   } | null;
 }
 
@@ -277,6 +285,9 @@ export interface PurchaseDetail {
   status: string;
   documentType: PurchaseDocumentType;
   createdAt: string;
+  updatedAt?: string;
+  isEdited?: boolean;
+  editedAt?: string | null;
   supplier?: Supplier | null;
   items: PurchaseItemDetail[];
 }

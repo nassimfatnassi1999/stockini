@@ -43,17 +43,20 @@ export class PurchasesService {
       throw new BadRequestException('Purchase must include at least one item');
     }
 
-    const items = dto.items.map((item) => ({
-      productId: item.productId,
-      quantity: item.quantity,
-      unitCost: item.unitCost,
-      total: item.quantity * item.unitCost,
-    }));
-    const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-    const discount = dto.discount ?? 0;
-    const tax = dto.tax ?? 0;
-    const total = subtotal - discount + tax;
-    const stampDuty = DEFAULT_STAMP_DUTY;
+    const items = dto.items.map((item) => {
+      const gross = item.quantity * item.unitCost;
+      const discountAmount = gross * ((item.discountPercent ?? 0) / 100);
+      const netHt = gross - discountAmount;
+      const taxAmount = netHt * ((item.tvaPercent ?? 0) / 100);
+      return { productId: item.productId, designation: item.designation?.trim(), quantity: item.quantity, unitCost: item.unitCost, discountPercent: item.discountPercent ?? 0, tvaPercent: item.tvaPercent ?? 0, total: netHt, discountAmount, taxAmount };
+    });
+    const hasLinePricing = dto.items.some((item) => item.discountPercent !== undefined || item.tvaPercent !== undefined);
+    const grossSubtotal = dto.items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
+    const subtotal = hasLinePricing ? items.reduce((sum, item) => sum + item.total, 0) : grossSubtotal - (dto.discount ?? 0);
+    const discount = hasLinePricing ? items.reduce((sum, item) => sum + item.discountAmount, 0) : (dto.discount ?? 0);
+    const tax = hasLinePricing ? items.reduce((sum, item) => sum + item.taxAmount, 0) : (dto.tax ?? 0);
+    const total = subtotal + tax;
+    const stampDuty = dto.stampDuty ?? DEFAULT_STAMP_DUTY;
     const totalFinal = commercialTotalFinal(total, stampDuty);
 
     // All purchases start UNPAID — payments go through /payments/purchases/:id/pay
@@ -74,7 +77,8 @@ export class PurchasesService {
           status: PurchaseStatus.ORDERED,
           documentType: PurchaseDocumentType.BON_COMMANDE,
           createdById,
-          items: { create: items },
+          ...(dto.date && { createdAt: new Date(dto.date) }),
+          items: { create: items.map(({ discountAmount: _discountAmount, taxAmount: _taxAmount, ...item }) => item) },
         },
         include: { supplier: true, items: true },
       });
@@ -237,12 +241,10 @@ export class PurchasesService {
         supplierReference: purchase.supplierReference,
         items: purchase.items.map((item) => ({
           reference: item.product?.reference ?? '—',
-          name: item.product?.name ?? '—',
+          name: item.designation ?? item.product?.name ?? '—',
           quantity: item.quantity,
           unitPrice: Number(item.unitCost),
-          tvaPercent: Number(purchase.tax) > 0 && Number(purchase.subtotal) > 0
-            ? (Number(purchase.tax) / Math.max(Number(purchase.subtotal) - Number(purchase.discount), 0.001)) * 100
-            : 0,
+          tvaPercent: Number(item.tvaPercent ?? 0),
           total: Number(item.total),
         })),
       },
@@ -460,9 +462,88 @@ export class PurchasesService {
     if (dto.status) {
       await this.settings.assertActiveOption('purchase_statuses', dto.status);
     }
-    const previous = await this.prisma.purchase.findFirstOrThrow({
-      where: { id, deletedAt: null },
-    });
+    if (dto.items) {
+      if (!dto.items.length) throw new BadRequestException('L’achat doit contenir au moins une ligne');
+      const requestedItems = dto.items;
+      return this.prisma.$transaction(async (tx) => {
+        const previous = await tx.purchase.findFirst({
+          where: { id, deletedAt: null },
+          include: { items: true, payments: { where: { deletedAt: null } } },
+        });
+        if (!previous) throw new BadRequestException('Achat introuvable ou placé dans la corbeille');
+        if (previous.status === PurchaseStatus.CANCELLED) throw new BadRequestException('Impossible de modifier un achat annulé');
+        if (dto.documentType && dto.documentType !== previous.documentType) throw new BadRequestException('Le type d’un achat existant ne peut pas être changé');
+        const oldById = new Map(previous.items.map((item) => [item.id, item]));
+        for (const item of requestedItems) {
+          if (item.id && !oldById.has(item.id)) throw new BadRequestException(`Ligne d’achat ${item.id} introuvable`);
+        }
+        const products = await tx.product.findMany({ where: { id: { in: [...new Set(requestedItems.map((item) => item.productId))] }, deletedAt: null } });
+        const productsById = new Map(products.map((product) => [product.id, product]));
+        const calculated = requestedItems.map((item) => {
+          const product = productsById.get(item.productId);
+          if (!product) throw new BadRequestException(`Produit ${item.productId} introuvable`);
+          const gross = item.quantity * item.unitCost;
+          const discountAmount = gross * ((item.discountPercent ?? 0) / 100);
+          const netHt = gross - discountAmount;
+          const taxAmount = netHt * ((item.tvaPercent ?? Number(product.tva ?? 0)) / 100);
+          const old = item.id ? oldById.get(item.id) : undefined;
+          const receivedQuantity = previous.documentType === PurchaseDocumentType.BON_RECEPTION && previous.status === PurchaseStatus.RECEIVED
+            ? item.quantity
+            : Math.min(old?.receivedQuantity ?? 0, item.quantity);
+          return { id: item.id, productId: item.productId, designation: item.designation?.trim() || product.name, quantity: item.quantity, receivedQuantity, unitCost: item.unitCost, discountPercent: item.discountPercent ?? 0, tvaPercent: item.tvaPercent ?? Number(product.tva ?? 0), total: netHt, discountAmount, taxAmount };
+        });
+
+        const desiredByOldId = new Map(calculated.filter((item) => item.id).map((item) => [item.id!, item]));
+        for (const old of previous.items) {
+          const desired = desiredByOldId.get(old.id);
+          const nextReceived = desired?.receivedQuantity ?? 0;
+          const delta = nextReceived - old.receivedQuantity;
+          if (desired && desired.productId !== old.productId && old.receivedQuantity > 0) {
+            await this.stockService.applyMovement(tx, { productId: old.productId, type: StockMovementType.SUPPLIER_RETURN, quantity: old.receivedQuantity, reason: `Modification achat ${previous.orderNumber}`, userId });
+            if (desired.receivedQuantity > 0) await this.stockService.applyMovement(tx, { productId: desired.productId, type: StockMovementType.PURCHASE_RECEPTION, quantity: desired.receivedQuantity, reason: `Modification achat ${previous.orderNumber}`, userId });
+          } else {
+            if (delta > 0) await this.stockService.applyMovement(tx, { productId: desired!.productId, type: StockMovementType.PURCHASE_RECEPTION, quantity: delta, reason: `Modification achat ${previous.orderNumber}`, userId });
+            if (delta < 0) await this.stockService.applyMovement(tx, { productId: old.productId, type: StockMovementType.SUPPLIER_RETURN, quantity: -delta, reason: `Modification achat ${previous.orderNumber}`, userId });
+          }
+        }
+        for (const item of calculated.filter((entry) => !entry.id && entry.receivedQuantity > 0)) {
+          await this.stockService.applyMovement(tx, { productId: item.productId, type: StockMovementType.PURCHASE_RECEPTION, quantity: item.receivedQuantity, reason: `Modification achat ${previous.orderNumber}`, userId });
+        }
+
+        const subtotal = calculated.reduce((sum, item) => sum + item.total, 0);
+        const discount = calculated.reduce((sum, item) => sum + item.discountAmount, 0);
+        const tax = calculated.reduce((sum, item) => sum + item.taxAmount, 0);
+        const total = subtotal + tax;
+        const stampDuty = dto.stampDuty ?? Number(previous.stampDuty);
+        const totalFinal = commercialTotalFinal(total, stampDuty);
+        const paidAmount = Number(previous.paidAmount);
+        if (dto.paidAmount !== undefined && Math.abs(dto.paidAmount - paidAmount) > 0.001) throw new BadRequestException('Modifiez les paiements depuis l’action Payer');
+        if (paidAmount > totalFinal + 0.001) throw new BadRequestException('Le nouveau total ne peut pas être inférieur au montant déjà payé');
+        const nextStatus = previous.documentType === PurchaseDocumentType.BON_RECEPTION
+          ? calculated.every((item) => item.receivedQuantity >= item.quantity)
+            ? PurchaseStatus.RECEIVED
+            : calculated.some((item) => item.receivedQuantity > 0)
+              ? PurchaseStatus.PARTIALLY_RECEIVED
+              : PurchaseStatus.ORDERED
+          : previous.status;
+
+        const keptIds = calculated.flatMap((item) => item.id ? [item.id] : []);
+        await tx.purchaseItem.deleteMany({ where: { purchaseId: id, ...(keptIds.length ? { id: { notIn: keptIds } } : {}) } });
+        for (const item of calculated) {
+          const data = { productId: item.productId, designation: item.designation, quantity: item.quantity, receivedQuantity: item.receivedQuantity, unitCost: item.unitCost, discountPercent: item.discountPercent, tvaPercent: item.tvaPercent, total: item.total };
+          if (item.id) await tx.purchaseItem.update({ where: { id: item.id }, data });
+          else await tx.purchaseItem.create({ data: { purchaseId: id, ...data } });
+        }
+        const updated = await tx.purchase.update({
+          where: { id },
+          data: { supplierId: dto.supplierId ?? previous.supplierId, supplierReference: dto.supplierReference === undefined ? previous.supplierReference : this.optionalReference(dto.supplierReference), ...(dto.date && { createdAt: new Date(dto.date) }), subtotal, discount, tax, total, stampDuty, remainingAmount: Math.max(totalFinal - paidAmount, 0), paymentStatus: this.paymentStatus(totalFinal, paidAmount), status: nextStatus, isEdited: true, editedAt: new Date() },
+          include: { supplier: true, items: { include: { product: true } }, payments: true },
+        });
+        await this.auditLogs.audit({ action: 'purchase.updated', entity: 'Purchase', entityId: id, userId, oldValue: { total: Number(previous.total), itemCount: previous.items.length }, newValue: { total, itemCount: calculated.length }, metadata: { orderNumber: previous.orderNumber } }, tx);
+        return updated;
+      });
+    }
+    const previous = await this.prisma.purchase.findFirstOrThrow({ where: { id, deletedAt: null } });
     const updated = await this.prisma.purchase.update({
       where: { id },
       data: {

@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, Pencil, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { stockiniApi } from '@/lib/stockini/api';
@@ -42,6 +42,7 @@ interface AchatDraft {
   commandeLineMap: Record<string, { purchaseItemId: string; maxQty: number }>;
   purchaseDate: string;
   supplierReference: string;
+  stampDuty: string;
 }
 
 function round3(v: number) {
@@ -123,6 +124,7 @@ export default function AchatsPage() {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString());
   const [supplierReference, setSupplierReference] = useState('');
+  const [stampDuty, setStampDuty] = useState('1');
   const [showHistory, setShowHistory] = useState(true);
   // Only an explicit selection in the source-order picker may replace form
   // lines. A docType change can enable the query, but must never hydrate it.
@@ -147,6 +149,10 @@ export default function AchatsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
+  const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
+  const [originalPurchaseNumber, setOriginalPurchaseNumber] = useState<string | null>(null);
+  const creationDraftRef = useRef<AchatDraft | null>(null);
+  const isEditMode = editingPurchaseId !== null;
 
   const suppliersQuery = useQuery<Supplier[]>({
     queryKey: ['stockini-suppliers'],
@@ -179,8 +185,8 @@ export default function AchatsPage() {
   });
 
   const draftData = useMemo<AchatDraft>(
-    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate, supplierReference }),
-    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate, supplierReference],
+    () => ({ docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate, supplierReference, stampDuty }),
+    [docType, receptionMode, lines, supplierId, paidAmount, paymentMethod, selectedCommandeId, commandeLineMap, purchaseDate, supplierReference, stampDuty],
   );
   const restoreDraft = useCallback((draft: AchatDraft) => {
     setDocType(draft.docType ?? 'BON_COMMANDE');
@@ -206,6 +212,7 @@ export default function AchatsPage() {
     setCommandeLineMap(draft.commandeLineMap ?? {});
     setPurchaseDate(draft.purchaseDate ?? new Date().toISOString());
     setSupplierReference(draft.supplierReference ?? '');
+    setStampDuty(draft.stampDuty ?? '1');
     explicitCommandeLoadRef.current = null;
   }, []);
   const isDraftEmpty = useCallback(
@@ -215,7 +222,8 @@ export default function AchatsPage() {
       !draft.paidAmount &&
       !draft.paymentMethod &&
       !draft.selectedCommandeId &&
-      !draft.supplierReference,
+      !draft.supplierReference &&
+      (!draft.stampDuty || draft.stampDuty === '1'),
     [],
   );
   const { clearDraft, status: draftStatus } = useFormDraft<AchatDraft>({
@@ -224,7 +232,53 @@ export default function AchatsPage() {
     isEmpty: isDraftEmpty,
     onRestore: restoreDraft,
     debounceMs: 400,
+    enabled: !isEditMode,
   });
+
+  const cancelEdit = useCallback(() => {
+    const draft = creationDraftRef.current;
+    setEditingPurchaseId(null);
+    setOriginalPurchaseNumber(null);
+    creationDraftRef.current = null;
+    if (draft) restoreDraft(draft);
+  }, [restoreDraft]);
+
+  const startEditing = useCallback(async (purchase: Purchase) => {
+    try {
+      const detail = await stockiniApi.purchase(purchase.id);
+      if (!editingPurchaseId) creationDraftRef.current = draftData;
+      const nextType: PurchaseDocType = detail.documentType === 'FACTURE_FOURNISSEUR' ? 'FACTURE' : detail.documentType;
+      setDocType(nextType);
+      setReceptionMode('LIBRE');
+      setSelectedCommandeId('');
+      setCommandeLineMap({});
+      setSupplierId(detail.supplier?.id ?? '');
+      setSupplierReference(detail.supplierReference ?? '');
+      setPurchaseDate(detail.createdAt);
+      setStampDuty(String(Number(detail.stampDuty)));
+      setPaidAmount(String(Number(detail.paidAmount) || ''));
+      setPaymentMethod('');
+      setLines(detail.items.map((item) => recalculateLine({
+        ...createEmptyLine(),
+        id: item.id,
+        productId: item.productId,
+        reference: item.product?.reference ?? '',
+        designation: item.designation ?? item.product?.name ?? '',
+        quantity: Number(item.quantity),
+        puHt: Number(item.unitCost),
+        purchasePriceHt: Number(item.unitCost),
+        remisePercent: Number(item.discountPercent ?? 0),
+        tvaPercent: Number(item.tvaPercent ?? item.product?.tva ?? 0),
+        manualUnitPriceHt: true,
+      })));
+      setEditingPurchaseId(detail.id);
+      setOriginalPurchaseNumber(detail.orderNumber);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error: unknown) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message ?? (error instanceof Error ? error.message : "Impossible de charger l'achat"));
+    }
+  }, [draftData, editingPurchaseId]);
 
   const commandesToReceptionner = purchasesList.filter(
     (p) => p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED',
@@ -296,6 +350,8 @@ export default function AchatsPage() {
   const filledLines = lines.filter(isFilledLine);
   const totals = calculateDocumentTotals(lines);
   const paidAmountNum = Number(paidAmount) || 0;
+  const stampDutyNum = Math.max(Number(stampDuty) || 0, 0);
+  const totalToPay = round3(totals.totalTtc + stampDutyNum);
 
   const hasQtyOverrun =
     isFromCommande &&
@@ -322,17 +378,12 @@ export default function AchatsPage() {
     setCommandeLineMap({});
     setPurchaseDate(new Date().toISOString());
     setSupplierReference('');
+    setStampDuty('1');
     clearDraft();
     if (notify) toast.success('Brouillon supprimé.');
   };
 
   const handleDocTypeChange = (nextType: PurchaseDocType) => {
-    console.log('DOC SWITCH', {
-      from: docType,
-      to: nextType,
-      linesBefore: lines.length,
-      linesPreview: lines,
-    });
     setDocType(nextType);
   };
 
@@ -385,15 +436,29 @@ export default function AchatsPage() {
 
       const payload = {
         supplierId,
+        date: purchaseDate,
         discount: round3(totals.totalRemise),
         tax: round3(totals.totalTva),
+        stampDuty: stampDutyNum,
         supplierReference,
         items: filledLines.map((l) => ({
+          id: isEditMode ? l.id : undefined,
           productId: l.productId!,
+          designation: l.designation.trim() || undefined,
           quantity: l.quantity,
           unitCost: round3(l.puHt),
+          discountPercent: l.remisePercent,
+          tvaPercent: l.tvaPercent,
         })),
       };
+
+      if (editingPurchaseId) {
+        return stockiniApi.updatePurchaseDocument(editingPurchaseId, {
+          ...payload,
+          documentType: docType === 'FACTURE' ? 'FACTURE_FOURNISSEUR' : docType,
+          paidAmount: paidAmountNum,
+        });
+      }
 
       const purchase = await stockiniApi.createPurchase(payload);
 
@@ -408,7 +473,7 @@ export default function AchatsPage() {
 
       return purchase;
     },
-    onSuccess: () => {
+    onSuccess: (updatedPurchase) => {
       queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-movements'] });
@@ -419,7 +484,9 @@ export default function AchatsPage() {
         queryClient.invalidateQueries({ queryKey: ['stockini-purchase', selectedCommandeId] });
       }
 
-      const label = isFromCommande
+      const label = editingPurchaseId
+        ? `Achat ${updatedPurchase.orderNumber} mis à jour`
+        : isFromCommande
         ? 'Réception validée — stock mis à jour, paiement à effectuer'
         : docType === 'BON_COMMANDE'
           ? 'Bon de commande créé'
@@ -427,8 +494,13 @@ export default function AchatsPage() {
             ? 'Bon de réception validé — stock mis à jour, paiement à effectuer'
             : 'Facture enregistrée';
       toast.success(label);
-      clearDraft();
-      resetForm();
+      if (editingPurchaseId) {
+        queryClient.invalidateQueries({ queryKey: ['stockini-purchase', editingPurchaseId] });
+        cancelEdit();
+      } else {
+        clearDraft();
+        resetForm();
+      }
     },
     onError: (error: unknown) => {
       if (error instanceof Error) {
@@ -438,7 +510,7 @@ export default function AchatsPage() {
       const msg = (
         error as { response?: { data?: { message?: string | string[] } } }
       )?.response?.data?.message;
-      const text = Array.isArray(msg) ? msg[0] : (msg ?? "Erreur lors de l'enregistrement");
+      const text = Array.isArray(msg) ? msg[0] : (msg ?? (editingPurchaseId ? 'Erreur lors de la mise à jour' : "Erreur lors de l'enregistrement"));
       toast.error(text);
     },
   });
@@ -476,7 +548,9 @@ export default function AchatsPage() {
   const selectedCommandeSupplier = commandeDetailQuery.data?.supplier?.name;
 
   const saveButtonLabel = createMutation.isPending
-    ? 'Enregistrement…'
+    ? (isEditMode ? 'Mise à jour…' : 'Enregistrement…')
+    : isEditMode
+      ? `Mettre à jour ${docType === 'FACTURE' ? 'la facture fournisseur' : docType === 'BON_RECEPTION' ? 'le bon de réception' : 'le bon de commande'}`
     : isFromCommande
       ? 'Valider la réception et mettre à jour le stock'
       : activeConfig.saveLabel;
@@ -517,6 +591,13 @@ export default function AchatsPage() {
           })}
         </div>
       </div>
+
+      {isEditMode && originalPurchaseNumber && (
+        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
+          <span className="inline-flex items-center gap-2 font-medium"><Pencil size={14} /> Modification de {originalPurchaseNumber}</span>
+          <Button type="button" variant="outline" size="sm" onClick={cancelEdit}>Annuler modification</Button>
+        </div>
+      )}
 
       {/* Active document type indicator */}
       <div className={`rounded-lg border px-4 py-2 text-sm font-medium ${activeConfig.color}`}>
@@ -617,9 +698,7 @@ export default function AchatsPage() {
           </div>
           <div className="space-y-1.5">
             <Label>Date</Label>
-            <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-text-secondary whitespace-nowrap">
-              {today}
-            </div>
+            <Input type="date" value={purchaseDate.slice(0, 10)} onChange={(event) => setPurchaseDate(`${event.target.value}T12:00:00.000Z`)} aria-label={`Date de l'achat, ${today}`} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="supplier-reference">Référence fournisseur</Label>
@@ -656,6 +735,10 @@ export default function AchatsPage() {
       <div className="rounded-lg border border-border/70 bg-white p-4">
         <div className="flex flex-wrap gap-4 items-end justify-between">
           <div className="flex flex-wrap gap-3 items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="purchase-stamp-duty">Timbre fiscal (DT)</Label>
+              <Input id="purchase-stamp-duty" type="number" min={0} step={0.001} value={stampDuty} onChange={(event) => setStampDuty(event.target.value)} className="w-32" />
+            </div>
             {docType === 'FACTURE' && (
               <>
                 <div className="space-y-1.5">
@@ -669,6 +752,7 @@ export default function AchatsPage() {
                     onChange={(e) => setPaidAmount(e.target.value)}
                     placeholder="0.000"
                     className="w-36"
+                    disabled={isEditMode}
                   />
                 </div>
                 {paidAmountNum > 0 && (
@@ -692,11 +776,17 @@ export default function AchatsPage() {
               </>
             )}
           </div>
+          <div className="grid min-w-[260px] grid-cols-2 gap-x-5 gap-y-1 text-xs tabular-nums text-text-secondary">
+            <span>Total HT</span><span className="text-right">{money(totals.totalHt)}</span>
+            <span>TVA</span><span className="text-right">{money(totals.totalTva)}</span>
+            <span>Total TTC</span><span className="text-right">{money(totals.totalTtc)}</span>
+            <span className="font-semibold text-text-primary">Total à payer</span><span className="text-right font-semibold text-text-primary">{money(totalToPay)}</span>
+          </div>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => resetForm(true)}>
+            <Button type="button" variant="outline" size="sm" onClick={() => resetForm(true)} disabled={isEditMode}>
               Réinitialiser
             </Button>
-            {can('purchases.create') && (
+            {(isEditMode ? can('purchases.update') : can('purchases.create')) && (
               <Button
                 type="button"
                 size="sm"
@@ -802,6 +892,9 @@ export default function AchatsPage() {
                       </td>
                       <td className="px-4 py-3 text-text-secondary text-xs">
                         {new Date(purchase.createdAt).toLocaleDateString('fr-TN')}
+                        {purchase.isEdited && (
+                          <span className="ml-1 inline-flex rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">· Modifié</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center text-text-secondary">
                         {purchase.items?.length ?? 0}
@@ -830,6 +923,12 @@ export default function AchatsPage() {
                       <td className="px-4 py-3">
                         <KebabMenu
                           items={[
+                            {
+                              label: 'Modifier',
+                              icon: <Pencil size={14} />,
+                              onClick: () => void startEditing(purchase),
+                              hidden: !can('purchases.update'),
+                            },
                             {
                               label: 'Voir les détails',
                               icon: <Eye size={14} />,
@@ -1009,7 +1108,7 @@ function PurchaseDetailsModal({
             <tbody className="divide-y divide-border/40">
               {data.items.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-3 py-2">{item.product?.name ?? item.productId}</td>
+                  <td className="px-3 py-2">{item.designation ?? item.product?.name ?? item.productId}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{item.quantity}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     <span className={item.receivedQuantity >= item.quantity ? 'text-emerald-600 font-semibold' : item.receivedQuantity > 0 ? 'text-yellow-600' : 'text-text-muted'}>

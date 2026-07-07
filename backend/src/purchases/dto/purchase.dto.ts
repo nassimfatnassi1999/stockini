@@ -12,11 +12,12 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { PaymentStatus, PurchaseStatus } from '@prisma/client';
+import { PaymentStatus, PurchaseDocumentType, PurchaseStatus } from '@prisma/client';
 
 export type PurchaseTransformTarget = 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR';
 
 export class CreatePurchaseItemDto {
+  @IsOptional() @IsString() id?: string;
   @IsString()
   productId!: string;
 
@@ -29,11 +30,19 @@ export class CreatePurchaseItemDto {
   @IsNumber()
   @Min(0)
   unitCost!: number;
+
+  @IsOptional() @IsString() designation?: string;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100) discountPercent?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100) tvaPercent?: number;
 }
 
 export class CreatePurchaseDto {
   @IsString()
   supplierId!: string;
+
+  @IsOptional() @IsDateString() date?: string;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) stampDuty?: number;
 
   @IsOptional()
   @IsString()
@@ -96,6 +105,17 @@ export class UpdatePurchaseDto {
   @IsOptional()
   @IsString()
   supplierReference?: string;
+
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsDateString() date?: string;
+  @IsOptional() @IsEnum(PurchaseDocumentType) documentType?: PurchaseDocumentType;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) stampDuty?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) paidAmount?: number;
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePurchaseItemDto)
+  items?: CreatePurchaseItemDto[];
 }
 
 /**

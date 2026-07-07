@@ -208,6 +208,8 @@ export const stockiniApi = {
     api.get<Blob>(`/purchases/${id}/pdf`, { responseType: 'blob' }).then((r) => r.data),
   createPurchase: (data: unknown) =>
     api.post<Purchase>("/purchases", data).then((r) => r.data),
+  updatePurchaseDocument: (id: string, data: unknown) =>
+    api.patch<Purchase>(`/purchases/${id}`, data).then((r) => r.data),
   receivePurchase: (
     id: string,
     items: Array<{ purchaseItemId: string; quantity: number }>,

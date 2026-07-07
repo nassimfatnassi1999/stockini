@@ -1,0 +1,8 @@
+ALTER TABLE "Purchase"
+ADD COLUMN "isEdited" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "editedAt" TIMESTAMP(3);
+
+ALTER TABLE "PurchaseItem"
+ADD COLUMN "designation" TEXT,
+ADD COLUMN "discountPercent" DECIMAL(5,2) NOT NULL DEFAULT 0,
+ADD COLUMN "tvaPercent" DECIMAL(5,2);
