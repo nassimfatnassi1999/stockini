@@ -73,7 +73,6 @@ export interface PdfCompanyInfo {
   phone?: string;
   email?: string;
   taxNumber?: string;
-  logoUrl?: string;
   bankRib?: string;
 }
 
@@ -95,13 +94,6 @@ const ROW_PAD_V = 4;
 const INFO_ROW_H = 15;
 const INFO_PAD = 8;
 const DEFAULT_COMPANY = 'Moumna spare part';
-const LOGO_TIMEOUT_MS = 5000;
-const ACCEPTED_LOGO_MIME_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/svg+xml',
-]);
 
 const DOC_TITLES: Record<DocumentType | PurchaseDocumentType, string> = {
   DEVIS: 'DEVIS',
@@ -135,161 +127,33 @@ function fmtDateTime(d: Date | string): string {
 
 type LogoSource = string | null;
 
-function mimeTypeFromDataUri(dataUri: string): string | null {
-  const match = /^data:([^;,]+);base64,/i.exec(dataUri.trim());
-  return match?.[1]?.toLowerCase() ?? null;
-}
-
-function isAcceptedLogoMimeType(contentType: string | null): contentType is string {
-  if (!contentType) return false;
-  return ACCEPTED_LOGO_MIME_TYPES.has(contentType.split(';')[0].trim().toLowerCase());
-}
-
-function googleDriveDirectUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname !== 'drive.google.com') return url;
-
-    const fileMatch = parsed.pathname.match(/^\/file\/d\/([^/]+)/);
-    const fileId = fileMatch?.[1] ?? parsed.searchParams.get('id');
-    if (!fileId) return url;
-
-    return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
-  } catch {
-    return url;
-  }
-}
-
-function warnLogoFailure(reason: string): void {
-  console.warn('Unable to load company logo:');
-  console.warn(`Reason: ${reason}`);
-}
-
 function dataUriToBuffer(dataUri: string): Buffer | null {
   const match = /^data:[^;,]+;base64,(.*)$/i.exec(dataUri.trim());
   if (!match) return null;
   return Buffer.from(match[1], 'base64');
 }
 
-function fileToDataUri(filePath: string): string | null {
-  if (!fs.existsSync(filePath)) return null;
-  const ext = path.extname(filePath).toLowerCase();
-  const mimeType =
-    ext === '.png' ? 'image/png'
-      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-        : ext === '.webp' ? 'image/webp'
-          : ext === '.svg' ? 'image/svg+xml'
-            : null;
-  if (!isAcceptedLogoMimeType(mimeType)) return null;
-  return `data:${mimeType};base64,${fs.readFileSync(filePath).toString('base64')}`;
-}
-
-function resolveLogoPath(): string | null {
-  const candidates = [
-    path.join(__dirname, '..', '..', '..', 'public', 'assets', 'MSP.png'),
-    path.join(process.cwd(), 'public', 'assets', 'MSP.png'),
-    path.join(__dirname, '..', 'public', 'assets', 'MSP.png'),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
-function resolvePublicLogoPath(logoUrl: string): string | null {
-  const normalized = logoUrl.trim();
-  if (!normalized || normalized.startsWith('http://') || normalized.startsWith('https://')) return null;
-  if (normalized.startsWith('data:')) return null;
-
-  const cleanPath = normalized.replace(/^\/+/, '');
-  const candidates = path.isAbsolute(normalized)
-    ? [normalized]
-    : [
-        path.join(process.cwd(), cleanPath),
-        path.join(process.cwd(), 'public', cleanPath.replace(/^public\/?/, '')),
-        path.join(__dirname, '..', '..', '..', cleanPath),
-      ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-export async function loadCompanyLogo(url: string): Promise<string | null> {
-  const originalUrl = url.trim();
-  if (!originalUrl) return null;
-
-  const existingMimeType = mimeTypeFromDataUri(originalUrl);
-  if (existingMimeType) {
-    if (!isAcceptedLogoMimeType(existingMimeType)) {
-      warnLogoFailure(`Unsupported Content-Type: ${existingMimeType}`);
-      return null;
-    }
-    return originalUrl;
-  }
-
-  const convertedUrl = googleDriveDirectUrl(originalUrl);
-  console.log('Loading company logo...');
-  console.log(`Original URL: ${originalUrl}`);
-  console.log(`Converted URL: ${convertedUrl}`);
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LOGO_TIMEOUT_MS);
+export function loadLocalCompanyLogo(): string | null {
+  const logoPath = path.join(
+    process.cwd(),
+    'assets',
+    'company-logo.png',
+  );
 
   try {
-    const response = await fetch(convertedUrl, { signal: controller.signal });
-    const contentType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? null;
-    const arrayBuffer = await response.arrayBuffer();
-    const bytes = Buffer.byteLength(Buffer.from(arrayBuffer));
-
-    console.log(`HTTP Status: ${response.status}`);
-    console.log(`Content-Type: ${contentType ?? ''}`);
-    console.log(`Bytes: ${bytes}`);
-
-    if (!response.ok) {
-      warnLogoFailure(`HTTP ${response.status}`);
-      return null;
-    }
-    if (!isAcceptedLogoMimeType(contentType)) {
-      warnLogoFailure(`Unsupported Content-Type: ${contentType ?? 'unknown'}`);
-      return null;
-    }
-    if (bytes === 0) {
-      warnLogoFailure('Empty response body');
+    if (!fs.existsSync(logoPath)) {
+      console.warn(`Company logo not found at ${logoPath}. PDF will be generated without a logo.`);
       return null;
     }
 
-    return `data:${contentType};base64,${Buffer.from(arrayBuffer).toString('base64')}`;
+    const logoBuffer = fs.readFileSync(logoPath);
+    return `data:image/png;base64,${logoBuffer.toString('base64')}`;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    warnLogoFailure(reason);
+    console.warn('Unable to load local company logo:');
+    console.warn(`Reason: ${reason}`);
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
-}
-
-async function resolveCompanyLogo(company: PdfCompanyInfo): Promise<LogoSource> {
-  const configuredLogo = company.logoUrl?.trim();
-
-  if (configuredLogo?.startsWith('data:')) {
-    return loadCompanyLogo(configuredLogo);
-  }
-
-  if (configuredLogo) {
-    const localLogoPath = resolvePublicLogoPath(configuredLogo);
-    if (localLogoPath) {
-      const localLogo = fileToDataUri(localLogoPath);
-      if (localLogo) return localLogo;
-    }
-
-    const remoteLogo = await loadCompanyLogo(configuredLogo);
-    if (remoteLogo) return remoteLogo;
-  }
-
-  const bundledLogoPath = resolveLogoPath();
-  return bundledLogoPath ? fileToDataUri(bundledLogoPath) : null;
 }
 
 function numberToFrenchWords(n: number): string {
@@ -408,7 +272,8 @@ function drawFirstPageHeader(
       doc.image(imageSource, logoX, headerTop, { fit: [logoW, docBlockH], align: 'right', valign: 'center' });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      warnLogoFailure(reason);
+      console.warn('Unable to render local company logo:');
+      console.warn(`Reason: ${reason}`);
     }
   }
 
@@ -727,12 +592,12 @@ const SALE_HEADERS = ['Num', 'Désignation', 'Qté', 'PU HT', 'NET HT', 'TVA%', 
 export class PdfService {
   // ── Sale documents (DEVIS / BON_COMMANDE / BON_LIVRAISON / FACTURE) ──────────
 
-  async generateSaleDocument(
+  generateSaleDocument(
     sale: PdfSaleData,
     documentType: DocumentType | PurchaseDocumentType,
     company: PdfCompanyInfo = {},
   ): Promise<Buffer> {
-    const logoSource = await resolveCompanyLogo(company);
+    const logoSource = loadLocalCompanyLogo();
 
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -877,11 +742,11 @@ export class PdfService {
 
   // ── Avoir documents ───────────────────────────────────────────────────────────
 
-  async generateAvoirDocument(
+  generateAvoirDocument(
     avoir: PdfAvoirData,
     company: PdfCompanyInfo = {},
   ): Promise<Buffer> {
-    const logoSource = await resolveCompanyLogo(company);
+    const logoSource = loadLocalCompanyLogo();
 
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];

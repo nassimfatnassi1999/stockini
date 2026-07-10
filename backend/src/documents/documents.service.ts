@@ -1030,10 +1030,6 @@ export class DocumentsService {
         map['matricule_fiscal'] ??
         process.env.COMPANY_TAX_ID ??
         undefined,
-      logoUrl:
-        map['company_logo_url'] ??
-        process.env.COMPANY_LOGO_URL ??
-        undefined,
       bankRib:
         map['company_bank_rib']?.trim() ||
         map['bank_rib']?.trim() ||
