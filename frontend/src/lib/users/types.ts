@@ -2,13 +2,15 @@ export type UserRole =
   | 'ADMIN'
   | 'STOCK_MANAGER'
   | 'SELLER'
-  | 'PURCHASE_MANAGER';
+  | 'PURCHASE_MANAGER'
+  | 'CASHIER';
 
 export const USER_ROLES: { value: UserRole; label: string }[] = [
   { value: 'ADMIN', label: 'Administrateur' },
   { value: 'STOCK_MANAGER', label: 'Responsable stock' },
   { value: 'SELLER', label: 'Vendeur' },
   { value: 'PURCHASE_MANAGER', label: 'Responsable achats' },
+  { value: 'CASHIER', label: 'Caissier' },
 ];
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -16,6 +18,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   STOCK_MANAGER: 'Responsable stock',
   SELLER: 'Vendeur',
   PURCHASE_MANAGER: 'Responsable achats',
+  CASHIER: 'Caissier',
 };
 
 export interface UserRoleInfo {

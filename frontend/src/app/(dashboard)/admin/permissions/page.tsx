@@ -42,6 +42,7 @@ const ROLES = [
   { value: 'STOCK_MANAGER',    label: 'Responsable stock' },
   { value: 'SELLER',           label: 'Vendeur' },
   { value: 'PURCHASE_MANAGER', label: 'Responsable achats' },
+  { value: 'CASHIER',          label: 'Caissier' },
 ];
 
 // Display order for module sections — covers ALL sidebar sections

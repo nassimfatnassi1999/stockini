@@ -15,6 +15,7 @@ export const VALID_ROLES = [
   'STOCK_MANAGER',
   'SELLER',
   'PURCHASE_MANAGER',
+  'CASHIER',
 ] as const;
 
 export class CreateUserDto {

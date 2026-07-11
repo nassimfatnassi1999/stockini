@@ -22,6 +22,7 @@ import {
   Trash2,
   Truck,
   UserCog,
+  UserRound,
   Users,
   Wallet,
   Building2,
@@ -43,6 +44,7 @@ interface NavItem {
   label: string;
   permission: string;
   badge?: string;
+  cashierOnly?: boolean;
 }
 
 interface NavSection {
@@ -52,6 +54,13 @@ interface NavSection {
 }
 
 const NAV_SECTIONS: NavSection[] = [
+  {
+    id: 'account',
+    title: 'Compte',
+    items: [
+      { label: 'Profil', href: '/profil', icon: UserRound, permission: 'dashboard.view', cashierOnly: true },
+    ],
+  },
   {
     id: 'operations',
     title: 'Opérations',
@@ -148,9 +157,15 @@ export function AppSidebar() {
 
   const identity = displayName ?? email ?? 'Utilisateur';
   const initials = getInitials(identity);
-  const roleLabel = ['SUPER_ADMIN', 'super_admin'].includes(role ?? '')
-    ? 'Gérant · Admin'
-    : (role?.replace(/_/g, ' ') ?? 'Utilisateur');
+  const roleLabels: Record<string, string> = {
+    ADMIN: 'Administrateur',
+    SUPER_ADMIN: 'Gérant · Admin',
+    STOCK_MANAGER: 'Responsable stock',
+    SELLER: 'Vendeur',
+    PURCHASE_MANAGER: 'Responsable achats',
+    CASHIER: 'Caissier',
+  };
+  const roleLabel = roleLabels[role ?? ''] ?? (role?.replace(/_/g, ' ') ?? 'Utilisateur');
   const isCollapsedDesktop = !isMobile && collapsed;
 
   const closeMobileOnNavigate = () => {
@@ -211,7 +226,13 @@ export function AppSidebar() {
   }
 
   function renderSection(section: NavSection) {
-    const visibleItems = section.items.filter((item) => can(item.permission));
+    const cashierHrefs = new Set(['/dashboard', '/paiements', '/caisse', '/clients', '/documents', '/profil']);
+    const isCashier = role?.toUpperCase() === 'CASHIER';
+    const visibleItems = section.items.filter((item) =>
+      can(item.permission)
+      && (!item.cashierOnly || isCashier)
+      && (!isCashier || cashierHrefs.has(item.href)),
+    );
     if (!visibleItems.length) return null;
 
     const isSectionCollapsed = collapsedSections.has(section.id) && !isCollapsedDesktop;

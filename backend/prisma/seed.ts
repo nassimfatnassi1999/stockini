@@ -83,6 +83,21 @@ async function main() {
       ],
     },
     {
+      // Caissier — encaissements, consultation clients/factures et opérations de caisse
+      name: 'CASHIER',
+      permissions: [
+        'dashboard.view',
+        // Clients et factures (lecture uniquement)
+        'clients.view',
+        'sales.view', 'sales.view_details', 'sales.print',
+        'documents.view', 'documents.download',
+        // Encaissements clients
+        'payments.view', 'payments.create', 'payments.receive_client_payment',
+        // Caisse (mouvements et opérations, sans administration)
+        'caisse.view', 'caisse.operate', 'caisse.close',
+      ],
+    },
+    {
       // Responsable achats — fournisseurs, achats, stock réception, paiements fournisseurs
       name: 'PURCHASE_MANAGER',
       permissions: [

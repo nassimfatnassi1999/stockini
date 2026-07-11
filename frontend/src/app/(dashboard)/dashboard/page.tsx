@@ -1,5 +1,5 @@
-import { SimpleDashboard } from '@/components/stockini/SimpleDashboard';
+import { DashboardContent } from '@/components/stockini/DashboardContent';
 
 export default function DashboardPage() {
-  return <SimpleDashboard />;
+  return <DashboardContent />;
 }

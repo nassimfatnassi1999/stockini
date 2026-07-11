@@ -41,6 +41,8 @@ const badgeVariants = cva(
           'border-app-accent/20 bg-app-accent/10 text-app-accent',
         purchase:
           'border-app-secondary/20 bg-app-secondary/10 text-app-secondary',
+        cashier:
+          'border-emerald-300 bg-emerald-50 text-emerald-700',
       },
     },
     defaultVariants: {

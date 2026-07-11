@@ -10,6 +10,12 @@ import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 
 const ROLE_LABELS: Record<string, string> = {
+  ADMIN: 'Administrateur',
+  SUPER_ADMIN: 'Gérant · Admin',
+  STOCK_MANAGER: 'Responsable stock',
+  SELLER: 'Vendeur',
+  PURCHASE_MANAGER: 'Responsable achats',
+  CASHIER: 'Caissier',
   super_admin: 'Super Admin',
   admin: 'Administrateur',
   direction: 'Direction',
