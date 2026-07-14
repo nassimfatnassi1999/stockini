@@ -245,6 +245,7 @@ export class SalesService {
           designation: item.designation?.trim() || product.name,
           quantity: item.quantity,
           unitPrice,
+          unitPurchaseCostHTSnapshot: purchasePriceHt,
           tvaRate,
           discountPercent,
           marginPercent,

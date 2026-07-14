@@ -1,7 +1,7 @@
 'use client';
 
-import { StockiniDashboardPage } from './DashboardPage';
+import { AnalyticsDashboard } from '../AnalyticsDashboard';
 
 export function ReportsPage() {
-  return <StockiniDashboardPage />;
+  return <AnalyticsDashboard />;
 }

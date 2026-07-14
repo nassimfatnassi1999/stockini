@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
   CaisseMovementType,
+  CreditNoteStatus,
   DocumentType,
+  ExpenseStatus,
   PaymentStatus,
   PaymentType,
   PurchaseStatus,
@@ -221,6 +223,10 @@ const STOCK_EXIT_TYPES = [
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private round3(value: number): number {
+    return Math.round((value + Number.EPSILON) * 1000) / 1000;
+  }
+
   async getOverview(query: ReportOverviewQueryDto) {
     const period = query.period ?? 'month';
     const range = resolveReportDateRange(period, query.dateFrom, query.dateTo);
@@ -229,8 +235,9 @@ export class ReportsService {
 
     const salesFilter = {
       documentType: { in: REVENUE_DOC_TYPES },
-      status: { not: SaleStatus.CANCELLED },
+      status: { notIn: [SaleStatus.DRAFT, SaleStatus.CANCELLED] },
       deletedAt: null as null,
+      transformedToId: null as null,
     };
 
     const purchasesFilter = {
@@ -419,10 +426,11 @@ export class ReportsService {
 
     // ── Time-series ───────────────────────────────────────────────────────────
     const series = await this.buildTimeSeries(buckets, salesFilter, purchasesFilter);
+    const analytics = await this.computeFinancialAnalytics(range, prevRange, salesFilter);
 
     // ── Scalar KPIs ───────────────────────────────────────────────────────────
-    const caNet = num(salesAgg._sum.total) + num(salesAgg._sum.stampDuty) - num(salesAgg._sum.totalRefunded);
-    const prevCaNet = num(prevSalesAgg._sum.total) + num(prevSalesAgg._sum.stampDuty) - num(prevSalesAgg._sum.totalRefunded);
+    const caNet = analytics.summary.netRevenueHT;
+    const prevCaNet = analytics.previous.netRevenueHT;
     const totalAchats = num(purchasesAgg._sum.total) + num(purchasesAgg._sum.stampDuty);
     const panierMoyen = salesAgg._count > 0 ? caNet / salesAgg._count : 0;
 
@@ -473,24 +481,25 @@ export class ReportsService {
     const clientById = new Map(topClientDetails.map((c) => [c.id, c]));
     const supplierById = new Map(supplierDetails.map((s) => [s.id, s]));
 
-    const benefice = caNet - totalAchats;
-    const marge = caNet > 0 ? +(((benefice / caNet) * 100).toFixed(2)) : 0;
+    const benefice = analytics.summary.netProfit;
+    const marge = analytics.summary.markupOnRevenue;
 
     return {
       period,
       range: { from: range.gte.toISOString(), to: range.lte.toISOString() },
 
       financier: {
+        ...analytics.summary,
         caNet: +caNet.toFixed(3),
-        caGross: +(num(salesAgg._sum.total) + num(salesAgg._sum.stampDuty)).toFixed(3),
+        caGross: +analytics.summary.grossRevenueHT.toFixed(3),
         caTrend: trend(caNet, prevCaNet),
         encaissementsClients: +num(customerPaymentsAgg._sum.amount).toFixed(3),
-        impayesClients: +num(salesAgg._sum.remainingAmount).toFixed(3),
+        impayesClients: +analytics.summary.customerOutstanding.toFixed(3),
         totalAchats: +totalAchats.toFixed(3),
         achatsTrend: trend(totalAchats, num(prevPurchasesAgg._sum.total) + num(prevPurchasesAgg._sum.stampDuty)),
         paiementsFournisseurs: +num(supplierPaymentsAgg._sum.amount).toFixed(3),
-        impayesFournisseurs: +num(purchasesAgg._sum.remainingAmount).toFixed(3),
-        depenses: +num(depensesAgg._sum.montant).toFixed(3),
+        impayesFournisseurs: +analytics.summary.supplierOutstanding.toFixed(3),
+        depenses: +analytics.summary.operatingExpenses.toFixed(3),
         beneficeEstime: +benefice.toFixed(3),
         margePercent: marge,
         soldeCaisse: +num(caisseConfig?.solde).toFixed(3),
@@ -559,6 +568,9 @@ export class ReportsService {
         quantitySold: num(item._sum.quantity),
         revenue: +num(item._sum.total).toFixed(3),
       })),
+      profitParVente: analytics.profitBySale,
+      profitParProduit: analytics.profitByProduct,
+      profitParClient: analytics.profitByCustomer,
 
       topClients: topClientSales.map((item) => ({
         customer: clientById.get(item.customerId!) ?? null,
@@ -624,6 +636,338 @@ export class ReportsService {
         };
       }),
     );
+  }
+
+  private async computeFinancialAnalytics(
+    range: { gte: Date; lte: Date },
+    prevRange: { gte: Date; lte: Date },
+    salesFilter: Record<string, unknown>,
+  ) {
+    const build = async (dateRange: { gte: Date; lte: Date }) => {
+      const [
+        sales,
+        creditNotes,
+        customerPayments,
+        supplierOutstanding,
+        operatingExpenses,
+      ] = await Promise.all([
+        this.prisma.sale.findMany({
+          where: { ...salesFilter, createdAt: dateRange },
+          include: {
+            customer: { select: { id: true, name: true, reference: true } },
+            items: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    reference: true,
+                    name: true,
+                    quantity: true,
+                    purchasePrice: true,
+                    category: { select: { name: true } },
+                    brand: { select: { name: true } },
+                  },
+                },
+              },
+            },
+          },
+        }),
+        this.prisma.creditNote.findMany({
+          where: {
+            statut: { not: CreditNoteStatus.CANCELLED },
+            dateAvoir: dateRange,
+          },
+          include: {
+            items: {
+              include: {
+                saleItem: {
+                  select: {
+                    unitPurchaseCostHTSnapshot: true,
+                    product: { select: { purchasePrice: true } },
+                  },
+                },
+              },
+            },
+          },
+        }),
+        this.prisma.payment.aggregate({
+          where: {
+            type: PaymentType.CUSTOMER_PAYMENT,
+            cashImpactDone: true,
+            deletedAt: null,
+            createdAt: dateRange,
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.purchase.aggregate({
+          where: {
+            status: { notIn: [PurchaseStatus.CANCELLED] },
+            deletedAt: null,
+          },
+          _sum: { remainingAmount: true },
+        }),
+        this.prisma.expense.aggregate({
+          where: {
+            status: ExpenseStatus.ACTIVE,
+            expenseDate: dateRange,
+          },
+          _sum: { amount: true },
+        }),
+      ]);
+
+      const saleRows = sales.map((sale) => {
+        let quantitySold = 0;
+        let grossRevenueHT = 0;
+        let netRevenueHT = 0;
+        let discountsHT = 0;
+        let cogsHT = 0;
+        let hasEstimatedCost = false;
+
+        for (const item of sale.items) {
+          const quantity = item.quantity;
+          const unitGrossHT = num(item.unitPrice);
+          const lineNetHT = num(item.total);
+          const snapshot = item.unitPurchaseCostHTSnapshot;
+          const unitCost = snapshot == null
+            ? num(item.product?.purchasePrice)
+            : num(snapshot);
+
+          quantitySold += quantity;
+          grossRevenueHT += unitGrossHT * quantity;
+          netRevenueHT += lineNetHT;
+          discountsHT += Math.max(unitGrossHT * quantity - lineNetHT, 0);
+          cogsHT += unitCost * quantity;
+          hasEstimatedCost = hasEstimatedCost || snapshot == null;
+        }
+
+        const grossMarginHT = netRevenueHT - cogsHT;
+        const paidAmount = num(sale.paidAmount);
+        const remainingAmount = num(sale.remainingAmount);
+        return {
+          id: sale.id,
+          date: sale.createdAt.toISOString(),
+          reference: sale.invoiceNumber,
+          client: sale.customer?.name ?? sale.counterClientFullName ?? 'Client comptoir',
+          itemsCount: sale.items.length,
+          quantitySold,
+          netRevenueHT: this.round3(netRevenueHT),
+          cogsHT: this.round3(cogsHT),
+          grossMarginHT: this.round3(grossMarginHT),
+          grossMarginRate: cogsHT > 0 ? this.round3((grossMarginHT / cogsHT) * 100) : 0,
+          netProfit: this.round3(grossMarginHT),
+          paymentStatus: sale.paymentStatus,
+          paidAmount: this.round3(paidAmount),
+          remainingAmount: this.round3(remainingAmount),
+          hasEstimatedCost,
+          grossRevenueHT,
+          discountsHT,
+          tax: num(sale.tax),
+          stampDuty: num(sale.stampDuty),
+          revenueTTC: num(sale.total) + num(sale.stampDuty),
+        };
+      });
+
+      const creditNotesHT = creditNotes.reduce((sum, note) => sum + num(note.subtotal), 0);
+      const creditNotesTTC = creditNotes.reduce(
+        (sum, note) => sum + num(note.total) + num(note.stampDuty),
+        0,
+      );
+      const returnedCOGS = creditNotes.reduce((sum, note) => {
+        return sum + note.items.reduce((itemSum, item) => {
+          const snapshot = item.saleItem?.unitPurchaseCostHTSnapshot;
+          const unitCost = snapshot == null
+            ? num(item.saleItem?.product?.purchasePrice)
+            : num(snapshot);
+          return itemSum + unitCost * item.quantiteRetournee;
+        }, 0);
+      }, 0);
+
+      const grossRevenueHT = saleRows.reduce((sum, sale) => sum + sale.grossRevenueHT, 0);
+      const revenueHTBeforeCreditNotes = saleRows.reduce((sum, sale) => sum + sale.netRevenueHT, 0);
+      const discountsHT = saleRows.reduce((sum, sale) => sum + sale.discountsHT, 0);
+      const vatCollected = saleRows.reduce((sum, sale) => sum + sale.tax, 0);
+      const fiscalStampCollected = saleRows.reduce((sum, sale) => sum + sale.stampDuty, 0);
+      const revenueTTC = saleRows.reduce((sum, sale) => sum + sale.revenueTTC, 0) - creditNotesTTC;
+      const cogsHT = saleRows.reduce((sum, sale) => sum + sale.cogsHT, 0);
+      const adjustedCOGS = Math.max(cogsHT - returnedCOGS, 0);
+      const netRevenueHT = revenueHTBeforeCreditNotes - creditNotesHT;
+      const grossMarginHT = netRevenueHT - adjustedCOGS;
+      const operatingExpensesAmount = num(operatingExpenses._sum.amount);
+      const netProfit = grossMarginHT - operatingExpensesAmount;
+      const quantitySold = saleRows.reduce((sum, sale) => sum + sale.quantitySold, 0);
+      const customerOutstanding = saleRows.reduce((sum, sale) => sum + sale.remainingAmount, 0);
+
+      const productMap = new Map<string, {
+        product: {
+          id: string;
+          reference: string;
+          name: string;
+          category: string | null;
+          brand: string | null;
+          stockActuel: number;
+        };
+        quantitySold: number;
+        revenueHT: number;
+        cogsHT: number;
+        discountsHT: number;
+        salesCount: Set<string>;
+        hasEstimatedCost: boolean;
+      }>();
+
+      const clientMap = new Map<string, {
+        customer: { id: string | null; name: string; reference: string | null };
+        salesCount: number;
+        revenueHT: number;
+        grossMarginHT: number;
+        paidAmount: number;
+        outstanding: number;
+        lastSale: string;
+      }>();
+
+      for (const sale of sales) {
+        const clientKey = sale.customer?.id ?? `counter:${sale.counterClientFullName ?? sale.id}`;
+        const clientEntry = clientMap.get(clientKey) ?? {
+          customer: {
+            id: sale.customer?.id ?? null,
+            name: sale.customer?.name ?? sale.counterClientFullName ?? 'Client comptoir',
+            reference: sale.customer?.reference ?? null,
+          },
+          salesCount: 0,
+          revenueHT: 0,
+          grossMarginHT: 0,
+          paidAmount: 0,
+          outstanding: 0,
+          lastSale: sale.createdAt.toISOString(),
+        };
+        clientEntry.salesCount += 1;
+        clientEntry.paidAmount += num(sale.paidAmount);
+        clientEntry.outstanding += num(sale.remainingAmount);
+        clientEntry.lastSale = sale.createdAt > new Date(clientEntry.lastSale)
+          ? sale.createdAt.toISOString()
+          : clientEntry.lastSale;
+
+        for (const item of sale.items) {
+          const unitGrossHT = num(item.unitPrice);
+          const lineNetHT = num(item.total);
+          const snapshot = item.unitPurchaseCostHTSnapshot;
+          const unitCost = snapshot == null
+            ? num(item.product?.purchasePrice)
+            : num(snapshot);
+          const lineCOGS = unitCost * item.quantity;
+          const lineMargin = lineNetHT - lineCOGS;
+          const productId = item.productId;
+          const entry = productMap.get(productId) ?? {
+            product: {
+              id: productId,
+              reference: item.product?.reference ?? '',
+              name: item.designation ?? item.product?.name ?? 'Produit inconnu',
+              category: item.product?.category?.name ?? null,
+              brand: item.product?.brand?.name ?? null,
+              stockActuel: item.product?.quantity ?? 0,
+            },
+            quantitySold: 0,
+            revenueHT: 0,
+            cogsHT: 0,
+            discountsHT: 0,
+            salesCount: new Set<string>(),
+            hasEstimatedCost: false,
+          };
+          entry.quantitySold += item.quantity;
+          entry.revenueHT += lineNetHT;
+          entry.cogsHT += lineCOGS;
+          entry.discountsHT += Math.max(unitGrossHT * item.quantity - lineNetHT, 0);
+          entry.salesCount.add(sale.id);
+          entry.hasEstimatedCost = entry.hasEstimatedCost || snapshot == null;
+          productMap.set(productId, entry);
+
+          clientEntry.revenueHT += lineNetHT;
+          clientEntry.grossMarginHT += lineMargin;
+        }
+        clientMap.set(clientKey, clientEntry);
+      }
+
+      const profitByProduct = Array.from(productMap.values())
+        .map((entry) => {
+          const margin = entry.revenueHT - entry.cogsHT;
+          const averageUnitMargin = entry.quantitySold > 0 ? margin / entry.quantitySold : 0;
+          const marginRate = entry.cogsHT > 0 ? (margin / entry.cogsHT) * 100 : 0;
+          const markupOnRevenue = entry.revenueHT > 0 ? (margin / entry.revenueHT) * 100 : 0;
+          const profitability = entry.hasEstimatedCost
+            ? 'cout_estime'
+            : margin < 0
+              ? 'vendu_a_perte'
+              : markupOnRevenue < 10
+                ? 'faible_marge'
+                : markupOnRevenue < 25
+                  ? 'rentable'
+                  : 'tres_rentable';
+          return {
+            product: entry.product,
+            quantitySold: entry.quantitySold,
+            revenueHT: this.round3(entry.revenueHT),
+            cogsHT: this.round3(entry.cogsHT),
+            grossMarginHT: this.round3(margin),
+            averageUnitMargin: this.round3(averageUnitMargin),
+            grossMarginRate: this.round3(marginRate),
+            averageSalePriceHT: this.round3(entry.quantitySold > 0 ? entry.revenueHT / entry.quantitySold : 0),
+            averageDiscountHT: this.round3(entry.quantitySold > 0 ? entry.discountsHT / entry.quantitySold : 0),
+            salesCount: entry.salesCount.size,
+            profitability,
+            hasEstimatedCost: entry.hasEstimatedCost,
+          };
+        })
+        .sort((a, b) => b.grossMarginHT - a.grossMarginHT);
+
+      const profitByCustomer = Array.from(clientMap.values())
+        .map((entry) => ({
+          customer: entry.customer,
+          salesCount: entry.salesCount,
+          revenueHT: this.round3(entry.revenueHT),
+          grossMarginHT: this.round3(entry.grossMarginHT),
+          netProfit: this.round3(entry.grossMarginHT),
+          paidAmount: this.round3(entry.paidAmount),
+          outstanding: this.round3(entry.outstanding),
+          averageOrderValueHT: this.round3(entry.salesCount > 0 ? entry.revenueHT / entry.salesCount : 0),
+          lastSale: entry.lastSale,
+        }))
+        .sort((a, b) => b.grossMarginHT - a.grossMarginHT);
+
+      return {
+        summary: {
+          salesCount: sales.length,
+          quantitySold,
+          grossRevenueHT: this.round3(grossRevenueHT),
+          discountsHT: this.round3(discountsHT),
+          creditNotesHT: this.round3(creditNotesHT),
+          netRevenueHT: this.round3(netRevenueHT),
+          vatCollected: this.round3(vatCollected),
+          fiscalStampCollected: this.round3(fiscalStampCollected),
+          revenueTTC: this.round3(revenueTTC),
+          cogsHT: this.round3(adjustedCOGS),
+          grossMarginHT: this.round3(grossMarginHT),
+          operatingExpenses: this.round3(operatingExpensesAmount),
+          netProfit: this.round3(netProfit),
+          grossMarginRate: adjustedCOGS > 0 ? this.round3((grossMarginHT / adjustedCOGS) * 100) : 0,
+          markupOnRevenue: netRevenueHT > 0 ? this.round3((grossMarginHT / netRevenueHT) * 100) : 0,
+          netProfitRate: netRevenueHT > 0 ? this.round3((netProfit / netRevenueHT) * 100) : 0,
+          averageOrderValueHT: sales.length > 0 ? this.round3(netRevenueHT / sales.length) : 0,
+          averageProfitPerSale: sales.length > 0 ? this.round3(netProfit / sales.length) : 0,
+          customerPayments: this.round3(num(customerPayments._sum.amount)),
+          customerOutstanding: this.round3(customerOutstanding),
+          supplierOutstanding: this.round3(num(supplierOutstanding._sum.remainingAmount)),
+          estimatedCostLines: saleRows.filter((sale) => sale.hasEstimatedCost).length,
+          hasEstimatedCosts: saleRows.some((sale) => sale.hasEstimatedCost),
+        },
+        profitBySale: saleRows
+          .map(({ grossRevenueHT: _grossRevenueHT, discountsHT: _discountsHT, tax: _tax, stampDuty: _stampDuty, revenueTTC: _revenueTTC, ...sale }) => sale)
+          .sort((a, b) => b.netProfit - a.netProfit),
+        profitByProduct,
+        profitByCustomer,
+      };
+    };
+
+    const [current, previous] = await Promise.all([build(range), build(prevRange)]);
+    return { ...current, previous: previous.summary };
   }
 
   // ─── Legacy endpoints ─────────────────────────────────────────────────────────
