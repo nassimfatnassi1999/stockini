@@ -35,7 +35,7 @@ function buildService() {
   };
   const references = {} as any;
   const customers = { getTotalClientDebt: jest.fn() } as any;
-  const auditLogs = { create: jest.fn(), audit: jest.fn().mockResolvedValue(undefined) } as any;
+  const auditLogs = { create: jest.fn() } as any;
   return { service: new CaisseService(prisma, references, customers, auditLogs), prisma };
 }
 

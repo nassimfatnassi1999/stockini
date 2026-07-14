@@ -112,8 +112,8 @@ function buildGlobalCards(summary: CashSummary, periodLabel: string): KpiCardPro
     { label: 'Dettes clients', value: summary.totalClientDebt ?? 0, icon: AlertCircle, color: (summary.totalClientDebt ?? 0) > 0 ? 'text-orange-600' : 'text-text-muted', bg: (summary.totalClientDebt ?? 0) > 0 ? 'bg-orange-50' : 'bg-slate-50' },
     { label: `Entrées — ${periodLabel}`, value: summary.entrees, icon: ArrowUpCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: `Sorties — ${periodLabel}`, value: summary.sorties, icon: ArrowDownCircle, color: 'text-red-500', bg: 'bg-red-50' },
-    { label: `Flux net — ${periodLabel}`, value: summary.profitPeriode, icon: summary.profitPeriode >= 0 ? TrendingUp : TrendingDown, color: summary.profitPeriode >= 0 ? 'text-emerald-600' : 'text-red-500', bg: summary.profitPeriode >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true },
-    { label: 'Flux net du mois', value: summary.profitMois, icon: CalendarDays, color: summary.profitMois >= 0 ? 'text-violet-600' : 'text-red-500', bg: 'bg-violet-50', positive: true },
+    { label: `Profit — ${periodLabel}`, value: summary.profitPeriode, icon: summary.profitPeriode >= 0 ? TrendingUp : TrendingDown, color: summary.profitPeriode >= 0 ? 'text-emerald-600' : 'text-red-500', bg: summary.profitPeriode >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true },
+    { label: 'Profit mois', value: summary.profitMois, icon: CalendarDays, color: summary.profitMois >= 0 ? 'text-violet-600' : 'text-red-500', bg: 'bg-violet-50', positive: true },
   ];
 }
 
@@ -125,10 +125,10 @@ function buildAccountCards(acc: AccountSummary, solde: number, periodLabel: stri
     { label: isCash ? 'Solde caisse physique' : 'Solde banque / virements', value: solde, icon: Icon, color: soldeColor, bg: soldeBg },
     { label: `Entrées — ${periodLabel}`, value: acc.entrees, icon: ArrowUpCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: `Sorties — ${periodLabel}`, value: acc.sorties, icon: ArrowDownCircle, color: 'text-red-500', bg: 'bg-red-50' },
-    { label: `Flux net — ${periodLabel}`, value: acc.profit, icon: acc.profit >= 0 ? TrendingUp : TrendingDown, color: acc.profit >= 0 ? 'text-emerald-600' : 'text-red-500', bg: acc.profit >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true },
-    { label: 'Flux net semaine', value: acc.profitSemaine, icon: CalendarDays, color: acc.profitSemaine >= 0 ? 'text-sky-600' : 'text-red-500', bg: 'bg-sky-50', positive: true },
-    { label: 'Flux net mois', value: acc.profitMois, icon: CalendarDays, color: acc.profitMois >= 0 ? 'text-violet-600' : 'text-red-500', bg: 'bg-violet-50', positive: true },
-    { label: 'Flux net année', value: acc.profitAnnee, icon: TrendingUp, color: acc.profitAnnee >= 0 ? 'text-amber-600' : 'text-red-500', bg: 'bg-amber-50', positive: true },
+    { label: `Profit — ${periodLabel}`, value: acc.profit, icon: acc.profit >= 0 ? TrendingUp : TrendingDown, color: acc.profit >= 0 ? 'text-emerald-600' : 'text-red-500', bg: acc.profit >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true },
+    { label: 'Profit semaine', value: acc.profitSemaine, icon: CalendarDays, color: acc.profitSemaine >= 0 ? 'text-sky-600' : 'text-red-500', bg: 'bg-sky-50', positive: true },
+    { label: 'Profit mois', value: acc.profitMois, icon: CalendarDays, color: acc.profitMois >= 0 ? 'text-violet-600' : 'text-red-500', bg: 'bg-violet-50', positive: true },
+    { label: 'Profit année', value: acc.profitAnnee, icon: TrendingUp, color: acc.profitAnnee >= 0 ? 'text-amber-600' : 'text-red-500', bg: 'bg-amber-50', positive: true },
   ];
 }
 

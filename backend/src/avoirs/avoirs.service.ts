@@ -105,11 +105,7 @@ export class AvoirsService {
             quantiteAnnulee: cancelledQuantity,
             quantiteRetournable:
               item.quantity - alreadyReturned - cancelledQuantity,
-            unitPrice: item.finalUnitPrice != null
-              ? Number(item.finalUnitPrice)
-              : item.total != null
-                ? Number(item.total) / item.quantity
-                : Number(item.unitPrice) * (1 - Number(item.discountPercent ?? 0) / 100),
+            unitPrice: Number(item.unitPrice),
             tvaRate: Number(item.product?.tva ?? 19),
             total: Number(item.total),
           };
@@ -251,12 +247,7 @@ export class AvoirsService {
             );
           }
 
-          // An avoir rembourse le prix net réellement facturé, jamais le prix brut avant remise.
-          const unitPriceHt = saleItem.finalUnitPrice != null
-            ? Number(saleItem.finalUnitPrice)
-            : saleItem.total != null
-              ? Number(saleItem.total) / saleItem.quantity
-              : Number(saleItem.unitPrice) * (1 - Number(saleItem.discountPercent ?? 0) / 100);
+          const unitPriceHt = Number(saleItem.unitPrice);
           const tvaRate = Number(saleItem.tvaPercent ?? saleItem.product?.tva ?? 19);
           const lineTotals = calculateCreditNoteLineTotals({
             quantity: dtoItem.quantiteRetournee,
@@ -330,7 +321,6 @@ export class AvoirsService {
                 totalHt: item.totalHt,
                 totalTtc: item.totalTtc,
                 motifLigne: item.motifLigne,
-                stockRestocked: item.restock,
               })),
             },
           },

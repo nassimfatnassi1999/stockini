@@ -29,7 +29,6 @@ import { SystemMonitorModule } from './system-monitor/system-monitor.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
 import { CommercialDocumentInterceptor } from './common/interceptors/commercial-document.interceptor';
-import { FinancialAnalyticsModule } from './financial-analytics/financial-analytics.module';
 
 @Module({
   imports: [
@@ -59,7 +58,6 @@ import { FinancialAnalyticsModule } from './financial-analytics/financial-analyt
     AdminModule,
     DatabaseModule,
     SystemMonitorModule,
-    FinancialAnalyticsModule,
   ],
   controllers: [AppController],
   providers: [

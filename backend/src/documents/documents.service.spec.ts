@@ -21,7 +21,6 @@ const sale = {
   discount: 0,
   tax: 19,
   total: 119,
-  stampDuty: 1,
   items: [],
   seller: null,
 };

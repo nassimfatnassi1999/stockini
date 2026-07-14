@@ -677,32 +677,6 @@ export interface ReportTimeSeries {
   benefice: number;
 }
 
-export interface FinancialSummary {
-  salesCount: number;
-  quantitySold: number;
-  grossRevenueHT: number;
-  discountsHT: number;
-  creditNotesHT: number;
-  netRevenueHT: number;
-  vatCollected: number;
-  fiscalStampCollected: number;
-  revenueTTC: number;
-  cogsHT: number;
-  grossMarginHT: number;
-  operatingExpenses: number;
-  netProfit: number;
-  grossMarginRate: number;
-  markupOnRevenue: number;
-  netProfitRate: number;
-  averageOrderValueHT: number;
-  averageProfitPerSale: number;
-  customerPayments: number;
-  customerOutstanding: number;
-  supplierOutstanding: number;
-  estimatedCostLines: number;
-  hasEstimatedCosts: boolean;
-}
-
 export interface ReportCriticalProduct {
   id: string;
   name: string;
@@ -752,86 +726,11 @@ export interface ReportTopSupplier {
   impaye: number;
 }
 
-export interface ProfitBySale {
-  id: string;
-  date: string;
-  reference: string;
-  client: string;
-  itemsCount: number;
-  quantitySold: number;
-  netRevenueHT: number;
-  cogsHT: number;
-  grossMarginHT: number;
-  grossMarginRate: number;
-  netProfit: number;
-  paymentStatus: string | null;
-  paidAmount: number;
-  remainingAmount: number;
-  hasEstimatedCost: boolean;
-}
-
-export interface ProfitByProduct {
-  product: {
-    id: string;
-    reference: string;
-    name: string;
-    category: string | null;
-    brand: string | null;
-    stockActuel: number;
-  };
-  quantitySold: number;
-  revenueHT: number;
-  cogsHT: number;
-  grossMarginHT: number;
-  averageUnitMargin: number;
-  grossMarginRate: number;
-  averageSalePriceHT: number;
-  averageDiscountHT: number;
-  salesCount: number;
-  profitability: 'tres_rentable' | 'rentable' | 'faible_marge' | 'vendu_a_perte' | 'cout_estime';
-  hasEstimatedCost: boolean;
-}
-
-export interface ProfitByCustomer {
-  customer: { id: string | null; name: string; reference: string | null };
-  salesCount: number;
-  revenueHT: number;
-  grossMarginHT: number;
-  netProfit: number;
-  paidAmount: number;
-  outstanding: number;
-  averageOrderValueHT: number;
-  lastSale: string;
-}
-
 export interface ReportOverview {
   period: ReportPeriod;
   range: { from: string; to: string };
 
   financier: {
-    salesCount: number;
-    quantitySold: number;
-    grossRevenueHT: number;
-    discountsHT: number;
-    creditNotesHT: number;
-    netRevenueHT: number;
-    vatCollected: number;
-    fiscalStampCollected: number;
-    revenueTTC: number;
-    cogsHT: number;
-    grossMarginHT: number;
-    operatingExpenses: number;
-    netProfit: number;
-    grossMarginRate: number;
-    markupOnRevenue: number;
-    netProfitRate: number;
-    averageOrderValueHT: number;
-    averageProfitPerSale: number;
-    customerPayments: number;
-    customerOutstanding: number;
-    supplierOutstanding: number;
-    estimatedCostLines: number;
-    hasEstimatedCosts: boolean;
     caNet: number;
     caGross: number;
     caTrend: number | null;
@@ -886,9 +785,6 @@ export interface ReportOverview {
   topProduits: ReportTopProduct[];
   topClients: ReportTopClient[];
   topFournisseurs: ReportTopSupplier[];
-  profitParVente: ProfitBySale[];
-  profitParProduit: ProfitByProduct[];
-  profitParClient: ProfitByCustomer[];
   series: ReportTimeSeries[];
 }
 

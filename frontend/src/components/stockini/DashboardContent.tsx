@@ -2,7 +2,7 @@
 
 import { CashDashboard } from '@/components/stockini/caisse/CashDashboard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import { FinancialAnalytics } from './FinancialAnalytics';
+import { SimpleDashboard } from './SimpleDashboard';
 
 /** Keep the cashier dashboard inside the scope of its caisse permissions. */
 export function DashboardContent() {
@@ -20,5 +20,5 @@ export function DashboardContent() {
     );
   }
 
-  return <FinancialAnalytics />;
+  return <SimpleDashboard />;
 }

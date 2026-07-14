@@ -1,38 +1,36 @@
-import { calculateSalesLine, calculateSalesTotals } from './sales-calculations';
+import { calculateSalesLine } from './sales-calculations';
 
-describe('centralized sales calculations', () => {
-  it('applies a 20% discount to the gross sale price (not to margin points)', () => {
-    const line = calculateSalesLine({ purchasePriceHt: '68.989', grossSalePriceHt: '96.5846', discountPercent: 20, taxPercent: 19, quantity: 1 });
-    expect(line.discountAmountHt).toBeCloseTo(19.31692, 8);
-    expect(line.netSalePriceHt).toBeCloseTo(77.26768, 8);
-    expect(line.marginAmountHt).toBeCloseTo(8.27868, 8);
-    expect(line.vatAmount).toBeCloseTo(14.6808592, 8);
-    expect(line.lineTtc).toBeCloseTo(91.9485392, 8);
-    expect(calculateSalesTotals([line], 1)).toEqual(expect.objectContaining({
-      totalHt: 77.268, totalVat: 14.681, totalMarginHt: 8.279, totalTtc: 91.949, totalToPay: 92.949,
-    }));
+describe('calculateSalesLine', () => {
+  it('PA 30, marge 40, remise 20, TVA 19, quantité 1', () => {
+    expect(calculateSalesLine({ purchasePriceHt: 30, marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 }))
+      .toMatchObject({
+        netMarginPercent: 20,
+        marginAmount: 6,
+        unitPriceHt: 36,
+        unitPriceTtc: 42.84,
+        totalTtc: 42.84,
+      });
   });
 
-  it('supports an explicit final 20% markup as a separate business scenario', () => {
-    const line = calculateSalesLine({ purchasePriceHt: '68.989', grossSalePriceHt: '82.7868', discountPercent: 0, taxPercent: 19, quantity: 1 });
-    expect(line.netSalePriceHt).toBeCloseTo(82.7868, 8);
-    expect(line.marginAmountHt).toBeCloseTo(13.7978, 8);
-    expect(line.marginPercentOnCost).toBeCloseTo(20, 8);
-    expect(line.vatAmount).toBeCloseTo(15.729492, 8);
-    expect(line.lineTtc).toBeCloseTo(98.516292, 8);
-    expect(calculateSalesTotals([line], 1).totalToPay).toBe(99.516);
+  it.each([
+    ['40%, remise 0%', 100, 40, 0, 19, 1, 40, 140, 166.6],
+    ['40%, remise 15%', 100, 40, 15, 19, 2, 25, 125, 297.5],
+    ['0%, remise 10%', 100, 0, 10, 19, 1, -10, 90, 107.1],
+    ['10%, remise 20%', 100, 10, 20, 19, 1, -10, 90, 107.1],
+    ['TVA 0%', 100, 40, 15, 0, 2, 25, 125, 250],
+    ['quantité décimale', 80, 40, 5, 19, 2.5, 35, 108, 321.3],
+    ['prix achat 0', 0, 40, 15, 19, 2, 25, 0, 0],
+    ['valeurs décimales', 33.333, 12.5, 2.25, 7, 1.5, 10.25, 36.75, 58.984],
+  ])('%s', (_label, purchase, margin, discount, tax, quantity, netMargin, unitHt, totalTtc) => {
+    const result = calculateSalesLine({ purchasePriceHt: purchase as number, marginPercent: margin as number,
+      discountPercent: discount as number, taxPercent: tax as number, quantity: quantity as number });
+    expect(result.netMarginPercent).toBe(netMargin);
+    expect(result.unitPriceHt).toBe(unitHt);
+    expect(result.totalTtc).toBe(totalTtc);
   });
 
-  it('keeps VAT and the document stamp outside commercial margin', () => {
-    const line = calculateSalesLine({ purchasePriceHt: 100, grossSalePriceHt: 140, discountPercent: 10, taxPercent: 19, quantity: 2 });
-    const totals = calculateSalesTotals([line], 1);
-    expect(totals.totalMarginHt).toBe(52);
-    expect(totals.totalToPay).toBe(300.88);
-  });
-
-  it('parses comma decimals and has no division by zero', () => {
-    const line = calculateSalesLine({ purchasePriceHt: '0', grossSalePriceHt: '10,500', discountPercent: '5', taxPercent: '19', quantity: '2' });
-    expect(line.netSalePriceHt).toBe(9.975);
-    expect(line.marginPercentOnCost).toBe(0);
+  it('uses defaults for empty margin and discount', () => {
+    expect(calculateSalesLine({ purchasePriceHt: 100, marginPercent: null, discountPercent: null, taxPercent: 19, quantity: 1 }))
+      .toMatchObject({ netMarginPercent: 40, unitPriceHt: 140, totalTtc: 166.6 });
   });
 });

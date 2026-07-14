@@ -1,5 +1,5 @@
 import { generateClientId } from '@/lib/id';
-import { calculateSalesLine, calculateSalesTotals, DEFAULT_SALES_MARGIN_PERCENT, salesRound3 } from '@/lib/salesCalculations';
+import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '@/lib/salesCalculations';
 
 export const MIN_MARGIN_PERCENT = 20;
 export const DEFAULT_MARGIN_PERCENT = DEFAULT_SALES_MARGIN_PERCENT;
@@ -124,7 +124,6 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
   if (line.purchasePriceHt > 0) {
     const result = calculateSalesLine({
       purchasePriceHt: line.purchasePriceHt,
-      grossSalePriceHt: line.manualUnitPriceHt ? line.puHt : undefined,
       marginPercent: line.defaultMarginPercent,
       discountPercent: line.remisePercent,
       taxPercent: line.tvaPercent,
@@ -132,7 +131,7 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     });
     return {
       ...line,
-      puHt: result.grossSalePriceHt,
+      puHt: result.unitPriceHt,
       margePercent: result.netMarginPercent,
       margeAmount: result.marginAmount,
       netHt: result.totalHt,
@@ -140,25 +139,26 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     };
   }
 
-  // A quote may contain an item without purchase cost; discount/VAT still use the same engine.
-  const result = calculateSalesLine({ purchasePriceHt: 0, grossSalePriceHt: line.puHt,
-    discountPercent: line.remisePercent, taxPercent: line.tvaPercent, quantity: line.quantity });
-  return { ...line, margePercent: null, margeAmount: null, netHt: result.lineNetHt, netTtc: result.lineTtc };
+  // No purchase price: use puHt as-is.
+  const netHt = round3(line.puHt * line.quantity);
+  const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
+  return { ...line, margePercent: null, margeAmount: null, netHt, netTtc };
 }
 
 export function calculateSalesDocumentTotals(lines: RegisterLine[]): DocumentTotals {
   const filled = lines.filter(isFilledLine);
   const calculations = filled.map((line) => calculateSalesLine({
     purchasePriceHt: line.purchasePriceHt,
-    grossSalePriceHt: line.puHt,
     marginPercent: line.defaultMarginPercent,
     discountPercent: line.remisePercent,
     taxPercent: line.tvaPercent,
     quantity: line.quantity,
   }));
-  const totals = calculateSalesTotals(calculations, DEFAULT_STAMP_DUTY);
-  return { totalHt: totals.totalHt, totalRemise: totals.totalDiscountHt, totalTva: totals.totalVat,
-    totalTtc: totals.totalTtc, stampDuty: totals.fiscalStamp, totalFinal: totals.totalToPay };
+  const totalHt = round3(calculations.reduce((sum, line) => sum + line.totalHt, 0));
+  const totalRemise = round3(calculations.reduce((sum, line) => sum + line.discountAmount, 0));
+  const totalTva = round3(calculations.reduce((sum, line) => sum + line.taxAmount, 0));
+  const totalTtc = round3(totalHt + totalTva);
+  return { totalHt, totalRemise, totalTva, totalTtc, stampDuty: DEFAULT_STAMP_DUTY, totalFinal: round3(totalTtc + DEFAULT_STAMP_DUTY) };
 }
 
 export function isFilledLine(line: RegisterLine): boolean {
@@ -185,13 +185,14 @@ export function calculateDocumentTotals(lines: RegisterLine[]): DocumentTotals {
  */
 export function calculateSaleMargeTotals(lines: RegisterLine[]): SaleMargeTotals {
   const filled = lines.filter(isFilledLine);
-  const calculations = filled.map((line) => calculateSalesLine({ purchasePriceHt: line.purchasePriceHt,
-    grossSalePriceHt: line.puHt, discountPercent: line.remisePercent, taxPercent: line.tvaPercent, quantity: line.quantity }));
-  const totals = calculateSalesTotals(calculations);
-  const margeTotaleDt = totals.totalMarginHt;
-  const totalPrixAchat = totals.totalPurchaseCostHt;
+  const margeTotaleDt = round3(
+    filled.reduce((s, l) => s + (l.margeAmount !== null ? round3(l.margeAmount * l.quantity) : 0), 0),
+  );
+  const totalPrixAchat = round3(
+    filled.reduce((s, l) => s + round3(l.purchasePriceHt * l.quantity), 0),
+  );
   const margeTotalePourcent =
-    totalPrixAchat > 0 ? salesRound3((margeTotaleDt / totalPrixAchat) * 100) : 0;
+    totalPrixAchat > 0 ? Math.round((margeTotaleDt / totalPrixAchat) * 10000) / 100 : 0;
   return { margeTotaleDt, margeTotalePourcent };
 }
 
