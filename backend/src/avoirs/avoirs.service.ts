@@ -330,6 +330,7 @@ export class AvoirsService {
                 totalHt: item.totalHt,
                 totalTtc: item.totalTtc,
                 motifLigne: item.motifLigne,
+                stockRestocked: item.restock,
               })),
             },
           },

@@ -1,6 +1,6 @@
 'use client';
 
-import { AnalyticsDashboard } from '@/components/stockini/AnalyticsDashboard';
+import { FinancialAnalytics } from '@/components/stockini/FinancialAnalytics';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 
 export default function RapportsPage() {
@@ -11,7 +11,7 @@ export default function RapportsPage() {
           <span className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">Rapports détaillés</span>
           <span className="text-[11px] text-text-muted">— Statistiques complètes toutes catégories</span>
         </div>
-        <AnalyticsDashboard />
+        <FinancialAnalytics detailed />
       </div>
     </PermissionGuard>
   );

@@ -85,7 +85,7 @@ export function resolveReportDateRange(
     case 'today':
       return { gte: today, lte: new Date(today.getTime() + 86_400_000 - 1) };
     case 'week':
-      return { gte: new Date(today.getTime() - 7 * 86_400_000), lte: now };
+      return { gte: new Date(now.getTime() - 7 * 86_400_000), lte: now };
     case 'month':
       return {
         gte: new Date(

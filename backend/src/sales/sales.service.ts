@@ -299,6 +299,8 @@ export class SalesService {
           tvaPercent: item.tvaRate,
           finalUnitPrice: salesRound3(item.netLineTotal / item.quantity),
           total: salesRound3(item.netLineTotal),
+          unitPurchaseCostHTSnapshot: Number(productsById.get(item.productId)!.purchasePrice),
+          purchaseCostEstimated: false,
         };
       });
 
@@ -811,6 +813,8 @@ export class SalesService {
           tvaPercent: tvaRate,
           finalUnitPrice: salesRound3(values.netSalePriceHt),
           total: salesRound3(values.totalHt),
+          unitPurchaseCostHTSnapshot: purchasePriceHt,
+          purchaseCostEstimated: false,
           discountAmount: values.discountAmount,
           taxAmount: values.taxAmount,
         };
@@ -1036,6 +1040,8 @@ export class SalesService {
               tvaPercent: item.tvaPercent,
               finalUnitPrice: item.finalUnitPrice,
               total: item.total,
+              unitPurchaseCostHTSnapshot: item.unitPurchaseCostHTSnapshot,
+              purchaseCostEstimated: item.purchaseCostEstimated,
             })),
           },
         },
