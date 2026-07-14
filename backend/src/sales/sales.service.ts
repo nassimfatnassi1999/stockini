@@ -22,7 +22,7 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '../common/utils/sales-calculations';
+import { calculateSalesLine, calculateSalesTotals, DEFAULT_SALES_MARGIN_PERCENT, salesRound3 } from '../common/utils/sales-calculations';
 import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
 import {
   CreateSaleDto,
@@ -203,14 +203,13 @@ export class SalesService {
         const purchasePriceHt = Number(product.purchasePrice);
         const calculation = calculateSalesLine({
           purchasePriceHt,
+          grossSalePriceHt: item.unitPrice,
           marginPercent,
           discountPercent,
           taxPercent: tvaRate,
           quantity: item.quantity,
         });
-        const unitPrice = purchasePriceHt > 0
-          ? calculation.unitPriceHt
-          : (item.unitPrice ?? this.salePriceHt(product));
+        const unitPrice = calculation.grossSalePriceHt || (item.unitPrice ?? this.salePriceHt(product));
         if (unitPrice < 0) {
           throw new BadRequestException(
             `Le prix de vente calculé pour "${product.name}" ne peut pas être négatif.`,
@@ -222,11 +221,11 @@ export class SalesService {
             `Vous n'avez pas la permission de modifier la marge pour "${product.name}".`,
           );
         }
-        const grossLineHt = calculation.unitPriceHtBeforeDiscount * item.quantity;
+        const grossLineHt = calculation.grossSalePriceHt * item.quantity;
         const lineDiscount = calculation.discountAmount;
         const netLineHt = purchasePriceHt > 0 ? calculation.totalHt : unitPrice * item.quantity;
-        const lineTax = this.round3(netLineHt * (tvaRate / 100));
-        const lineTotalTtc = this.round3(netLineHt + lineTax);
+        const lineTax = calculation.vatAmount;
+        const lineTotalTtc = calculation.lineTtc;
 
         if (!isDevis) {
           if (purchasePriceHt <= 0) {
@@ -257,18 +256,16 @@ export class SalesService {
         };
       });
 
-      const subtotal = this.round3(
-        rawItems.reduce((sum, item) => sum + item.netLineTotal, 0),
-      );
-      const discount = this.round3(
-        rawItems.reduce((sum, item) => sum + item.discountAmount, 0),
-      );
-      const tax = this.round3(
-        rawItems.reduce((sum, item) => sum + item.tax, 0),
-      );
-      const total = this.round3(subtotal + tax);
       const stampDuty = DEFAULT_STAMP_DUTY;
-      const totalFinal = commercialTotalFinal(total, stampDuty);
+      const documentCalculation = calculateSalesTotals(rawItems.map((item) => calculateSalesLine({
+        purchasePriceHt: Number(productsById.get(item.productId)!.purchasePrice), grossSalePriceHt: item.unitPrice,
+        discountPercent: item.discountPercent, taxPercent: item.tvaRate, quantity: item.quantity,
+      })), stampDuty);
+      const subtotal = documentCalculation.totalHt;
+      const discount = documentCalculation.totalDiscountHt;
+      const tax = documentCalculation.totalVat;
+      const total = documentCalculation.totalTtc;
+      const totalFinal = documentCalculation.totalToPay;
 
       const rawPaidAmount = acceptsPayment ? this.round3(dto.paidAmount ?? 0) : 0;
       // CREDIT = vente à crédit, aucun encaissement immédiat — paidAmount reste 0.
@@ -300,8 +297,8 @@ export class SalesService {
           discountPercent: item.discountPercent,
           marginPercent: item.marginPercent,
           tvaPercent: item.tvaRate,
-          finalUnitPrice: item.netLineTotal / item.quantity,
-          total: item.netLineTotal,
+          finalUnitPrice: salesRound3(item.netLineTotal / item.quantity),
+          total: salesRound3(item.netLineTotal),
         };
       });
 
@@ -794,7 +791,7 @@ export class SalesService {
         const marginPercent = item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
         const discountPercent = item.discountPercent ?? 0;
         const tvaRate = Number(product.tva ?? 0);
-        const values = calculateSalesLine({ purchasePriceHt, marginPercent, discountPercent, taxPercent: tvaRate, quantity: item.quantity });
+        const values = calculateSalesLine({ purchasePriceHt, grossSalePriceHt: item.unitPrice, marginPercent, discountPercent, taxPercent: tvaRate, quantity: item.quantity });
         if (Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 && !allowEditUnitPriceHt) {
           throw new ForbiddenException(`Vous n'avez pas la permission de modifier la marge pour "${product.name}".`);
         }
@@ -808,21 +805,25 @@ export class SalesService {
           productId: item.productId,
           designation: item.designation?.trim() || product.name,
           quantity: item.quantity,
-          unitPrice: values.unitPriceHt,
+          unitPrice: values.grossSalePriceHt,
           discountPercent,
           marginPercent,
           tvaPercent: tvaRate,
-          finalUnitPrice: values.totalHt / item.quantity,
-          total: values.totalHt,
+          finalUnitPrice: salesRound3(values.netSalePriceHt),
+          total: salesRound3(values.totalHt),
           discountAmount: values.discountAmount,
           taxAmount: values.taxAmount,
         };
       });
 
-      const subtotal = this.round3(calculated.reduce((sum, item) => sum + item.total, 0));
-      const discount = this.round3(calculated.reduce((sum, item) => sum + item.discountAmount, 0));
-      const tax = this.round3(calculated.reduce((sum, item) => sum + item.taxAmount, 0));
-      const total = this.round3(subtotal + tax);
+      const updateTotals = calculateSalesTotals(calculated.map((item) => calculateSalesLine({
+        purchasePriceHt: Number(productsById.get(item.productId)!.purchasePrice), grossSalePriceHt: item.unitPrice,
+        discountPercent: item.discountPercent, taxPercent: item.tvaPercent, quantity: item.quantity,
+      })), Number(sale.stampDuty));
+      const subtotal = updateTotals.totalHt;
+      const discount = updateTotals.totalDiscountHt;
+      const tax = updateTotals.totalVat;
+      const total = updateTotals.totalTtc;
       const totalFinal = commercialTotalFinal(total, Number(sale.stampDuty));
       const paidAmount = Number(sale.paidAmount);
       if (dto.paidAmount !== undefined && Math.abs(dto.paidAmount - paidAmount) > 0.001) {
@@ -1225,11 +1226,11 @@ export class SalesService {
       for (const item of saleGroup) {
         const grossHt = Number(item.unitPrice) * item.quantity;
         const discountPercent = Number(item.discountPercent ?? 0);
-        // New rows already store the final HT produced by margin - discount.
+        // New rows store the gross unit price and the canonical net line total.
         // NULL marginPercent identifies legacy rows using multiplicative discount.
         const netHt = item.marginPercent === null
           ? grossHt * (1 - discountPercent / 100)
-          : grossHt;
+          : Number(item.total);
         lineNetHtByItemId.set(item.id, netHt);
         lineDiscountTotal += grossHt - netHt;
         lineNetSubtotal += netHt;

@@ -165,10 +165,10 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                       const purchasePrice = Number(
                         item.product?.purchasePrice ?? 0,
                       );
-                      const margePercent =
-                        purchasePrice > 0
-                          ? ((unitPrice - purchasePrice) / purchasePrice) * 100
-                          : null;
+                      const netUnitPrice = Number(item.finalUnitPrice ?? (Number(item.total) / Number(item.quantity)));
+                      const margePercent = purchasePrice > 0
+                        ? ((netUnitPrice - purchasePrice) / purchasePrice) * 100
+                        : null;
                       const grossMargin = item.marginPercent == null
                         ? null
                         : Number(item.marginPercent);
