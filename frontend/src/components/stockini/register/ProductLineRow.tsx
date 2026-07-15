@@ -217,7 +217,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
         {hasProduct ? margeAmountDisplay : '—'}
       </td>
 
-      {/* Remise commerciale appliquée au prix brut HT */}
+      {/* Réduction en points du taux de marge */}
       <td className={`min-w-[60px] ${CELL}`}>
         <input
           type="number"

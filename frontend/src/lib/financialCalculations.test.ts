@@ -7,14 +7,19 @@ test('frontend: vecteur canonique de vente', () => {
   const line = calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 15, taxPercent: 19, quantity: 2 });
   assert.deepEqual({ gross: line.grossSalePriceHt, net: line.netSalePriceHt, marginUnit: line.marginAmount,
     marginTotal: line.marginAmountHt, marginPct: line.marginPercentOnCost, ht: line.totalHt, vat: line.taxAmount, ttc: line.totalTtc },
-  { gross: 140, net: 119, marginUnit: 19, marginTotal: 38, marginPct: 19, ht: 238, vat: 45.22, ttc: 283.22 });
-  assert.equal(calculateSalesTotals([line], 1).totalToPay, 284.22);
+  { gross: 140, net: 125, marginUnit: 25, marginTotal: 50, marginPct: 25, ht: 250, vat: 47.5, ttc: 297.5 });
+  assert.equal(calculateSalesTotals([line], 1).totalToPay, 298.5);
 });
 
 test('frontend: remises limites et seuil de marge', () => {
   assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 0, quantity: 1 }).netSalePriceHt, 140);
-  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 100, quantity: 1 }).netSalePriceHt, 0);
-  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 15, quantity: 1 }).marginPercentOnCost, 19);
+  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 10, quantity: 1 }).netSalePriceHt, 130);
+  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 40, quantity: 1 }).netSalePriceHt, 100);
+  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 50, quantity: 1 }).marginPercentOnCost, -10);
+
+  const exact = calculateSalesLine({ purchasePriceHt: 35, marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 });
+  assert.deepEqual({ margin: exact.marginAmount, netHt: exact.totalHt, vat: exact.taxAmount, ttc: exact.totalTtc },
+    { margin: 7, netHt: 42, vat: 7.98, ttc: 49.98 });
 });
 
 test('frontend: achat, somme des lignes et timbre saisi', () => {

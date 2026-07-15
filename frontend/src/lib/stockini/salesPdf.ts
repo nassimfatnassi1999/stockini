@@ -248,7 +248,7 @@ export function generateSalesPDF(
   ];
 
   const tableBody = sale.items.map((item) => {
-    const unitPrice = Number(item.unitPrice);
+    const unitPrice = Number(item.finalUnitPrice ?? item.unitPrice);
     const totalHt = Number(item.total);
     const tvaRate = Number(item.tvaPercent ?? 19);
     const totalTtc = totalHt * (1 + tvaRate / 100);

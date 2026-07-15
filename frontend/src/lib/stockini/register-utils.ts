@@ -37,9 +37,21 @@ export function calcDefaultSellingPriceHt(purchasePriceHt: number): number {
   return round3(purchasePriceHt * (1 + DEFAULT_MARGIN_PERCENT / 100));
 }
 
-/** Effective unit price after applying a per-line discount */
-export function calcNetUnitPriceHt(puHt: number, discountPercent: number): number {
-  return round3(puHt * (1 - discountPercent / 100));
+/** Prix net Stockini : la remise retire des points au taux de marge. */
+export function calcNetUnitPriceHt(
+  puHt: number,
+  discountPercent: number,
+  purchasePriceHt = 0,
+): number {
+  const grossMarginAmount = puHt - purchasePriceHt;
+  const grossMarginPercent = purchasePriceHt > 0
+    ? (grossMarginAmount / purchasePriceHt) * 100
+    : DEFAULT_MARGIN_PERCENT;
+  const netMarginPercent = grossMarginPercent - discountPercent;
+  const netMarginAmount = grossMarginPercent === 0
+    ? purchasePriceHt * (netMarginPercent / 100)
+    : grossMarginAmount * (netMarginPercent / grossMarginPercent);
+  return round3(purchasePriceHt + netMarginAmount);
 }
 
 /** Profit amount per unit after discount, null when purchasePriceHt is 0 */
@@ -49,7 +61,7 @@ export function calcMargeAmount(
   purchasePriceHt: number,
 ): number | null {
   if (purchasePriceHt <= 0) return null;
-  return round3(calcNetUnitPriceHt(puHt, discountPercent) - purchasePriceHt);
+  return round3(calcNetUnitPriceHt(puHt, discountPercent, purchasePriceHt) - purchasePriceHt);
 }
 
 /** Profit % based on net price after discount, null when purchasePriceHt is 0 */
@@ -59,7 +71,7 @@ export function calcMargePercent(
   purchasePriceHt: number,
 ): number | null {
   if (purchasePriceHt <= 0) return null;
-  const net = calcNetUnitPriceHt(puHt, discountPercent);
+  const net = calcNetUnitPriceHt(puHt, discountPercent, purchasePriceHt);
   return Math.round(((net - purchasePriceHt) / purchasePriceHt) * 10000) / 100;
 }
 
@@ -119,7 +131,7 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
 
 /**
  * For sales (auto mode): puHt = purchasePriceHt × (1 + defaultMarginPercent / 100) — always
- * the GROSS unit price (no discount baked in). Remise is applied as a standard line discount
+ * the GROSS unit price (no discount baked in). Remise removes points from the gross margin
  * so the payload sent to the backend is unambiguous: unitPrice = gross, discountPercent = remise.
  *
  * When manualUnitPriceHt is true, puHt is frozen (user-set) and only the
@@ -145,7 +157,7 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     };
   }
 
-  // Devis sans coût connu : conserver le brut saisi mais appliquer la remise normalement.
+  // Devis sans coût connu : conserver le brut saisi et appliquer la réduction de marge.
   const result = calculateSalesLine({
     purchasePriceHt: 0,
     grossSalePriceHt: line.puHt,

@@ -27,6 +27,7 @@ import {
   calculateSalesTotals,
   DEFAULT_SALES_MARGIN_PERCENT,
   SALES_CALCULATION_VERSION,
+  SALES_SNAPSHOT_VERSION,
   salesRound3,
 } from '../common/utils/sales-calculations';
 import {
@@ -307,6 +308,7 @@ export class SalesService {
               productsById.get(item.productId)!.purchasePrice,
             ),
             grossSalePriceHt: item.unitPrice,
+            marginPercent: item.marginPercent,
             discountPercent: item.discountPercent,
             taxPercent: item.tvaRate,
             quantity: item.quantity,
@@ -964,6 +966,7 @@ export class SalesService {
           calculateSalesLine({
             purchasePriceHt: item.unitPurchaseCostHt,
             grossSalePriceHt: item.unitPrice,
+            marginPercent: item.marginPercent,
             discountPercent: item.discountPercent,
             taxPercent: item.tvaPercent,
             quantity: item.quantity,
@@ -1455,7 +1458,7 @@ export class SalesService {
         const grossHt = Number(item.unitPrice) * item.quantity;
         const discountPercent = Number(item.discountPercent ?? 0);
         const netHt =
-          item.calculationVersion >= SALES_CALCULATION_VERSION
+          item.calculationVersion >= SALES_SNAPSHOT_VERSION
             ? Number(item.total)
             : item.marginPercent === null
               ? grossHt * (1 - discountPercent / 100)
@@ -1468,7 +1471,7 @@ export class SalesService {
       const sale = saleGroup[0].sale;
       const usesNewPricing = saleGroup.every(
         (item) =>
-          item.calculationVersion >= SALES_CALCULATION_VERSION ||
+          item.calculationVersion >= SALES_SNAPSHOT_VERSION ||
           item.marginPercent !== null,
       );
       const remainingDocumentDiscount = usesNewPricing

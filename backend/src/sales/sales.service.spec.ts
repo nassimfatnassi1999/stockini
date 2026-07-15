@@ -216,7 +216,7 @@ describe('SalesService document references', () => {
           unitPrice: 140,
           finalUnitPrice: 140,
           unitPurchaseCostHt: 100,
-          calculationVersion: 2,
+          calculationVersion: 3,
           total: 140,
         }),
       );
@@ -244,7 +244,7 @@ describe('SalesService document references', () => {
     ).rejects.toThrow('Un avoir doit être créé via le module Avoirs');
   });
 
-  it('sauvegarde le brut/net et le coût historique avec une remise multiplicative', async () => {
+  it('sauvegarde le brut/net et le coût historique avec une remise en points de marge', async () => {
     const { service, tx } = buildService();
     await service.create(
       {
@@ -271,21 +271,21 @@ describe('SalesService document references', () => {
     const data = tx.sale.create.mock.calls[0][0].data;
     expect(data).toEqual(
       expect.objectContaining({
-        subtotal: 238,
-        discount: 42,
-        tax: 45.22,
-        total: 283.22,
+        subtotal: 250,
+        discount: 30,
+        tax: 47.5,
+        total: 297.5,
       }),
     );
     expect(data.items.create[0]).toEqual(
       expect.objectContaining({
         unitPrice: 140,
-        finalUnitPrice: 119,
+        finalUnitPrice: 125,
         unitPurchaseCostHt: 100,
         discountPercent: 15,
         marginPercent: 40,
-        total: 238,
-        calculationVersion: 2,
+        total: 250,
+        calculationVersion: 3,
       }),
     );
   });
@@ -303,7 +303,7 @@ describe('SalesService document references', () => {
             quantity: 1,
             unitPrice: 140,
             marginPercent: 40,
-            discountPercent: 15,
+            discountPercent: 25,
           },
         ],
       }),

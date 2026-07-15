@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 
 export const DEFAULT_SALES_MARGIN_PERCENT = 40;
-export const SALES_CALCULATION_VERSION = 2;
+export const SALES_CALCULATION_VERSION = 3;
 export const SALES_MONEY_DECIMALS = 3;
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
@@ -40,12 +40,16 @@ export function calculateSalesLine(input: SalesLineCalculationInput) {
     ? purchasePriceHt.mul(new Decimal(1).plus(grossMarginPercent.div(100)))
     : Decimal.max(0, decimal(input.grossSalePriceHt));
   const grossSalePriceHt = decimal(salesRound3(gross));
-  const netSalePriceHt = decimal(salesRound3(grossSalePriceHt.mul(new Decimal(1).minus(discountPercent.div(100)))));
+  const netMarginPercent = grossMarginPercent.minus(discountPercent);
+  const grossMarginAmount = grossSalePriceHt.minus(purchasePriceHt);
+  const netMarginAmount = grossMarginPercent.isZero()
+    ? purchasePriceHt.mul(netMarginPercent).div(100)
+    : grossMarginAmount.mul(netMarginPercent).div(grossMarginPercent);
+  const netSalePriceHt = decimal(salesRound3(purchasePriceHt.plus(netMarginAmount)));
   const lineNetHt = decimal(salesRound3(netSalePriceHt.mul(quantity)));
   const purchaseCostHt = decimal(salesRound3(purchasePriceHt.mul(quantity)));
   const marginAmountHt = lineNetHt.minus(purchaseCostHt);
-  const marginPercentOnCost = purchasePriceHt.gt(0)
-    ? netSalePriceHt.minus(purchasePriceHt).div(purchasePriceHt).mul(100) : new Decimal(0);
+  const marginPercentOnCost = purchasePriceHt.gt(0) ? netMarginPercent : new Decimal(0);
   const vatAmount = decimal(salesRound3(lineNetHt.mul(taxPercent).div(100)));
   const discountAmountHt = decimal(salesRound3(grossSalePriceHt.minus(netSalePriceHt).mul(quantity)));
   return {

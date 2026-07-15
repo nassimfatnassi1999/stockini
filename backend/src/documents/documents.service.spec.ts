@@ -22,7 +22,18 @@ const sale = {
   tax: 19,
   total: 119,
   stampDuty: 1,
-  items: [],
+  items: [
+    {
+      quantity: 1,
+      unitPrice: 140,
+      finalUnitPrice: 125,
+      discountPercent: 15,
+      tvaPercent: 19,
+      total: 125,
+      designation: 'Produit test',
+      product: { reference: 'P-001', name: 'Produit test', tva: 19 },
+    },
+  ],
   seller: null,
 };
 
@@ -49,6 +60,7 @@ function createService(generatedDocument: Record<string, jest.Mock>) {
       {} as never,
     ),
     generatedDocument,
+    pdf,
   };
 }
 
@@ -70,7 +82,7 @@ describe('DocumentsService.generate', () => {
       create: jest.fn(),
       update: jest.fn().mockResolvedValue(restored),
     };
-    const { service } = createService(generatedDocument);
+    const { service, pdf } = createService(generatedDocument);
 
     const result = await service.generate(dto);
 
@@ -85,6 +97,13 @@ describe('DocumentsService.generate', () => {
           deletedBy: null,
         }),
       }),
+    );
+    expect(pdf.generateSaleDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [expect.objectContaining({ unitPrice: 125, total: 125 })],
+      }),
+      DocumentType.DEVIS,
+      expect.any(Object),
     );
   });
 
