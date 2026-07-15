@@ -161,10 +161,8 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {sale.items.map((item) => {
-                      const unitPrice = Number(item.unitPrice);
-                      const purchasePrice = Number(
-                        item.product?.purchasePrice ?? 0,
-                      );
+                      const unitPrice = Number(item.finalUnitPrice ?? (Number(item.total) / item.quantity));
+                      const purchasePrice = Number(item.unitPurchaseCostHt ?? 0);
                       const margePercent =
                         purchasePrice > 0
                           ? ((unitPrice - purchasePrice) / purchasePrice) * 100

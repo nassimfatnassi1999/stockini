@@ -28,7 +28,10 @@ import {
   calculateCreditNoteLineTotals,
   calculateCreditNoteTotals,
 } from '../credit-notes/utils/credit-note-calculation.util';
-import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
+import {
+  commercialTotalFinal,
+  DEFAULT_STAMP_DUTY,
+} from '../common/utils/commercial-document';
 
 const AVOIR_INCLUDE = {
   sale: { select: { invoiceNumber: true, customerId: true } },
@@ -105,7 +108,15 @@ export class AvoirsService {
             quantiteAnnulee: cancelledQuantity,
             quantiteRetournable:
               item.quantity - alreadyReturned - cancelledQuantity,
-            unitPrice: Number(item.unitPrice),
+            unitPrice:
+              item.finalUnitPrice != null
+                ? Number(item.finalUnitPrice)
+                : item.total != null
+                  ? Number(item.total) / item.quantity
+                  : Number(item.unitPrice) *
+                    (item.marginPercent == null
+                      ? 1 - Number(item.discountPercent ?? 0) / 100
+                      : 1),
             tvaRate: Number(item.product?.tva ?? 19),
             total: Number(item.total),
           };
@@ -247,8 +258,19 @@ export class AvoirsService {
             );
           }
 
-          const unitPriceHt = Number(saleItem.unitPrice);
-          const tvaRate = Number(saleItem.tvaPercent ?? saleItem.product?.tva ?? 19);
+          // Un avoir rembourse le net HT réellement facturé, jamais le brut avant remise.
+          const unitPriceHt =
+            saleItem.finalUnitPrice != null
+              ? Number(saleItem.finalUnitPrice)
+              : saleItem.total != null
+                ? Number(saleItem.total) / saleItem.quantity
+                : Number(saleItem.unitPrice) *
+                  (saleItem.marginPercent == null
+                    ? 1 - Number(saleItem.discountPercent ?? 0) / 100
+                    : 1);
+          const tvaRate = Number(
+            saleItem.tvaPercent ?? saleItem.product?.tva ?? 19,
+          );
           const lineTotals = calculateCreditNoteLineTotals({
             quantity: dtoItem.quantiteRetournee,
             unitPriceHt,
@@ -258,14 +280,18 @@ export class AvoirsService {
           resolvedItems.push({
             saleItemId: saleItem.id,
             productId: saleItem.productId,
-            designation: saleItem.designation ?? saleItem.product?.name ?? dtoItem.productId,
+            designation:
+              saleItem.designation ??
+              saleItem.product?.name ??
+              dtoItem.productId,
             quantiteRetournee: dtoItem.quantiteRetournee,
             prixUnitaireHt: unitPriceHt,
             tva: tvaRate,
             totalHt: lineTotals.totalHt,
             totalTtc: lineTotals.totalTtc,
             motifLigne: dtoItem.motifLigne,
-            restock: dtoItem.restock !== undefined ? dtoItem.restock : globalRestock,
+            restock:
+              dtoItem.restock !== undefined ? dtoItem.restock : globalRestock,
           });
         }
 
@@ -321,6 +347,7 @@ export class AvoirsService {
                 totalHt: item.totalHt,
                 totalTtc: item.totalTtc,
                 motifLigne: item.motifLigne,
+                stockRestocked: item.restock,
               })),
             },
           },
@@ -373,7 +400,7 @@ export class AvoirsService {
               motif: `Remboursement avoir ${numero}`,
               referenceDoc: payment.reference,
               userId: user?.id,
-              paymentMethod: refundMethod as string,
+              paymentMethod: refundMethod,
             });
           }
           if (refundMethod === 'CUSTOMER_CREDIT' && effectiveCustomerId) {

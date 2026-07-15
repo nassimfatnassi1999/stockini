@@ -41,7 +41,6 @@ describe('SalesService document references', () => {
       generate: jest.fn((prefix: string) => Promise.resolve(`${prefix}-001`)),
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tx: any = {
       product: {
         findMany: jest.fn().mockResolvedValue([product]),
@@ -115,18 +114,19 @@ describe('SalesService document references', () => {
       },
     };
 
-    tx.sale.findUniqueOrThrow.mockImplementation(({ where }: { where: { id: string } }) =>
-      Promise.resolve({
-        id: where.id,
-        invoiceNumber: tx.sale.create.mock.calls[0][0].data.invoiceNumber,
-        documentType: tx.sale.create.mock.calls[0][0].data.documentType,
-        paymentStatus: tx.sale.create.mock.calls[0][0].data.paymentStatus,
-        status: tx.sale.create.mock.calls[0][0].data.status,
-        items: [],
-        customer: null,
-        seller: null,
-        payments: [],
-      }),
+    tx.sale.findUniqueOrThrow.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          id: where.id,
+          invoiceNumber: tx.sale.create.mock.calls[0][0].data.invoiceNumber,
+          documentType: tx.sale.create.mock.calls[0][0].data.documentType,
+          paymentStatus: tx.sale.create.mock.calls[0][0].data.paymentStatus,
+          status: tx.sale.create.mock.calls[0][0].data.status,
+          items: [],
+          customer: null,
+          seller: null,
+          payments: [],
+        }),
     );
 
     const prisma = {
@@ -139,7 +139,10 @@ describe('SalesService document references', () => {
       references as any,
       { assertActiveOption: jest.fn() } as any,
       { recordMovement: jest.fn().mockResolvedValue({}) } as any,
-      { assertClientNotLocked: jest.fn().mockResolvedValue(undefined), recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any,
+      {
+        assertClientNotLocked: jest.fn().mockResolvedValue(undefined),
+        recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined),
+      } as any,
       { audit: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
@@ -168,8 +171,10 @@ describe('SalesService document references', () => {
         customerId: 'customer-1',
         paidAmount: 0,
         discount: 999, // ignored — backend recalculates
-        tax: 999,      // ignored — backend recalculates
-        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+        tax: 999, // ignored — backend recalculates
+        items: [
+          { productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE },
+        ],
       });
 
       expect(references.generateSalesDocumentNumber).toHaveBeenCalledWith(
@@ -184,7 +189,10 @@ describe('SalesService document references', () => {
             invoiceNumber: expectedReference,
             documentType,
             paymentStatus: (
-              [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+              [
+                DocumentType.FACTURE,
+                DocumentType.BON_LIVRAISON,
+              ] as DocumentType[]
             ).includes(documentType)
               ? PaymentStatus.UNPAID
               : null,
@@ -193,11 +201,23 @@ describe('SalesService document references', () => {
             tax: AUTO_TAX,
             total: AUTO_TOTAL_TTC,
             status: (
-              [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+              [
+                DocumentType.FACTURE,
+                DocumentType.BON_LIVRAISON,
+              ] as DocumentType[]
             ).includes(documentType)
               ? SaleStatus.COMPLETED
               : SaleStatus.DRAFT,
           }),
+        }),
+      );
+      expect(tx.sale.create.mock.calls[0][0].data.items.create[0]).toEqual(
+        expect.objectContaining({
+          unitPrice: 140,
+          finalUnitPrice: 140,
+          unitPurchaseCostHt: 100,
+          calculationVersion: 2,
+          total: 140,
         }),
       );
       expect(sale).toEqual(
@@ -217,9 +237,77 @@ describe('SalesService document references', () => {
         documentType: DocumentType.AVOIR,
         customerId: 'customer-1',
         paidAmount: 0,
-        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+        items: [
+          { productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE },
+        ],
       }),
     ).rejects.toThrow('Un avoir doit être créé via le module Avoirs');
+  });
+
+  it('sauvegarde le brut/net et le coût historique avec une remise multiplicative', async () => {
+    const { service, tx } = buildService();
+    await service.create(
+      {
+        documentType: DocumentType.FACTURE,
+        customerId: 'customer-1',
+        paidAmount: 0,
+        items: [
+          {
+            productId: product.id,
+            quantity: 2,
+            unitPrice: 140,
+            marginPercent: 40,
+            discountPercent: 15,
+          },
+        ],
+      },
+      {
+        id: 'admin',
+        email: 'admin@test.tn',
+        permissions: ['sales.allow_low_margin'],
+      } as any,
+    );
+
+    const data = tx.sale.create.mock.calls[0][0].data;
+    expect(data).toEqual(
+      expect.objectContaining({
+        subtotal: 238,
+        discount: 42,
+        tax: 45.22,
+        total: 283.22,
+      }),
+    );
+    expect(data.items.create[0]).toEqual(
+      expect.objectContaining({
+        unitPrice: 140,
+        finalUnitPrice: 119,
+        unitPurchaseCostHt: 100,
+        discountPercent: 15,
+        marginPercent: 40,
+        total: 238,
+        calculationVersion: 2,
+      }),
+    );
+  });
+
+  it('bloque sans permission une marge réelle sous 20%', async () => {
+    const { service } = buildService();
+    await expect(
+      service.create({
+        documentType: DocumentType.FACTURE,
+        customerId: 'customer-1',
+        paidAmount: 0,
+        items: [
+          {
+            productId: product.id,
+            quantity: 1,
+            unitPrice: 140,
+            marginPercent: 40,
+            discountPercent: 15,
+          },
+        ],
+      }),
+    ).rejects.toThrow('marge insuffisante');
   });
 
   it('rejects payment on DEVIS', async () => {
@@ -231,7 +319,9 @@ describe('SalesService document references', () => {
         customerId: 'customer-1',
         paidAmount: 10,
         paymentMethod: PaymentMethod.CASH,
-        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+        items: [
+          { productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE },
+        ],
       }),
     ).rejects.toThrow("DEVIS n'accepte pas de paiement");
   });
@@ -244,7 +334,9 @@ describe('SalesService document references', () => {
       customerId: 'customer-1',
       paidAmount: AUTO_TOTAL_TTC,
       paymentMethod: PaymentMethod.CASH,
-      items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+      items: [
+        { productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE },
+      ],
     });
 
     expect(settings.assertActiveOption).toHaveBeenCalledWith(
@@ -279,7 +371,9 @@ describe('SalesService document references', () => {
         documentType,
         customerId: 'customer-1',
         paidAmount: 0,
-        items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+        items: [
+          { productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE },
+        ],
       });
 
       expect(stockService.applyMovement).toHaveBeenCalledTimes(1);
@@ -293,6 +387,65 @@ describe('SalesService document references', () => {
       );
     },
   );
+
+  it('préserve tous les snapshots lors de la transformation BL vers facture sans second stock', async () => {
+    const { service, tx, stockService } = buildService();
+    const sourceItem = {
+      id: 'source-item',
+      productId: product.id,
+      designation: product.name,
+      quantity: 2,
+      unitPrice: 140,
+      finalUnitPrice: 119,
+      total: 238,
+      discountPercent: 15,
+      marginPercent: 40,
+      tvaPercent: 19,
+      unitPurchaseCostHt: 100,
+      purchaseCostEstimated: false,
+      calculationVersion: 2,
+    };
+    tx.sale.findFirstOrThrow.mockResolvedValue({
+      id: 'source-bl',
+      invoiceNumber: 'BL-001',
+      customerId: 'customer-1',
+      customer: { name: 'Auto Top' },
+      documentType: DocumentType.BON_LIVRAISON,
+      status: SaleStatus.COMPLETED,
+      transformedToId: null,
+      stockImpactDone: true,
+      subtotal: 238,
+      discount: 42,
+      tax: 45.22,
+      total: 283.22,
+      stampDuty: 1,
+      clientType: 'PERSISTENT',
+      items: [sourceItem],
+    });
+
+    await service.transformDocument('source-bl', DocumentType.FACTURE, {
+      id: 'seller',
+      email: 's@test.tn',
+      permissions: [],
+    } as any);
+    const createdItem = tx.sale.create.mock.calls[0][0].data.items.create[0];
+    expect(createdItem).toEqual(
+      expect.objectContaining({
+        unitPrice: 140,
+        finalUnitPrice: 119,
+        total: 238,
+        unitPurchaseCostHt: 100,
+        calculationVersion: 2,
+      }),
+    );
+    expect(stockService.applyMovement).not.toHaveBeenCalled();
+    expect(tx.sale.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'source-bl' },
+        data: { transformedToId: 'sale-1' },
+      }),
+    );
+  });
 
   it('returns the next simple reference preview for each document type', async () => {
     const { service, references } = buildService();

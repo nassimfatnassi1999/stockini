@@ -121,8 +121,8 @@ export const stockiniApi = {
         params: cleanQueryParams(query),
       })
       .then((r) => r.data),
-  dashboard: () =>
-    api.get<DashboardReport>("/reports/dashboard").then((r) => r.data),
+  dashboard: (query?: ReportOverviewQuery) =>
+    api.get<DashboardReport>("/reports/dashboard", { params: cleanQueryParams(query) }).then((r) => r.data),
   stockValue: () =>
     api
       .get<{ purchaseValue: number; saleValue: number }>("/reports/stock-value")

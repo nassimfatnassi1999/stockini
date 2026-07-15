@@ -1,15 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import {
-  CaisseMovementType,
   DocumentType,
+  ExpenseStatus,
   PaymentStatus,
   PaymentType,
+  Prisma,
   PurchaseStatus,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import type { ReportOverviewQueryDto, ReportPeriod } from './dto/report-overview.dto';
+import type {
+  ReportOverviewQueryDto,
+  ReportPeriod,
+} from './dto/report-overview.dto';
 
 // ─── KPI CALCULATION RULES ────────────────────────────────────────────────────
 //
@@ -96,9 +100,7 @@ export function resolveReportDateRange(
       };
     case 'year':
       return {
-        gte: new Date(
-          Date.UTC(localNow.getUTCFullYear(), 0, 1) - TZ_OFFSET_MS,
-        ),
+        gte: new Date(Date.UTC(localNow.getUTCFullYear(), 0, 1) - TZ_OFFSET_MS),
         lte: now,
       };
     default:
@@ -132,8 +134,18 @@ interface TimeBucket {
 }
 
 const MONTHS_FR = [
-  'Jan','Fév','Mar','Avr','Mai','Jun',
-  'Jul','Aoû','Sep','Oct','Nov','Déc',
+  'Jan',
+  'Fév',
+  'Mar',
+  'Avr',
+  'Mai',
+  'Jun',
+  'Jul',
+  'Aoû',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Déc',
 ];
 
 function buildTimeBuckets(
@@ -147,7 +159,7 @@ function buildTimeBuckets(
     const year = localNow.getUTCFullYear();
     for (let m = 0; m < 12; m++) {
       buckets.push({
-        label: MONTHS_FR[m]!,
+        label: MONTHS_FR[m],
         start: new Date(Date.UTC(year, m, 1) - TZ_OFFSET_MS),
         end: new Date(Date.UTC(year, m + 1, 0, 23, 59, 59, 999) - TZ_OFFSET_MS),
       });
@@ -194,6 +206,12 @@ function num(v: unknown): number {
   return typeof v === 'string' ? parseFloat(v) || 0 : Number(v);
 }
 
+function moneyRound(value: Prisma.Decimal.Value): number {
+  return new Prisma.Decimal(value)
+    .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
+}
+
 function trend(cur: number, prev: number): number | null {
   if (prev === 0) return cur > 0 ? 100 : null;
   return Math.round(((cur - prev) / Math.abs(prev)) * 100);
@@ -201,7 +219,12 @@ function trend(cur: number, prev: number): number | null {
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
-const REVENUE_DOC_TYPES = [DocumentType.FACTURE, DocumentType.BON_LIVRAISON];
+const REVENUE_STATUSES = [
+  SaleStatus.COMPLETED,
+  SaleStatus.PARTIALLY_REFUNDED,
+  SaleStatus.REFUNDED,
+  SaleStatus.RETURNED,
+];
 
 const STOCK_ENTRY_TYPES = [
   StockMovementType.ENTRY,
@@ -221,6 +244,104 @@ const STOCK_EXIT_TYPES = [
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async calculateFinancials(range: { gte: Date; lte: Date }) {
+    const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
+    const round = (value: Prisma.Decimal.Value) =>
+      D(value).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toNumber();
+    const where: Prisma.SaleWhereInput = {
+      createdAt: range,
+      deletedAt: null,
+      status: { in: REVENUE_STATUSES },
+      OR: [
+        { documentType: DocumentType.FACTURE },
+        { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
+      ],
+    };
+    const [sales, creditNotes, expenses] = await Promise.all([
+      this.prisma.sale.findMany({
+        where,
+        select: {
+          subtotal: true,
+          items: {
+            select: {
+              quantity: true,
+              unitPurchaseCostHt: true,
+              purchaseCostEstimated: true,
+            },
+          },
+        },
+      }),
+      this.prisma.creditNote.findMany({
+        where: { dateAvoir: range, statut: { not: 'CANCELLED' } },
+        select: {
+          subtotal: true,
+          items: {
+            select: {
+              quantiteRetournee: true,
+              saleItem: { select: { unitPurchaseCostHt: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.expense.aggregate({
+        where: { expenseDate: range, status: ExpenseStatus.ACTIVE },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    let grossRevenueHt = D(0);
+    let cogsHt = D(0);
+    let unknownCostLines = 0;
+    let estimatedCostLines = 0;
+    for (const sale of sales) {
+      grossRevenueHt = grossRevenueHt.plus(sale.subtotal);
+      for (const item of sale.items) {
+        if (item.unitPurchaseCostHt == null) unknownCostLines += 1;
+        else
+          cogsHt = cogsHt.plus(D(item.unitPurchaseCostHt).mul(item.quantity));
+        if (item.purchaseCostEstimated) estimatedCostLines += 1;
+      }
+    }
+
+    let creditsHt = D(0);
+    let returnedCogsHt = D(0);
+    for (const creditNote of creditNotes) {
+      creditsHt = creditsHt.plus(creditNote.subtotal);
+      for (const item of creditNote.items) {
+        const cost = item.saleItem?.unitPurchaseCostHt;
+        if (cost != null)
+          returnedCogsHt = returnedCogsHt.plus(
+            D(cost).mul(item.quantiteRetournee),
+          );
+      }
+    }
+
+    const netRevenueHt = grossRevenueHt.minus(creditsHt);
+    const netCogsHt = Prisma.Decimal.max(cogsHt.minus(returnedCogsHt), D(0));
+    const grossMarginHt = netRevenueHt.minus(netCogsHt);
+    const expenseTotal = D(expenses._sum.amount ?? 0);
+    const netProfit = grossMarginHt.minus(expenseTotal);
+    return {
+      salesCount: sales.length,
+      grossRevenueHt: round(grossRevenueHt),
+      creditNotesHt: round(creditsHt),
+      netRevenueHt: round(netRevenueHt),
+      cogsHt: round(netCogsHt),
+      returnedCogsHt: round(returnedCogsHt),
+      grossMarginHt: round(grossMarginHt),
+      expenses: round(expenseTotal),
+      netProfit: round(netProfit),
+      grossMarginRateOnRevenue: netRevenueHt.gt(0)
+        ? round(grossMarginHt.div(netRevenueHt).mul(100))
+        : 0,
+      dataQuality: {
+        unknownCostLines,
+        estimatedCostLines,
+        complete: unknownCostLines === 0,
+      },
+    };
+  }
+
   async getOverview(query: ReportOverviewQueryDto) {
     const period = query.period ?? 'month';
     const range = resolveReportDateRange(period, query.dateFrom, query.dateTo);
@@ -228,14 +349,18 @@ export class ReportsService {
     const buckets = buildTimeBuckets(period, range);
 
     const salesFilter = {
-      documentType: { in: REVENUE_DOC_TYPES },
-      status: { not: SaleStatus.CANCELLED },
-      deletedAt: null as null,
+      status: { in: REVENUE_STATUSES },
+      deletedAt: null,
+      OR: [
+        { documentType: DocumentType.FACTURE },
+        { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
+      ],
     };
 
     const purchasesFilter = {
       status: { notIn: [PurchaseStatus.CANCELLED] },
-      deletedAt: null as null,
+      documentType: { not: 'BON_COMMANDE' as const },
+      deletedAt: null,
     };
 
     const [
@@ -245,7 +370,6 @@ export class ReportsService {
       prevPurchasesAgg,
       customerPaymentsAgg,
       supplierPaymentsAgg,
-      depensesAgg,
       avoirsAgg,
       devisCount,
       bonCommandeCount,
@@ -265,7 +389,13 @@ export class ReportsService {
     ] = await Promise.all([
       this.prisma.sale.aggregate({
         where: { ...salesFilter, createdAt: range },
-        _sum: { total: true, stampDuty: true, totalRefunded: true, paidAmount: true, remainingAmount: true },
+        _sum: {
+          total: true,
+          stampDuty: true,
+          totalRefunded: true,
+          paidAmount: true,
+          remainingAmount: true,
+        },
         _count: true,
       }),
       this.prisma.sale.aggregate({
@@ -275,7 +405,12 @@ export class ReportsService {
       }),
       this.prisma.purchase.aggregate({
         where: { ...purchasesFilter, createdAt: range },
-        _sum: { total: true, stampDuty: true, remainingAmount: true, paidAmount: true },
+        _sum: {
+          total: true,
+          stampDuty: true,
+          remainingAmount: true,
+          paidAmount: true,
+        },
         _count: true,
       }),
       this.prisma.purchase.aggregate({
@@ -301,33 +436,45 @@ export class ReportsService {
         },
         _sum: { amount: true },
       }),
-      this.prisma.caisseMovement.aggregate({
-        where: {
-          type: { in: [CaisseMovementType.RETRAIT_MANUEL, CaisseMovementType.DEPENSE_GENERALE] },
-          clearedAt: null,
-          createdAt: range,
-        },
-        _sum: { montant: true },
-      }),
       this.prisma.creditNote.aggregate({
         where: { statut: { not: 'CANCELLED' }, dateAvoir: range },
         _sum: { total: true, stampDuty: true, montantRembourse: true },
         _count: true,
       }),
       this.prisma.sale.count({
-        where: { documentType: DocumentType.DEVIS, deletedAt: null, createdAt: range },
+        where: {
+          documentType: DocumentType.DEVIS,
+          deletedAt: null,
+          createdAt: range,
+        },
       }),
       this.prisma.sale.count({
-        where: { documentType: DocumentType.BON_COMMANDE, deletedAt: null, createdAt: range },
+        where: {
+          documentType: DocumentType.BON_COMMANDE,
+          deletedAt: null,
+          createdAt: range,
+        },
       }),
       this.prisma.sale.count({
-        where: { documentType: DocumentType.BON_LIVRAISON, deletedAt: null, createdAt: range },
+        where: {
+          documentType: DocumentType.BON_LIVRAISON,
+          deletedAt: null,
+          createdAt: range,
+        },
       }),
       this.prisma.sale.count({
-        where: { documentType: DocumentType.FACTURE, deletedAt: null, createdAt: range },
+        where: {
+          documentType: DocumentType.FACTURE,
+          deletedAt: null,
+          createdAt: range,
+        },
       }),
       this.prisma.sale.count({
-        where: { status: SaleStatus.CANCELLED, deletedAt: null, createdAt: range },
+        where: {
+          status: SaleStatus.CANCELLED,
+          deletedAt: null,
+          createdAt: range,
+        },
       }),
       this.prisma.caisseConfig.findFirst(),
       this.prisma.product.findMany({
@@ -355,13 +502,25 @@ export class ReportsService {
       }),
       this.prisma.stockMovement.count({ where: { createdAt: range } }),
       this.prisma.sale.count({
-        where: { ...salesFilter, paymentStatus: PaymentStatus.PAID, createdAt: range },
+        where: {
+          ...salesFilter,
+          paymentStatus: PaymentStatus.PAID,
+          createdAt: range,
+        },
       }),
       this.prisma.sale.count({
-        where: { ...salesFilter, paymentStatus: PaymentStatus.PARTIAL, createdAt: range },
+        where: {
+          ...salesFilter,
+          paymentStatus: PaymentStatus.PARTIAL,
+          createdAt: range,
+        },
       }),
       this.prisma.sale.count({
-        where: { ...salesFilter, paymentStatus: PaymentStatus.UNPAID, createdAt: range },
+        where: {
+          ...salesFilter,
+          paymentStatus: PaymentStatus.UNPAID,
+          createdAt: range,
+        },
       }),
       this.prisma.saleItem.groupBy({
         by: ['productId'],
@@ -398,8 +557,17 @@ export class ReportsService {
         }),
         this.prisma.sale.groupBy({
           by: ['customerId'],
-          where: { ...salesFilter, customerId: { not: null }, createdAt: range },
-          _sum: { total: true, stampDuty: true, totalRefunded: true, remainingAmount: true },
+          where: {
+            ...salesFilter,
+            customerId: { not: null },
+            createdAt: range,
+          },
+          _sum: {
+            total: true,
+            stampDuty: true,
+            totalRefunded: true,
+            remainingAmount: true,
+          },
           orderBy: { _sum: { total: 'desc' } },
           take: 10,
         }),
@@ -417,13 +585,19 @@ export class ReportsService {
       select: { id: true, name: true, reference: true },
     });
 
+    const [financials, previousFinancials] = await Promise.all([
+      this.calculateFinancials(range),
+      this.calculateFinancials(prevRange),
+    ]);
+
     // ── Time-series ───────────────────────────────────────────────────────────
-    const series = await this.buildTimeSeries(buckets, salesFilter, purchasesFilter);
+    const series = await this.buildTimeSeries(buckets, purchasesFilter);
 
     // ── Scalar KPIs ───────────────────────────────────────────────────────────
-    const caNet = num(salesAgg._sum.total) + num(salesAgg._sum.stampDuty) - num(salesAgg._sum.totalRefunded);
-    const prevCaNet = num(prevSalesAgg._sum.total) + num(prevSalesAgg._sum.stampDuty) - num(prevSalesAgg._sum.totalRefunded);
-    const totalAchats = num(purchasesAgg._sum.total) + num(purchasesAgg._sum.stampDuty);
+    const caNet = financials.netRevenueHt;
+    const prevCaNet = previousFinancials.netRevenueHt;
+    const totalAchats =
+      num(purchasesAgg._sum.total) + num(purchasesAgg._sum.stampDuty);
     const panierMoyen = salesAgg._count > 0 ? caNet / salesAgg._count : 0;
 
     // Stock value (all active products)
@@ -473,36 +647,45 @@ export class ReportsService {
     const clientById = new Map(topClientDetails.map((c) => [c.id, c]));
     const supplierById = new Map(supplierDetails.map((s) => [s.id, s]));
 
-    const benefice = caNet - totalAchats;
-    const marge = caNet > 0 ? +(((benefice / caNet) * 100).toFixed(2)) : 0;
+    const benefice = financials.netProfit;
+    const marge = financials.grossMarginRateOnRevenue;
 
     return {
       period,
       range: { from: range.gte.toISOString(), to: range.lte.toISOString() },
 
       financier: {
-        caNet: +caNet.toFixed(3),
-        caGross: +(num(salesAgg._sum.total) + num(salesAgg._sum.stampDuty)).toFixed(3),
+        caNet,
+        caGross: financials.grossRevenueHt,
         caTrend: trend(caNet, prevCaNet),
-        encaissementsClients: +num(customerPaymentsAgg._sum.amount).toFixed(3),
-        impayesClients: +num(salesAgg._sum.remainingAmount).toFixed(3),
-        totalAchats: +totalAchats.toFixed(3),
-        achatsTrend: trend(totalAchats, num(prevPurchasesAgg._sum.total) + num(prevPurchasesAgg._sum.stampDuty)),
-        paiementsFournisseurs: +num(supplierPaymentsAgg._sum.amount).toFixed(3),
-        impayesFournisseurs: +num(purchasesAgg._sum.remainingAmount).toFixed(3),
-        depenses: +num(depensesAgg._sum.montant).toFixed(3),
-        beneficeEstime: +benefice.toFixed(3),
+        encaissementsClients: moneyRound(num(customerPaymentsAgg._sum.amount)),
+        impayesClients: moneyRound(num(salesAgg._sum.remainingAmount)),
+        totalAchats: moneyRound(totalAchats),
+        achatsTrend: trend(
+          totalAchats,
+          num(prevPurchasesAgg._sum.total) +
+            num(prevPurchasesAgg._sum.stampDuty),
+        ),
+        paiementsFournisseurs: moneyRound(num(supplierPaymentsAgg._sum.amount)),
+        impayesFournisseurs: moneyRound(num(purchasesAgg._sum.remainingAmount)),
+        depenses: financials.expenses,
+        coutProduitsVendus: financials.cogsHt,
+        margeBruteReelle: financials.grossMarginHt,
+        beneficeEstime: benefice,
         margePercent: marge,
-        soldeCaisse: +num(caisseConfig?.solde).toFixed(3),
-        soldeBanque: +num(caisseConfig?.soldeBanque).toFixed(3),
-        soldeGlobal: +(num(caisseConfig?.solde) + num(caisseConfig?.soldeBanque)).toFixed(3),
+        dataQuality: financials.dataQuality,
+        soldeCaisse: moneyRound(num(caisseConfig?.solde)),
+        soldeBanque: moneyRound(num(caisseConfig?.soldeBanque)),
+        soldeGlobal: moneyRound(
+          num(caisseConfig?.solde) + num(caisseConfig?.soldeBanque),
+        ),
       },
 
       ventes: {
         count: salesAgg._count,
         prevCount: prevSalesAgg._count,
         countTrend: trend(salesAgg._count, prevSalesAgg._count),
-        panierMoyen: +panierMoyen.toFixed(3),
+        panierMoyen: moneyRound(panierMoyen),
         devisCount,
         bonCommandeCount,
         blCount,
@@ -515,8 +698,10 @@ export class ReportsService {
         },
         avoirs: {
           count: avoirsAgg._count,
-          total: +(num(avoirsAgg._sum.total) + num(avoirsAgg._sum.stampDuty)).toFixed(3),
-          montantRembourse: +num(avoirsAgg._sum.montantRembourse).toFixed(3),
+          total: moneyRound(
+            num(avoirsAgg._sum.total) + num(avoirsAgg._sum.stampDuty),
+          ),
+          montantRembourse: moneyRound(num(avoirsAgg._sum.montantRembourse)),
         },
       },
 
@@ -527,8 +712,8 @@ export class ReportsService {
       },
 
       stock: {
-        valeurAchat: +stockValue.purchaseValue.toFixed(3),
-        valeurVente: +stockValue.saleValue.toFixed(3),
+        valeurAchat: moneyRound(stockValue.purchaseValue),
+        valeurVente: moneyRound(stockValue.saleValue),
         totalProduits: stockProducts.length,
         ruptureCount,
         lowStockCount,
@@ -547,29 +732,37 @@ export class ReportsService {
           minStock: p.minStock,
           category: p.category?.name ?? null,
           brand: p.brand?.name ?? null,
-          statut: (p.quantity <= 0 ? 'rupture' : 'faible') as 'rupture' | 'faible',
+          statut: p.quantity <= 0 ? 'rupture' : 'faible',
         })),
         parCategorie: stockByCategory,
       },
 
-      clients: { total: await this.prisma.customer.count({ where: { deletedAt: null } }) },
+      clients: {
+        total: await this.prisma.customer.count({ where: { deletedAt: null } }),
+      },
 
       topProduits: topProductsRaw.map((item) => ({
         product: prodById.get(item.productId) ?? null,
         quantitySold: num(item._sum.quantity),
-        revenue: +num(item._sum.total).toFixed(3),
+        revenue: moneyRound(num(item._sum.total)),
       })),
 
       topClients: topClientSales.map((item) => ({
         customer: clientById.get(item.customerId!) ?? null,
-        ca: +(num(item._sum.total) + num(item._sum.stampDuty) - num(item._sum.totalRefunded)).toFixed(3),
-        impaye: +num(item._sum.remainingAmount).toFixed(3),
+        ca: moneyRound(
+          num(item._sum.total) +
+            num(item._sum.stampDuty) -
+            num(item._sum.totalRefunded),
+        ),
+        impaye: moneyRound(num(item._sum.remainingAmount)),
       })),
 
       topFournisseurs: topSuppliersRaw.map((item) => ({
         supplier: supplierById.get(item.supplierId) ?? null,
-        totalAchats: +(num(item._sum.total) + num(item._sum.stampDuty)).toFixed(3),
-        impaye: +num(item._sum.remainingAmount).toFixed(3),
+        totalAchats: moneyRound(
+          num(item._sum.total) + num(item._sum.stampDuty),
+        ),
+        impaye: moneyRound(num(item._sum.remainingAmount)),
       })),
 
       series,
@@ -578,20 +771,16 @@ export class ReportsService {
 
   private async buildTimeSeries(
     buckets: TimeBucket[],
-    salesFilter: Record<string, unknown>,
     purchasesFilter: Record<string, unknown>,
   ) {
     return Promise.all(
       buckets.map(async (bucket) => {
         const range = { gte: bucket.start, lte: bucket.end };
-        const [s, p, enc, dep] = await Promise.all([
-          this.prisma.sale.aggregate({
-            where: { ...salesFilter, createdAt: range },
-            _sum: { total: true, stampDuty: true, totalRefunded: true },
-          }),
+        const [p, enc, financials] = await Promise.all([
           this.prisma.purchase.aggregate({
             where: { ...purchasesFilter, createdAt: range },
             _sum: { total: true, stampDuty: true },
+            _count: true,
           }),
           this.prisma.payment.aggregate({
             where: {
@@ -602,25 +791,23 @@ export class ReportsService {
             },
             _sum: { amount: true },
           }),
-          this.prisma.caisseMovement.aggregate({
-            where: {
-              type: { in: [CaisseMovementType.RETRAIT_MANUEL, CaisseMovementType.DEPENSE_GENERALE] },
-              clearedAt: null,
-              createdAt: range,
-            },
-            _sum: { montant: true },
-          }),
+          this.calculateFinancials(range),
         ]);
 
-        const ca = num(s._sum.total) + num(s._sum.stampDuty) - num(s._sum.totalRefunded);
+        const ca = financials.netRevenueHt;
         const achats = num(p._sum.total) + num(p._sum.stampDuty);
         return {
           label: bucket.label,
-          ca: +ca.toFixed(3),
-          achats: +achats.toFixed(3),
-          encaissements: +num(enc._sum.amount).toFixed(3),
-          depenses: +num(dep._sum.montant).toFixed(3),
-          benefice: +(ca - achats).toFixed(3),
+          ca,
+          achats: new Prisma.Decimal(achats).toDecimalPlaces(3).toNumber(),
+          encaissements: new Prisma.Decimal(num(enc._sum.amount))
+            .toDecimalPlaces(3)
+            .toNumber(),
+          depenses: financials.expenses,
+          benefice: financials.netProfit,
+          margeBrute: financials.grossMarginHt,
+          ventes: financials.salesCount,
+          achatsCount: p._count,
         };
       }),
     );
@@ -628,39 +815,42 @@ export class ReportsService {
 
   // ─── Legacy endpoints ─────────────────────────────────────────────────────────
 
-  async dashboard() {
-    const [productsCount, lowStockList, customersCount, salesAggregate, unpaidSales] =
-      await Promise.all([
-        this.prisma.product.count({ where: { deletedAt: null, isActive: true } }),
-        this.lowStockProducts(),
-        this.prisma.customer.count(),
-        this.prisma.sale.aggregate({
-          where: {
-            documentType: DocumentType.FACTURE,
-            status: SaleStatus.COMPLETED,
-            deletedAt: null,
+  async dashboard(query: ReportOverviewQueryDto = {}) {
+    const overview = await this.getOverview(query);
+    const range = {
+      gte: new Date(overview.range.from),
+      lte: new Date(overview.range.to),
+    };
+    const [pendingCustomerOrders, pendingSupplierReceipts] = await Promise.all([
+      this.prisma.sale.count({
+        where: {
+          documentType: DocumentType.BON_COMMANDE,
+          status: SaleStatus.DRAFT,
+          deletedAt: null,
+          createdAt: range,
+        },
+      }),
+      this.prisma.purchase.count({
+        where: {
+          documentType: 'BON_COMMANDE',
+          status: {
+            in: [PurchaseStatus.ORDERED, PurchaseStatus.PARTIALLY_RECEIVED],
           },
-          _sum: { total: true, stampDuty: true, paidAmount: true },
-          _count: true,
-        }),
-        this.prisma.sale.count({
-          where: {
-            documentType: DocumentType.FACTURE,
-            paymentStatus: { not: PaymentStatus.PAID },
-            status: { not: SaleStatus.CANCELLED },
-            deletedAt: null,
-          },
-        }),
-      ]);
-
+          deletedAt: null,
+          createdAt: range,
+        },
+      }),
+    ]);
     return {
-      productsCount,
-      lowStockCount: lowStockList.length,
-      customersCount,
-      salesCount: salesAggregate._count,
-      salesTotal: num(salesAggregate._sum.total) + num(salesAggregate._sum.stampDuty),
-      paidTotal: salesAggregate._sum.paidAmount ?? 0,
-      unpaidSales,
+      period: overview.period,
+      range: overview.range,
+      ventes: overview.ventes,
+      achats: overview.achats,
+      stock: overview.stock,
+      topProduits: overview.topProduits,
+      series: overview.series,
+      pendingCustomerOrders,
+      pendingSupplierReceipts,
     };
   }
 

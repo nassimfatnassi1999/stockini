@@ -1,5 +1,11 @@
 import { generateClientId } from '@/lib/id';
-import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '@/lib/salesCalculations';
+import {
+  calculateSalesLine,
+  calculateSalesTotals,
+  DEFAULT_SALES_MARGIN_PERCENT,
+  salesRound3,
+} from '@/lib/salesCalculations';
+import { calculatePurchaseLine, calculatePurchaseTotals } from '@/lib/purchaseCalculations';
 
 export const MIN_MARGIN_PERCENT = 20;
 export const DEFAULT_MARGIN_PERCENT = DEFAULT_SALES_MARGIN_PERCENT;
@@ -98,15 +104,14 @@ export function createEmptyLine(id: string = generateClientId()): RegisterLine {
 }
 
 function round3(value: number): number {
-  return Math.round(value * 1000) / 1000;
+  return salesRound3(value);
 }
 
 /** For purchases: remise reduces the purchase price directly */
 export function recalculateLine(line: RegisterLine): RegisterLine {
-  const grossHt = round3(line.quantity * line.puHt);
-  const remiseAmount = round3(grossHt * line.remisePercent / 100);
-  const netHt = round3(grossHt - remiseAmount);
-  const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
+  const result = calculatePurchaseLine({ quantity: line.quantity, unitCost: line.puHt, discountPercent: line.remisePercent, tvaPercent: line.tvaPercent });
+  const netHt = result.netHt;
+  const netTtc = result.totalTtc;
   const margePercent = calcMargePercent(line.puHt, line.remisePercent, line.purchasePriceHt);
   const margeAmount = calcMargeAmount(line.puHt, line.remisePercent, line.purchasePriceHt);
   return { ...line, netHt, netTtc, margePercent, margeAmount };
@@ -124,6 +129,7 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
   if (line.purchasePriceHt > 0) {
     const result = calculateSalesLine({
       purchasePriceHt: line.purchasePriceHt,
+      ...(line.manualUnitPriceHt && { grossSalePriceHt: line.puHt }),
       marginPercent: line.defaultMarginPercent,
       discountPercent: line.remisePercent,
       taxPercent: line.tvaPercent,
@@ -131,7 +137,7 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     });
     return {
       ...line,
-      puHt: result.unitPriceHt,
+      puHt: result.grossSalePriceHt,
       margePercent: result.netMarginPercent,
       margeAmount: result.marginAmount,
       netHt: result.totalHt,
@@ -139,26 +145,36 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     };
   }
 
-  // No purchase price: use puHt as-is.
-  const netHt = round3(line.puHt * line.quantity);
-  const netTtc = round3(netHt * (1 + line.tvaPercent / 100));
-  return { ...line, margePercent: null, margeAmount: null, netHt, netTtc };
+  // Devis sans coût connu : conserver le brut saisi mais appliquer la remise normalement.
+  const result = calculateSalesLine({
+    purchasePriceHt: 0,
+    grossSalePriceHt: line.puHt,
+    discountPercent: line.remisePercent,
+    taxPercent: line.tvaPercent,
+    quantity: line.quantity,
+  });
+  return { ...line, margePercent: null, margeAmount: null, netHt: result.totalHt, netTtc: result.totalTtc };
 }
 
 export function calculateSalesDocumentTotals(lines: RegisterLine[]): DocumentTotals {
   const filled = lines.filter(isFilledLine);
   const calculations = filled.map((line) => calculateSalesLine({
     purchasePriceHt: line.purchasePriceHt,
+    grossSalePriceHt: line.puHt,
     marginPercent: line.defaultMarginPercent,
     discountPercent: line.remisePercent,
     taxPercent: line.tvaPercent,
     quantity: line.quantity,
   }));
-  const totalHt = round3(calculations.reduce((sum, line) => sum + line.totalHt, 0));
-  const totalRemise = round3(calculations.reduce((sum, line) => sum + line.discountAmount, 0));
-  const totalTva = round3(calculations.reduce((sum, line) => sum + line.taxAmount, 0));
-  const totalTtc = round3(totalHt + totalTva);
-  return { totalHt, totalRemise, totalTva, totalTtc, stampDuty: DEFAULT_STAMP_DUTY, totalFinal: round3(totalTtc + DEFAULT_STAMP_DUTY) };
+  const totals = calculateSalesTotals(calculations, DEFAULT_STAMP_DUTY);
+  return {
+    totalHt: totals.totalHt,
+    totalRemise: totals.totalDiscountHt,
+    totalTva: totals.totalVat,
+    totalTtc: totals.totalTtc,
+    stampDuty: totals.fiscalStamp,
+    totalFinal: totals.totalToPay,
+  };
 }
 
 export function isFilledLine(line: RegisterLine): boolean {
@@ -169,14 +185,13 @@ export function isFilledLine(line: RegisterLine): boolean {
   );
 }
 
-export function calculateDocumentTotals(lines: RegisterLine[]): DocumentTotals {
+export function calculateDocumentTotals(lines: RegisterLine[], stampDuty = DEFAULT_STAMP_DUTY): DocumentTotals {
   const filled = lines.filter(isFilledLine);
-  const totalGrossHt = round3(filled.reduce((s, l) => s + round3(l.quantity * l.puHt), 0));
-  const totalHt = round3(filled.reduce((s, l) => s + l.netHt, 0));
-  const totalRemise = round3(totalGrossHt - totalHt);
-  const totalTva = round3(filled.reduce((s, l) => s + round3(l.netHt * l.tvaPercent / 100), 0));
-  const totalTtc = round3(totalHt + totalTva);
-  return { totalHt, totalRemise, totalTva, totalTtc, stampDuty: DEFAULT_STAMP_DUTY, totalFinal: round3(totalTtc + DEFAULT_STAMP_DUTY) };
+  const totals = calculatePurchaseTotals(filled.map((line) => calculatePurchaseLine({
+    quantity: line.quantity, unitCost: line.puHt, discountPercent: line.remisePercent, tvaPercent: line.tvaPercent,
+  })), stampDuty);
+  return { totalHt: totals.subtotal, totalRemise: totals.discount, totalTva: totals.tax,
+    totalTtc: totals.total, stampDuty: totals.stampDuty, totalFinal: totals.totalFinal };
 }
 
 /**

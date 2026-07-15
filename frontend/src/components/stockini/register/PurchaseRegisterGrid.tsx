@@ -12,6 +12,7 @@ import {
 interface Props {
   lines: RegisterLine[];
   onLinesChange: (lines: RegisterLine[]) => void;
+  stampDuty?: number;
 }
 
 const HEADERS = [
@@ -36,8 +37,8 @@ function fmt3(value: number): string {
   });
 }
 
-export function PurchaseRegisterGrid({ lines, onLinesChange }: Props) {
-  const totals = calculateDocumentTotals(lines);
+export function PurchaseRegisterGrid({ lines, onLinesChange, stampDuty = 1 }: Props) {
+  const totals = calculateDocumentTotals(lines, stampDuty);
 
   const updateLine = (index: number, updated: RegisterLine) => {
     const next = lines.map((l, i) => (i === index ? updated : l));

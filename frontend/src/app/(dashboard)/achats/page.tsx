@@ -348,10 +348,10 @@ export default function AchatsPage() {
   const isFromCommande = docType === 'BON_RECEPTION' && receptionMode === 'FROM_COMMANDE';
 
   const filledLines = lines.filter(isFilledLine);
-  const totals = calculateDocumentTotals(lines);
-  const paidAmountNum = Number(paidAmount) || 0;
   const stampDutyNum = Math.max(Number(stampDuty) || 0, 0);
-  const totalToPay = round3(totals.totalTtc + stampDutyNum);
+  const totals = calculateDocumentTotals(lines, stampDutyNum);
+  const paidAmountNum = Number(paidAmount) || 0;
+  const totalToPay = totals.totalFinal;
 
   const hasQtyOverrun =
     isFromCommande &&
@@ -708,7 +708,7 @@ export default function AchatsPage() {
       </div>
 
       {/* Purchase lines grid */}
-      <PurchaseRegisterGrid lines={lines} onLinesChange={setLines} />
+      <PurchaseRegisterGrid lines={lines} onLinesChange={setLines} stampDuty={stampDutyNum} />
 
       {/* Warnings */}
       {!isFromCommande && filledLines.some((l) => l.productId === null) && (

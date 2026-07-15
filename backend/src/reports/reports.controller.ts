@@ -23,8 +23,9 @@ export class ReportsController {
   }
 
   @Get('dashboard')
-  dashboard() {
-    return this.reportsService.dashboard();
+  @RequirePermissions('dashboard.view')
+  dashboard(@Query() query: ReportOverviewQueryDto) {
+    return this.reportsService.dashboard(query);
   }
 
   @RequirePermissions('reports.financial.view')

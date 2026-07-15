@@ -21,7 +21,7 @@ import { StateRows } from '../shared/StateRows';
 import { StockBadge } from '../shared/StockBadge';
 
 export function StockiniDashboardPage() {
-  const dashboard = useQuery({ queryKey: ['stockini-dashboard'], queryFn: stockiniApi.dashboard });
+  const dashboard = useQuery({ queryKey: ['stockini-dashboard'], queryFn: () => stockiniApi.dashboard() });
   const stockValue = useQuery({ queryKey: ['stockini-stock-value'], queryFn: stockiniApi.stockValue });
   const products = useQuery({ queryKey: ['stockini-products-preview'], queryFn: () => stockiniApi.products() });
   const alerts = useQuery({ queryKey: ['stockini-alerts-preview'], queryFn: stockiniApi.alerts });
@@ -35,10 +35,10 @@ export function StockiniDashboardPage() {
     <>
       <PageHeader title="Dashboard Stockini" subtitle="Vue opérationnelle des pièces, ventes, alertes et valeur de stock." />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={Boxes} label="Produits actifs" value={dashboard.data?.productsCount ?? '-'} />
-        <StatCard icon={AlertTriangle} label="Sous seuil" value={dashboard.data?.lowStockCount ?? '-'} tone="accent" />
-        <StatCard icon={Users} label="Clients" value={dashboard.data?.customersCount ?? '-'} />
-        <StatCard icon={Banknote} label="Ventes" value={money(dashboard.data?.salesTotal)} tone="green" />
+        <StatCard icon={Boxes} label="Produits actifs" value={dashboard.data?.stock.totalProduits ?? '-'} />
+        <StatCard icon={AlertTriangle} label="Sous seuil" value={dashboard.data?.stock.lowStockCount ?? '-'} tone="accent" />
+        <StatCard icon={Users} label="Unités en stock" value={dashboard.data?.stock.totalQuantite ?? '-'} />
+        <StatCard icon={Banknote} label="Ventes" value={dashboard.data?.ventes.count ?? '-'} tone="green" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">

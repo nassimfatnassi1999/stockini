@@ -175,18 +175,18 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
               // Recalcul immédiat à chaque frappe
               const newPuHt = Math.max(0, parseFloat(raw.replace(',', '.')) || 0);
               const margin = line.purchasePriceHt > 0
-                ? ((newPuHt / line.purchasePriceHt) - 1) * 100 + line.remisePercent
+                ? ((newPuHt / line.purchasePriceHt) - 1) * 100
                 : line.defaultMarginPercent;
-              onChange(recalculateSaleLine({ ...line, defaultMarginPercent: margin, manualUnitPriceHt: true }));
+              onChange(recalculateSaleLine({ ...line, puHt: newPuHt, defaultMarginPercent: margin, manualUnitPriceHt: true }));
             }}
             onBlur={() => {
               setIsPuHtFocused(false);
               // Recalcul final pour assurer la cohérence (ex: focus sans frappe)
               const newPuHt = Math.max(0, parseFloat(puHtRaw.replace(',', '.')) || 0);
               const margin = line.purchasePriceHt > 0
-                ? ((newPuHt / line.purchasePriceHt) - 1) * 100 + line.remisePercent
+                ? ((newPuHt / line.purchasePriceHt) - 1) * 100
                 : line.defaultMarginPercent;
-              onChange(recalculateSaleLine({ ...line, defaultMarginPercent: margin, manualUnitPriceHt: true }));
+              onChange(recalculateSaleLine({ ...line, puHt: newPuHt, defaultMarginPercent: margin, manualUnitPriceHt: true }));
             }}
             placeholder="—"
             className={NUM_INPUT}
@@ -217,7 +217,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
         {hasProduct ? margeAmountDisplay : '—'}
       </td>
 
-      {/* Remise % — soustraite directement de la marge brute */}
+      {/* Remise commerciale appliquée au prix brut HT */}
       <td className={`min-w-[60px] ${CELL}`}>
         <input
           type="number"

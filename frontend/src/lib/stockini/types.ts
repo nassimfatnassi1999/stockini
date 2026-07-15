@@ -172,6 +172,9 @@ export interface SaleItemDetail {
   marginPercent?: number | string | null;
   tvaPercent?: number | string | null;
   finalUnitPrice?: number | string | null;
+  unitPurchaseCostHt?: number | string | null;
+  purchaseCostEstimated?: boolean;
+  calculationVersion?: number;
   total: number | string;
   product?: {
     id: Id;
@@ -651,13 +654,22 @@ export interface CreditNote {
 }
 
 export interface DashboardReport {
-  productsCount: number;
-  lowStockCount: number;
-  customersCount: number;
-  salesCount: number;
-  salesTotal: number | string;
-  paidTotal: number | string;
-  unpaidSales: number;
+  period: ReportPeriod;
+  range: { from: string; to: string };
+  ventes: ReportOverview['ventes'];
+  achats: ReportOverview['achats'];
+  stock: ReportOverview['stock'];
+  topProduits: ReportTopProduct[];
+  series: ReportTimeSeries[];
+  pendingCustomerOrders: number;
+  pendingSupplierReceipts: number;
+  productsCount?: number;
+  lowStockCount?: number;
+  customersCount?: number;
+  salesCount?: number;
+  salesTotal?: number | string;
+  paidTotal?: number | string;
+  unpaidSales?: number;
 }
 
 export type ReportPeriod = 'today' | 'week' | 'month' | 'year' | 'custom';
@@ -675,6 +687,9 @@ export interface ReportTimeSeries {
   encaissements: number;
   depenses: number;
   benefice: number;
+  margeBrute: number;
+  ventes: number;
+  achatsCount: number;
 }
 
 export interface ReportCriticalProduct {
@@ -741,8 +756,11 @@ export interface ReportOverview {
     paiementsFournisseurs: number;
     impayesFournisseurs: number;
     depenses: number;
+    coutProduitsVendus: number;
+    margeBruteReelle: number;
     beneficeEstime: number;
     margePercent: number;
+    dataQuality: { unknownCostLines: number; estimatedCostLines: number; complete: boolean };
     soldeCaisse: number;
     soldeBanque: number;
     soldeGlobal: number;

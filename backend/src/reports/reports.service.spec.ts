@@ -1,4 +1,4 @@
-import { resolveReportDateRange } from './reports.service';
+import { ReportsService, resolveReportDateRange } from './reports.service';
 
 // ─── resolveReportDateRange ───────────────────────────────────────────────────
 
@@ -83,13 +83,16 @@ describe('KPI arithmetic', () => {
   describe('caNet', () => {
     it('no refunds: equals total', () => expect(caNet(1000, 0)).toBe(1000));
     it('full refund: equals 0', () => expect(caNet(1000, 1000)).toBe(0));
-    it('partial refund: total minus refunded', () => expect(caNet(1000, 200)).toBe(800));
+    it('partial refund: total minus refunded', () =>
+      expect(caNet(1000, 200)).toBe(800));
   });
 
   describe('benefice', () => {
-    it('positive when CA > achats', () => expect(benefice(1000, 600)).toBe(400));
+    it('positive when CA > achats', () =>
+      expect(benefice(1000, 600)).toBe(400));
     it('zero when equal', () => expect(benefice(800, 800)).toBe(0));
-    it('negative when CA < achats (loss)', () => expect(benefice(500, 700)).toBe(-200));
+    it('negative when CA < achats (loss)', () =>
+      expect(benefice(500, 700)).toBe(-200));
   });
 
   describe('marge', () => {
@@ -148,13 +151,15 @@ describe('KPI arithmetic', () => {
     it('purchase value = qty * purchasePrice', () => {
       const products = [
         { quantity: 10, purchasePrice: 50, salePrice: 80 },
-        { quantity: 5,  purchasePrice: 20, salePrice: 35 },
+        { quantity: 5, purchasePrice: 20, salePrice: 35 },
       ];
       const purchaseValue = products.reduce(
-        (acc, p) => acc + p.quantity * p.purchasePrice, 0,
+        (acc, p) => acc + p.quantity * p.purchasePrice,
+        0,
       );
       const saleValue = products.reduce(
-        (acc, p) => acc + p.quantity * p.salePrice, 0,
+        (acc, p) => acc + p.quantity * p.salePrice,
+        0,
       );
       expect(purchaseValue).toBe(600);
       expect(saleValue).toBe(975);
@@ -201,6 +206,89 @@ describe('CA business rules', () => {
   });
 });
 
+describe('ReportsService real profit', () => {
+  it('utilise le coût snapshot, déduplique le BL transformé et traite un avoir partiel', async () => {
+    const saleFindMany = jest.fn().mockResolvedValue([
+      {
+        subtotal: 238,
+        items: [
+          {
+            quantity: 2,
+            unitPurchaseCostHt: 100,
+            purchaseCostEstimated: false,
+          },
+        ],
+      },
+    ]);
+    const prisma = {
+      sale: { findMany: saleFindMany },
+      creditNote: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            subtotal: 119,
+            items: [
+              { quantiteRetournee: 1, saleItem: { unitPurchaseCostHt: 100 } },
+            ],
+          },
+        ]),
+      },
+      expense: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 5 } }),
+      },
+    } as any;
+    const service = new ReportsService(prisma);
+    const result = await (service as any).calculateFinancials({
+      gte: new Date('2026-07-01'),
+      lte: new Date('2026-07-31'),
+    });
+    expect(saleFindMany.mock.calls[0][0].where.OR).toEqual([
+      { documentType: 'FACTURE' },
+      { documentType: 'BON_LIVRAISON', transformedToId: null },
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        netRevenueHt: 119,
+        cogsHt: 100,
+        returnedCogsHt: 100,
+        grossMarginHt: 19,
+        expenses: 5,
+        netProfit: 14,
+      }),
+    );
+  });
+
+  it('signale les anciennes lignes dont le coût ne peut pas être reconstruit', async () => {
+    const prisma = {
+      sale: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            subtotal: 50,
+            items: [
+              {
+                quantity: 1,
+                unitPurchaseCostHt: null,
+                purchaseCostEstimated: false,
+              },
+            ],
+          },
+        ]),
+      },
+      creditNote: { findMany: jest.fn().mockResolvedValue([]) },
+      expense: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
+      },
+    } as any;
+    const result = await (
+      new ReportsService(prisma) as any
+    ).calculateFinancials({ gte: new Date(), lte: new Date() });
+    expect(result.dataQuality).toEqual({
+      unknownCostLines: 1,
+      estimatedCostLines: 0,
+      complete: false,
+    });
+  });
+});
+
 // ─── Critical stock detection ─────────────────────────────────────────────────
 
 describe('critical stock', () => {
@@ -210,10 +298,16 @@ describe('critical stock', () => {
     return 'ok';
   }
 
-  it('quantity=0 → rupture', () => expect(classify({ quantity: 0, minStock: 5 })).toBe('rupture'));
-  it('quantity=-1 → rupture', () => expect(classify({ quantity: -1, minStock: 5 })).toBe('rupture'));
-  it('quantity=minStock → faible', () => expect(classify({ quantity: 5, minStock: 5 })).toBe('faible'));
-  it('quantity<minStock → faible', () => expect(classify({ quantity: 3, minStock: 5 })).toBe('faible'));
-  it('quantity>minStock → ok', () => expect(classify({ quantity: 10, minStock: 5 })).toBe('ok'));
-  it('minStock=0 quantity=0 → rupture', () => expect(classify({ quantity: 0, minStock: 0 })).toBe('rupture'));
+  it('quantity=0 → rupture', () =>
+    expect(classify({ quantity: 0, minStock: 5 })).toBe('rupture'));
+  it('quantity=-1 → rupture', () =>
+    expect(classify({ quantity: -1, minStock: 5 })).toBe('rupture'));
+  it('quantity=minStock → faible', () =>
+    expect(classify({ quantity: 5, minStock: 5 })).toBe('faible'));
+  it('quantity<minStock → faible', () =>
+    expect(classify({ quantity: 3, minStock: 5 })).toBe('faible'));
+  it('quantity>minStock → ok', () =>
+    expect(classify({ quantity: 10, minStock: 5 })).toBe('ok'));
+  it('minStock=0 quantity=0 → rupture', () =>
+    expect(classify({ quantity: 0, minStock: 0 })).toBe('rupture'));
 });

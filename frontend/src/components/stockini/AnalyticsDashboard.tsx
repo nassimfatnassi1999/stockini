@@ -250,6 +250,7 @@ export function AnalyticsDashboard() {
     label:      s.label,
     CA:         Math.round(s.ca),
     Achats:     Math.round(s.achats),
+    'Marge brute': Math.round(s.margeBrute),
     Bénéfice:   Math.round(s.benefice),
     Encaissements: Math.round(s.encaissements),
     Dépenses:   Math.round(s.depenses),
@@ -287,6 +288,12 @@ export function AnalyticsDashboard() {
   return (
     <div className="space-y-6 pb-10">
       {header}
+      {!financier.dataQuality.complete && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Marge historique partielle : {financier.dataQuality.unknownCostLines} ligne(s) sans coût reconstructible.
+          {financier.dataQuality.estimatedCostLines > 0 && ` ${financier.dataQuality.estimatedCostLines} coût(s) ont été reconstruits et signalés comme estimés.`}
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════
           SECTION 1 — SYNTHÈSE FINANCIÈRE
@@ -296,7 +303,7 @@ export function AnalyticsDashboard() {
         <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KpiCard
             icon={DollarSign}
-            label="Chiffre d'affaires"
+            label="CA net HT hors timbre"
             value={money(financier.caNet)}
             trend={financier.caTrend}
             color="orange"
@@ -315,9 +322,9 @@ export function AnalyticsDashboard() {
           />
           <KpiCard
             icon={TrendingUp}
-            label="Bénéfice estimé"
+            label="Bénéfice réel"
             value={money(financier.beneficeEstime)}
-            sub={`Marge : ${financier.margePercent}%`}
+            sub={`Marge brute : ${money(financier.margeBruteReelle)} (${financier.margePercent}%)`}
             color={financier.beneficeEstime >= 0 ? 'green' : 'red'}
           />
           <KpiCard
@@ -539,11 +546,11 @@ export function AnalyticsDashboard() {
             </CardContent>
           </Card>
 
-          {/* Chart 2 — Achats vs Ventes + Bénéfice */}
+          {/* Chart 2 — CA, marge brute et bénéfice */}
           <Card className="shadow-card">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <BarChart2 size={14} className="text-accent" /> CA vs Achats vs Bénéfice
+                <BarChart2 size={14} className="text-accent" /> CA net HT, marge brute et bénéfice
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
@@ -556,7 +563,7 @@ export function AnalyticsDashboard() {
                     <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                     <Line type="monotone" dataKey="CA"       stroke="#E67E22" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-                    <Line type="monotone" dataKey="Achats"   stroke="#2563EB" strokeWidth={2}   dot={false} strokeDasharray="5 3" activeDot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="Marge brute" stroke="#2563EB" strokeWidth={2} dot={false} strokeDasharray="5 3" activeDot={{ r: 4 }} />
                     <Line type="monotone" dataKey="Bénéfice" stroke="#10B981" strokeWidth={2}   dot={false} strokeDasharray="3 2" activeDot={{ r: 4 }} />
                   </LineChart>
                 </ResponsiveContainer>

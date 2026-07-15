@@ -22,8 +22,17 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { calculateSalesLine, DEFAULT_SALES_MARGIN_PERCENT } from '../common/utils/sales-calculations';
-import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
+import {
+  calculateSalesLine,
+  calculateSalesTotals,
+  DEFAULT_SALES_MARGIN_PERCENT,
+  SALES_CALCULATION_VERSION,
+  salesRound3,
+} from '../common/utils/sales-calculations';
+import {
+  commercialTotalFinal,
+  DEFAULT_STAMP_DUTY,
+} from '../common/utils/commercial-document';
 import {
   CreateSaleDto,
   SalePaginationDto,
@@ -55,8 +64,15 @@ const LAST_SALE_PRICE_TYPE_LIST = [
 
 // Transformations autorisées : source -> cibles possibles
 const ALLOWED_TRANSFORMS: Partial<Record<DocumentType, DocumentType[]>> = {
-  [DocumentType.DEVIS]: [DocumentType.BON_COMMANDE, DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
-  [DocumentType.BON_COMMANDE]: [DocumentType.BON_LIVRAISON, DocumentType.FACTURE],
+  [DocumentType.DEVIS]: [
+    DocumentType.BON_COMMANDE,
+    DocumentType.BON_LIVRAISON,
+    DocumentType.FACTURE,
+  ],
+  [DocumentType.BON_COMMANDE]: [
+    DocumentType.BON_LIVRAISON,
+    DocumentType.FACTURE,
+  ],
   [DocumentType.BON_LIVRAISON]: [DocumentType.FACTURE],
 };
 
@@ -104,15 +120,24 @@ export class SalesService {
     if (!resolvedCustomerId && dto.counterClientEmail?.trim()) {
       const email = dto.counterClientEmail.trim().toLowerCase();
       const existing = await this.prisma.customer.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' }, deletedAt: null },
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          deletedAt: null,
+        },
         select: { id: true },
       });
       if (existing) {
         resolvedCustomerId = existing.id;
       } else {
-        const fullName = dto.counterClientLastName?.trim() || dto.counterClientFullName?.trim() || 'Client comptoir';
+        const fullName =
+          dto.counterClientLastName?.trim() ||
+          dto.counterClientFullName?.trim() ||
+          'Client comptoir';
         const created = await this.prisma.$transaction(async (tx) => {
-          const ref = await this.references.generateForCustomer('INDIVIDUAL', tx);
+          const ref = await this.references.generateForCustomer(
+            'INDIVIDUAL',
+            tx,
+          );
           return tx.customer.create({
             data: {
               reference: ref,
@@ -155,12 +180,17 @@ export class SalesService {
     }
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
-    const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
+    const allowEditUnitPriceHt = this.hasPermission(
+      user,
+      'sales.line.edit_unit_price_ht',
+    );
     const documentDate = dto.date ? new Date(dto.date) : new Date();
     const counterClientFullName = isComptoir
-      ? (dto.counterClientFirstName && dto.counterClientLastName)
+      ? dto.counterClientFirstName && dto.counterClientLastName
         ? `${dto.counterClientFirstName.trim()} ${dto.counterClientLastName.trim()}`
-        : (dto.counterClientLastName?.trim() || dto.counterClientFirstName?.trim() || undefined)
+        : dto.counterClientLastName?.trim() ||
+          dto.counterClientFirstName?.trim() ||
+          undefined
       : dto.counterClientFullName?.trim() || undefined;
 
     const sale = await this.prisma.$transaction(async (tx) => {
@@ -172,7 +202,9 @@ export class SalesService {
         : null;
       const invoiceNumber = await this.references.generateSalesDocumentNumber(
         documentType,
-        customer?.name ?? counterClientFullName ?? (isComptoir ? 'Comptoir' : null),
+        customer?.name ??
+          counterClientFullName ??
+          (isComptoir ? 'Comptoir' : null),
         documentDate,
         tx,
       );
@@ -199,34 +231,41 @@ export class SalesService {
 
         const tvaRate = Number(product.tva ?? 0);
         const discountPercent = item.discountPercent ?? 0;
-        const marginPercent = item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
+        const marginPercent =
+          item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
         const purchasePriceHt = Number(product.purchasePrice);
+        const submittedGrossPriceHt =
+          item.unitPrice ?? this.salePriceHt(product);
         const calculation = calculateSalesLine({
           purchasePriceHt,
+          ...(purchasePriceHt <= 0 && {
+            grossSalePriceHt: submittedGrossPriceHt,
+          }),
           marginPercent,
           discountPercent,
           taxPercent: tvaRate,
           quantity: item.quantity,
         });
-        const unitPrice = purchasePriceHt > 0
-          ? calculation.unitPriceHt
-          : (item.unitPrice ?? this.salePriceHt(product));
+        const unitPrice = calculation.grossSalePriceHt;
         if (unitPrice < 0) {
           throw new BadRequestException(
             `Le prix de vente calculé pour "${product.name}" ne peut pas être négatif.`,
           );
         }
 
-        if (Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 && !allowEditUnitPriceHt) {
+        if (
+          Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 &&
+          !allowEditUnitPriceHt
+        ) {
           throw new ForbiddenException(
             `Vous n'avez pas la permission de modifier la marge pour "${product.name}".`,
           );
         }
-        const grossLineHt = calculation.unitPriceHtBeforeDiscount * item.quantity;
+        const grossLineHt = calculation.grossSalePriceHt * item.quantity;
         const lineDiscount = calculation.discountAmount;
-        const netLineHt = purchasePriceHt > 0 ? calculation.totalHt : unitPrice * item.quantity;
-        const lineTax = this.round3(netLineHt * (tvaRate / 100));
-        const lineTotalTtc = this.round3(netLineHt + lineTax);
+        const netLineHt = calculation.totalHt;
+        const lineTax = calculation.vatAmount;
+        const lineTotalTtc = calculation.lineTtc;
 
         if (!isDevis) {
           if (purchasePriceHt <= 0) {
@@ -234,7 +273,10 @@ export class SalesService {
               `Le produit "${product.name}" n'a pas de prix d'achat défini. Vente refusée.`,
             );
           }
-          if (calculation.netMarginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
+          if (
+            calculation.netMarginPercent < MIN_MARGIN_PERCENT &&
+            !allowLowMargin
+          ) {
             throw new BadRequestException(
               `Vente refusée : marge insuffisante pour "${product.name}" (${calculation.netMarginPercent.toFixed(2)}% < ${MIN_MARGIN_PERCENT}%).`,
             );
@@ -257,20 +299,30 @@ export class SalesService {
         };
       });
 
-      const subtotal = this.round3(
-        rawItems.reduce((sum, item) => sum + item.netLineTotal, 0),
-      );
-      const discount = this.round3(
-        rawItems.reduce((sum, item) => sum + item.discountAmount, 0),
-      );
-      const tax = this.round3(
-        rawItems.reduce((sum, item) => sum + item.tax, 0),
-      );
-      const total = this.round3(subtotal + tax);
       const stampDuty = DEFAULT_STAMP_DUTY;
-      const totalFinal = commercialTotalFinal(total, stampDuty);
+      const documentCalculation = calculateSalesTotals(
+        rawItems.map((item) =>
+          calculateSalesLine({
+            purchasePriceHt: Number(
+              productsById.get(item.productId)!.purchasePrice,
+            ),
+            grossSalePriceHt: item.unitPrice,
+            discountPercent: item.discountPercent,
+            taxPercent: item.tvaRate,
+            quantity: item.quantity,
+          }),
+        ),
+        stampDuty,
+      );
+      const subtotal = documentCalculation.totalHt;
+      const discount = documentCalculation.totalDiscountHt;
+      const tax = documentCalculation.totalVat;
+      const total = documentCalculation.totalTtc;
+      const totalFinal = documentCalculation.totalToPay;
 
-      const rawPaidAmount = acceptsPayment ? this.round3(dto.paidAmount ?? 0) : 0;
+      const rawPaidAmount = acceptsPayment
+        ? this.round3(dto.paidAmount ?? 0)
+        : 0;
       // CREDIT = vente à crédit, aucun encaissement immédiat — paidAmount reste 0.
       const paidAmount = dto.paymentMethod === 'CREDIT' ? 0 : rawPaidAmount;
 
@@ -290,7 +342,9 @@ export class SalesService {
 
       const remainingAmount = Math.max(totalFinal - paidAmount, 0);
       // Only FACTURE carries a payment status; other document types are not payable
-      const paymentStatus = acceptsPayment ? this.paymentStatus(totalFinal, paidAmount) : null;
+      const paymentStatus = acceptsPayment
+        ? this.paymentStatus(totalFinal, paidAmount)
+        : null;
       const items = rawItems.map((item) => {
         return {
           productId: item.productId,
@@ -300,8 +354,13 @@ export class SalesService {
           discountPercent: item.discountPercent,
           marginPercent: item.marginPercent,
           tvaPercent: item.tvaRate,
-          finalUnitPrice: item.netLineTotal / item.quantity,
-          total: item.netLineTotal,
+          finalUnitPrice: salesRound3(item.netLineTotal / item.quantity),
+          total: salesRound3(item.netLineTotal),
+          unitPurchaseCostHt: Number(
+            productsById.get(item.productId)!.purchasePrice,
+          ),
+          purchaseCostEstimated: false,
+          calculationVersion: SALES_CALCULATION_VERSION,
         };
       });
 
@@ -312,10 +371,15 @@ export class SalesService {
           createdAt: documentDate,
           customerId: resolvedCustomerId,
           clientType: resolvedClientType ?? null,
-          counterClientFirstName: isComptoir ? dto.counterClientFirstName?.trim() ?? null : null,
-          counterClientLastName: isComptoir ? dto.counterClientLastName?.trim() ?? null : null,
+          counterClientFirstName: isComptoir
+            ? (dto.counterClientFirstName?.trim() ?? null)
+            : null,
+          counterClientLastName: isComptoir
+            ? (dto.counterClientLastName?.trim() ?? null)
+            : null,
           counterClientFullName: counterClientFullName ?? null,
-          counterClientEmail: dto.counterClientEmail?.trim().toLowerCase() ?? null,
+          counterClientEmail:
+            dto.counterClientEmail?.trim().toLowerCase() ?? null,
           counterClientPhone: dto.counterClientPhone?.trim() ?? null,
           counterClientAddress: dto.counterClientAddress?.trim() ?? null,
           counterClientTaxId: dto.counterClientTaxId?.trim() ?? null,
@@ -381,7 +445,7 @@ export class SalesService {
           motif: `Encaissement vente ${invoiceNumber}`,
           referenceDoc: payRef,
           userId: sellerId,
-          paymentMethod: dto.paymentMethod as string | undefined,
+          paymentMethod: dto.paymentMethod,
         });
       }
 
@@ -403,40 +467,48 @@ export class SalesService {
         },
       });
 
-      await this.auditLogs.audit({
-        action: 'sale.created',
-        entity: 'Sale',
-        entityId: finalSale.id,
-        userId: sellerId,
-        userName: user?.email,
-        newValue: {
-          id: finalSale.id,
-          invoiceNumber: finalSale.invoiceNumber,
-          documentType: finalSale.documentType,
-          status: finalSale.status,
-          total: Number(finalSale.total),
-          paidAmount: Number(finalSale.paidAmount),
-          remainingAmount: Number(finalSale.remainingAmount),
-          customerId: finalSale.customerId,
+      await this.auditLogs.audit(
+        {
+          action: 'sale.created',
+          entity: 'Sale',
+          entityId: finalSale.id,
+          userId: sellerId,
+          userName: user?.email,
+          newValue: {
+            id: finalSale.id,
+            invoiceNumber: finalSale.invoiceNumber,
+            documentType: finalSale.documentType,
+            status: finalSale.status,
+            total: Number(finalSale.total),
+            paidAmount: Number(finalSale.paidAmount),
+            remainingAmount: Number(finalSale.remainingAmount),
+            customerId: finalSale.customerId,
+          },
+          metadata: {
+            invoiceNumber: finalSale.invoiceNumber,
+            documentType: finalSale.documentType,
+            customerId: finalSale.customerId,
+            customerName:
+              finalSale.customer?.name ??
+              finalSale.counterClientFullName ??
+              null,
+            total: Number(finalSale.total),
+            paidAmount: Number(finalSale.paidAmount),
+            paymentMethod: dto.paymentMethod ?? null,
+            itemCount: finalSale.items.length,
+          },
         },
-        metadata: {
-          invoiceNumber: finalSale.invoiceNumber,
-          documentType: finalSale.documentType,
-          customerId: finalSale.customerId,
-          customerName: finalSale.customer?.name ?? finalSale.counterClientFullName ?? null,
-          total: Number(finalSale.total),
-          paidAmount: Number(finalSale.paidAmount),
-          paymentMethod: dto.paymentMethod ?? null,
-          itemCount: finalSale.items.length,
-        },
-      }, tx);
+        tx,
+      );
 
       return finalSale;
     });
 
     // Recalcule le statut de verrouillage après création (BL/Facture créent une dette)
     if (resolvedCustomerId) {
-      await this.customersService.recalculateClientLockStatus(resolvedCustomerId);
+      await this.customersService.recalculateClientLockStatus(
+        resolvedCustomerId,
+      );
     }
 
     return sale;
@@ -515,19 +587,22 @@ export class SalesService {
         );
       }
 
-      await this.auditLogs.audit({
-        action: 'sale.validated',
-        entity: 'Sale',
-        entityId: sale.id,
-        userId,
-        userName: user?.email,
-        oldValue: { status: sale.status },
-        newValue: { status: SaleStatus.COMPLETED },
-        metadata: {
-          invoiceNumber: sale.invoiceNumber,
-          documentType: sale.documentType,
+      await this.auditLogs.audit(
+        {
+          action: 'sale.validated',
+          entity: 'Sale',
+          entityId: sale.id,
+          userId,
+          userName: user?.email,
+          oldValue: { status: sale.status },
+          newValue: { status: SaleStatus.COMPLETED },
+          metadata: {
+            invoiceNumber: sale.invoiceNumber,
+            documentType: sale.documentType,
+          },
         },
-      }, tx);
+        tx,
+      );
 
       return updatedSale;
     });
@@ -546,7 +621,9 @@ export class SalesService {
       andConditions.push({
         OR: [
           { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
-          { customer: { name: { contains: query.search, mode: 'insensitive' } } },
+          {
+            customer: { name: { contains: query.search, mode: 'insensitive' } },
+          },
         ],
       });
     }
@@ -576,8 +653,10 @@ export class SalesService {
       // contradictions (ex: documentType=DEVIS AND payableOnly=true → 0 résultat).
       // Le paymentStatus est géré dans la payableCondition quand payableOnly=true.
       ...(!query?.payableOnly && query?.status && { status: query.status }),
-      ...(!query?.payableOnly && query?.documentType && { documentType: query.documentType }),
-      ...(!query?.payableOnly && query?.paymentStatus && { paymentStatus: query.paymentStatus }),
+      ...(!query?.payableOnly &&
+        query?.documentType && { documentType: query.documentType }),
+      ...(!query?.payableOnly &&
+        query?.paymentStatus && { paymentStatus: query.paymentStatus }),
       ...(query?.customerId && { customerId: query.customerId }),
       ...((query?.dateFrom || query?.dateTo) && {
         createdAt: {
@@ -589,7 +668,10 @@ export class SalesService {
     };
 
     const sortOrder = query?.sortOrder ?? 'desc';
-    const allowedSortFields: Record<string, Prisma.SaleOrderByWithRelationInput> = {
+    const allowedSortFields: Record<
+      string,
+      Prisma.SaleOrderByWithRelationInput
+    > = {
       createdAt: { createdAt: sortOrder },
       date: { createdAt: sortOrder },
       totalTtc: { total: sortOrder },
@@ -604,8 +686,8 @@ export class SalesService {
       paymentStatus: { paymentStatus: sortOrder },
       documentType: { documentType: sortOrder },
     };
-    const orderBy: Prisma.SaleOrderByWithRelationInput =
-      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+    const orderBy: Prisma.SaleOrderByWithRelationInput = (query?.sortBy &&
+      allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
 
     const [data, total] = await Promise.all([
       this.prisma.sale.findMany({
@@ -629,7 +711,13 @@ export class SalesService {
       creditNotesCount: _count.creditNotes,
     }));
 
-    return { data: enriched, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data: enriched,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   findOne(id: string, user?: AuthUser) {
@@ -691,7 +779,7 @@ export class SalesService {
             motif: `Annulation ${sale.documentType} ${sale.invoiceNumber} — paiement ${payment.reference}`,
             referenceDoc: sale.invoiceNumber,
             userId,
-            paymentMethod: payment.method as string,
+            paymentMethod: payment.method,
           });
         }
         await tx.payment.update({
@@ -722,27 +810,30 @@ export class SalesService {
         );
       }
 
-      await this.auditLogs.audit({
-        action: 'sale.cancelled',
-        entity: 'Sale',
-        entityId: sale.id,
-        userId,
-        userName: user?.email,
-        oldValue: {
-          status: sale.status,
-          paidAmount: Number(sale.paidAmount),
-          remainingAmount: Number(sale.remainingAmount),
+      await this.auditLogs.audit(
+        {
+          action: 'sale.cancelled',
+          entity: 'Sale',
+          entityId: sale.id,
+          userId,
+          userName: user?.email,
+          oldValue: {
+            status: sale.status,
+            paidAmount: Number(sale.paidAmount),
+            remainingAmount: Number(sale.remainingAmount),
+          },
+          newValue: {
+            status: SaleStatus.CANCELLED,
+            paidAmount: 0,
+            remainingAmount: Number(sale.total),
+          },
+          metadata: {
+            invoiceNumber: sale.invoiceNumber,
+            documentType: sale.documentType,
+          },
         },
-        newValue: {
-          status: SaleStatus.CANCELLED,
-          paidAmount: 0,
-          remainingAmount: Number(sale.total),
-        },
-        metadata: {
-          invoiceNumber: sale.invoiceNumber,
-          documentType: sale.documentType,
-        },
-      }, tx);
+        tx,
+      );
 
       return updatedSale;
     });
@@ -759,16 +850,25 @@ export class SalesService {
       return this.prisma.sale.update({
         where: { id },
         data: { status: dto.status },
-        include: { customer: true, items: { include: { product: true } }, payments: true },
+        include: {
+          customer: true,
+          items: { include: { product: true } },
+          payments: true,
+        },
       });
     }
     if (!dto.items.length) {
-      throw new BadRequestException('Le document doit contenir au moins une ligne');
+      throw new BadRequestException(
+        'Le document doit contenir au moins une ligne',
+      );
     }
     const requestedItems = dto.items;
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
-    const allowEditUnitPriceHt = this.hasPermission(user, 'sales.line.edit_unit_price_ht');
+    const allowEditUnitPriceHt = this.hasPermission(
+      user,
+      'sales.line.edit_unit_price_ht',
+    );
     const userId = user?.id;
 
     return this.prisma.$transaction(async (tx) => {
@@ -776,72 +876,148 @@ export class SalesService {
         where: { id, deletedAt: null },
         include: { items: true, payments: { where: { deletedAt: null } } },
       });
-      if (!sale) throw new BadRequestException('Document introuvable ou placé dans la corbeille');
+      if (!sale)
+        throw new BadRequestException(
+          'Document introuvable ou placé dans la corbeille',
+        );
       if (sale.status === SaleStatus.CANCELLED) {
-        throw new BadRequestException('Impossible de modifier un document annulé');
+        throw new BadRequestException(
+          'Impossible de modifier un document annulé',
+        );
       }
       if (dto.documentType && dto.documentType !== sale.documentType) {
-        throw new BadRequestException('Le type d’un document existant ne peut pas être changé');
+        throw new BadRequestException(
+          'Le type d’un document existant ne peut pas être changé',
+        );
       }
 
-      const productIds = [...new Set(requestedItems.map((item) => item.productId))];
-      const products = await tx.product.findMany({ where: { id: { in: productIds }, deletedAt: null } });
-      const productsById = new Map(products.map((product) => [product.id, product]));
+      const productIds = [
+        ...new Set(requestedItems.map((item) => item.productId)),
+      ];
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds }, deletedAt: null },
+      });
+      const productsById = new Map(
+        products.map((product) => [product.id, product]),
+      );
       const calculated = requestedItems.map((item) => {
         const product = productsById.get(item.productId);
-        if (!product) throw new BadRequestException(`Produit ${item.productId} introuvable`);
+        if (!product)
+          throw new BadRequestException(
+            `Produit ${item.productId} introuvable`,
+          );
         const purchasePriceHt = Number(product.purchasePrice);
-        const marginPercent = item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
+        const marginPercent =
+          item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
         const discountPercent = item.discountPercent ?? 0;
         const tvaRate = Number(product.tva ?? 0);
-        const values = calculateSalesLine({ purchasePriceHt, marginPercent, discountPercent, taxPercent: tvaRate, quantity: item.quantity });
-        if (Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 && !allowEditUnitPriceHt) {
-          throw new ForbiddenException(`Vous n'avez pas la permission de modifier la marge pour "${product.name}".`);
+        const values = calculateSalesLine({
+          purchasePriceHt,
+          ...(purchasePriceHt <= 0 && { grossSalePriceHt: item.unitPrice }),
+          marginPercent,
+          discountPercent,
+          taxPercent: tvaRate,
+          quantity: item.quantity,
+        });
+        if (
+          Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 &&
+          !allowEditUnitPriceHt
+        ) {
+          throw new ForbiddenException(
+            `Vous n'avez pas la permission de modifier la marge pour "${product.name}".`,
+          );
         }
         if (sale.documentType !== DocumentType.DEVIS && purchasePriceHt <= 0) {
-          throw new BadRequestException(`Le produit "${product.name}" n'a pas de prix d'achat défini.`);
+          throw new BadRequestException(
+            `Le produit "${product.name}" n'a pas de prix d'achat défini.`,
+          );
         }
-        if (sale.documentType !== DocumentType.DEVIS && values.netMarginPercent < MIN_MARGIN_PERCENT && !allowLowMargin) {
-          throw new BadRequestException(`Vente refusée : marge insuffisante pour "${product.name}".`);
+        if (
+          sale.documentType !== DocumentType.DEVIS &&
+          values.netMarginPercent < MIN_MARGIN_PERCENT &&
+          !allowLowMargin
+        ) {
+          throw new BadRequestException(
+            `Vente refusée : marge insuffisante pour "${product.name}".`,
+          );
         }
         return {
           productId: item.productId,
           designation: item.designation?.trim() || product.name,
           quantity: item.quantity,
-          unitPrice: values.unitPriceHt,
+          unitPrice: values.grossSalePriceHt,
           discountPercent,
           marginPercent,
           tvaPercent: tvaRate,
-          finalUnitPrice: values.totalHt / item.quantity,
+          finalUnitPrice: values.netSalePriceHt,
           total: values.totalHt,
+          unitPurchaseCostHt: purchasePriceHt,
+          purchaseCostEstimated: false,
+          calculationVersion: SALES_CALCULATION_VERSION,
           discountAmount: values.discountAmount,
           taxAmount: values.taxAmount,
         };
       });
 
-      const subtotal = this.round3(calculated.reduce((sum, item) => sum + item.total, 0));
-      const discount = this.round3(calculated.reduce((sum, item) => sum + item.discountAmount, 0));
-      const tax = this.round3(calculated.reduce((sum, item) => sum + item.taxAmount, 0));
-      const total = this.round3(subtotal + tax);
+      const updateTotals = calculateSalesTotals(
+        calculated.map((item) =>
+          calculateSalesLine({
+            purchasePriceHt: item.unitPurchaseCostHt,
+            grossSalePriceHt: item.unitPrice,
+            discountPercent: item.discountPercent,
+            taxPercent: item.tvaPercent,
+            quantity: item.quantity,
+          }),
+        ),
+        Number(sale.stampDuty),
+      );
+      const subtotal = updateTotals.totalHt;
+      const discount = updateTotals.totalDiscountHt;
+      const tax = updateTotals.totalVat;
+      const total = updateTotals.totalTtc;
       const totalFinal = commercialTotalFinal(total, Number(sale.stampDuty));
       const paidAmount = Number(sale.paidAmount);
-      if (dto.paidAmount !== undefined && Math.abs(dto.paidAmount - paidAmount) > 0.001) {
-        throw new BadRequestException('Modifiez les encaissements depuis le module Paiements');
+      if (
+        dto.paidAmount !== undefined &&
+        Math.abs(dto.paidAmount - paidAmount) > 0.001
+      ) {
+        throw new BadRequestException(
+          'Modifiez les encaissements depuis le module Paiements',
+        );
       }
       if (paidAmount > totalFinal + 0.001) {
-        throw new BadRequestException('Le nouveau total ne peut pas être inférieur au montant déjà payé');
+        throw new BadRequestException(
+          'Le nouveau total ne peut pas être inférieur au montant déjà payé',
+        );
       }
 
       if (sale.stockImpactDone) {
         for (const item of sale.items) {
-          await this.stockService.applyMovement(tx, { productId: item.productId, type: StockMovementType.CUSTOMER_RETURN, quantity: item.quantity, reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`, userId });
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.CUSTOMER_RETURN,
+            quantity: item.quantity,
+            reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
+            userId,
+          });
         }
         for (const item of calculated) {
-          const current = await tx.product.findUnique({ where: { id: item.productId }, select: { quantity: true, name: true } });
+          const current = await tx.product.findUnique({
+            where: { id: item.productId },
+            select: { quantity: true, name: true },
+          });
           if (!current || current.quantity < item.quantity) {
-            throw new BadRequestException(`Stock insuffisant pour "${current?.name ?? item.designation}"`);
+            throw new BadRequestException(
+              `Stock insuffisant pour "${current?.name ?? item.designation}"`,
+            );
           }
-          await this.stockService.applyMovement(tx, { productId: item.productId, type: StockMovementType.SALE, quantity: item.quantity, reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`, userId });
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.SALE,
+            quantity: item.quantity,
+            reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
+            userId,
+          });
         }
       }
 
@@ -849,7 +1025,8 @@ export class SalesService {
       const updated = await tx.sale.update({
         where: { id },
         data: {
-          customerId: dto.customerId === undefined ? sale.customerId : dto.customerId,
+          customerId:
+            dto.customerId === undefined ? sale.customerId : dto.customerId,
           clientType: dto.clientType ?? sale.clientType,
           counterClientFirstName: dto.counterClientFirstName,
           counterClientLastName: dto.counterClientLastName,
@@ -860,17 +1037,49 @@ export class SalesService {
           counterClientTaxId: dto.counterClientTaxId,
           counterClientNote: dto.counterClientNote,
           ...(dto.date && { createdAt: new Date(dto.date) }),
-          subtotal, discount, tax, total,
+          subtotal,
+          discount,
+          tax,
+          total,
           remainingAmount: this.round3(Math.max(totalFinal - paidAmount, 0)),
-          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType) ? this.paymentStatus(totalFinal, paidAmount) : null,
+          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType)
+            ? this.paymentStatus(totalFinal, paidAmount)
+            : null,
           isEdited: true,
           editedAt: new Date(),
-          items: { create: calculated.map(({ discountAmount: _discountAmount, taxAmount: _taxAmount, ...item }) => item) },
+          items: {
+            create: calculated.map(
+              ({
+                discountAmount: _discountAmount,
+                taxAmount: _taxAmount,
+                ...item
+              }) => item,
+            ),
+          },
         },
-        include: { customer: true, items: { include: { product: true } }, payments: true },
+        include: {
+          customer: true,
+          items: { include: { product: true } },
+          payments: true,
+        },
       });
 
-      await this.auditLogs.audit({ action: 'sale.updated', entity: 'Sale', entityId: id, userId, userName: user?.email, oldValue: { total: Number(sale.total), itemCount: sale.items.length }, newValue: { total, itemCount: calculated.length }, metadata: { invoiceNumber: sale.invoiceNumber, documentType: sale.documentType } }, tx);
+      await this.auditLogs.audit(
+        {
+          action: 'sale.updated',
+          entity: 'Sale',
+          entityId: id,
+          userId,
+          userName: user?.email,
+          oldValue: { total: Number(sale.total), itemCount: sale.items.length },
+          newValue: { total, itemCount: calculated.length },
+          metadata: {
+            invoiceNumber: sale.invoiceNumber,
+            documentType: sale.documentType,
+          },
+        },
+        tx,
+      );
       return updated;
     });
   }
@@ -886,7 +1095,14 @@ export class SalesService {
 
     const sale = await this.prisma.sale.findFirstOrThrow({
       where: { id, deletedAt: null },
-      select: { id: true, invoiceNumber: true, documentType: true, status: true, total: true, customerId: true },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        documentType: true,
+        status: true,
+        total: true,
+        customerId: true,
+      },
     });
 
     await this.prisma.sale.update({
@@ -909,7 +1125,10 @@ export class SalesService {
         customerId: sale.customerId,
         deletedAt: null,
       },
-      newValue: { deletedAt: new Date().toISOString(), deletedBy: userId ?? null },
+      newValue: {
+        deletedAt: new Date().toISOString(),
+        deletedBy: userId ?? null,
+      },
       metadata: {
         invoiceNumber: sale.invoiceNumber,
         documentType: sale.documentType,
@@ -1016,7 +1235,9 @@ export class SalesService {
           stampDuty: source.stampDuty,
           paidAmount: 0,
           remainingAmount: commercialTotalFinal(source.total, source.stampDuty),
-          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(targetType) ? PaymentStatus.UNPAID : null,
+          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(targetType)
+            ? PaymentStatus.UNPAID
+            : null,
           status: targetAppliesStock ? SaleStatus.COMPLETED : SaleStatus.DRAFT,
           documentType: targetType,
           reserveStock: false,
@@ -1035,6 +1256,9 @@ export class SalesService {
               tvaPercent: item.tvaPercent,
               finalUnitPrice: item.finalUnitPrice,
               total: item.total,
+              unitPurchaseCostHt: item.unitPurchaseCostHt,
+              purchaseCostEstimated: item.purchaseCostEstimated,
+              calculationVersion: item.calculationVersion,
             })),
           },
         },
@@ -1092,31 +1316,34 @@ export class SalesService {
         },
       });
 
-      await this.auditLogs.audit({
-        action: 'sale.transformed',
-        entity: 'Sale',
-        entityId: finalNew.id,
-        userId,
-        userName: user?.email,
-        oldValue: {
-          id: source.id,
-          invoiceNumber: source.invoiceNumber,
-          documentType: source.documentType,
+      await this.auditLogs.audit(
+        {
+          action: 'sale.transformed',
+          entity: 'Sale',
+          entityId: finalNew.id,
+          userId,
+          userName: user?.email,
+          oldValue: {
+            id: source.id,
+            invoiceNumber: source.invoiceNumber,
+            documentType: source.documentType,
+          },
+          newValue: {
+            id: finalNew.id,
+            invoiceNumber: finalNew.invoiceNumber,
+            documentType: finalNew.documentType,
+          },
+          metadata: {
+            sourceRef: source.invoiceNumber,
+            sourceType: source.documentType,
+            sourceId: source.id,
+            targetRef: finalNew.invoiceNumber,
+            targetType: finalNew.documentType,
+            targetId: finalNew.id,
+          },
         },
-        newValue: {
-          id: finalNew.id,
-          invoiceNumber: finalNew.invoiceNumber,
-          documentType: finalNew.documentType,
-        },
-        metadata: {
-          sourceRef: source.invoiceNumber,
-          sourceType: source.documentType,
-          sourceId: source.id,
-          targetRef: finalNew.invoiceNumber,
-          targetType: finalNew.documentType,
-          targetId: finalNew.id,
-        },
-      }, tx);
+        tx,
+      );
 
       return finalNew;
     });
@@ -1124,7 +1351,9 @@ export class SalesService {
     // Recalcule le statut de verrouillage si transformation vers BL/Facture
     const transformedSale = result as { customerId?: string | null };
     if (transformedSale.customerId && STOCK_IMPACTING_TYPES.has(targetType)) {
-      await this.customersService.recalculateClientLockStatus(transformedSale.customerId);
+      await this.customersService.recalculateClientLockStatus(
+        transformedSale.customerId,
+      );
     }
 
     return result;
@@ -1225,18 +1454,23 @@ export class SalesService {
       for (const item of saleGroup) {
         const grossHt = Number(item.unitPrice) * item.quantity;
         const discountPercent = Number(item.discountPercent ?? 0);
-        // New rows already store the final HT produced by margin - discount.
-        // NULL marginPercent identifies legacy rows using multiplicative discount.
-        const netHt = item.marginPercent === null
-          ? grossHt * (1 - discountPercent / 100)
-          : grossHt;
+        const netHt =
+          item.calculationVersion >= SALES_CALCULATION_VERSION
+            ? Number(item.total)
+            : item.marginPercent === null
+              ? grossHt * (1 - discountPercent / 100)
+              : grossHt;
         lineNetHtByItemId.set(item.id, netHt);
         lineDiscountTotal += grossHt - netHt;
         lineNetSubtotal += netHt;
       }
 
       const sale = saleGroup[0].sale;
-      const usesNewPricing = saleGroup.every((item) => item.marginPercent !== null);
+      const usesNewPricing = saleGroup.every(
+        (item) =>
+          item.calculationVersion >= SALES_CALCULATION_VERSION ||
+          item.marginPercent !== null,
+      );
       const remainingDocumentDiscount = usesNewPricing
         ? 0
         : Math.max(Number(sale.discount) - lineDiscountTotal, 0);

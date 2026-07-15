@@ -13,7 +13,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
 import { StockService } from '../stock/stock.service';
-import { commercialTotalFinal, DEFAULT_STAMP_DUTY } from '../common/utils/commercial-document';
+import {
+  commercialTotalFinal,
+  DEFAULT_STAMP_DUTY,
+} from '../common/utils/commercial-document';
+import {
+  calculatePurchaseLine,
+  calculatePurchaseTotals,
+  purchaseRound3,
+} from '../common/utils/purchase-calculations';
 import { PdfService } from '../documents/pdf.service';
 import {
   CreatePurchaseDto,
@@ -44,20 +52,45 @@ export class PurchasesService {
     }
 
     const items = dto.items.map((item) => {
-      const gross = item.quantity * item.unitCost;
-      const discountAmount = gross * ((item.discountPercent ?? 0) / 100);
-      const netHt = gross - discountAmount;
-      const taxAmount = netHt * ((item.tvaPercent ?? 0) / 100);
-      return { productId: item.productId, designation: item.designation?.trim(), quantity: item.quantity, unitCost: item.unitCost, discountPercent: item.discountPercent ?? 0, tvaPercent: item.tvaPercent ?? 0, total: netHt, discountAmount, taxAmount };
+      const calculation = calculatePurchaseLine(item);
+      return {
+        productId: item.productId,
+        designation: item.designation?.trim(),
+        quantity: item.quantity,
+        unitCost: purchaseRound3(item.unitCost),
+        discountPercent: item.discountPercent ?? 0,
+        tvaPercent: item.tvaPercent ?? 0,
+        total: calculation.netHt,
+        discountAmount: calculation.discountAmount,
+        taxAmount: calculation.taxAmount,
+        grossHt: calculation.grossHt,
+      };
     });
-    const hasLinePricing = dto.items.some((item) => item.discountPercent !== undefined || item.tvaPercent !== undefined);
-    const grossSubtotal = dto.items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
-    const subtotal = hasLinePricing ? items.reduce((sum, item) => sum + item.total, 0) : grossSubtotal - (dto.discount ?? 0);
-    const discount = hasLinePricing ? items.reduce((sum, item) => sum + item.discountAmount, 0) : (dto.discount ?? 0);
-    const tax = hasLinePricing ? items.reduce((sum, item) => sum + item.taxAmount, 0) : (dto.tax ?? 0);
-    const total = subtotal + tax;
+    const hasLinePricing = dto.items.some(
+      (item) =>
+        item.discountPercent !== undefined || item.tvaPercent !== undefined,
+    );
     const stampDuty = dto.stampDuty ?? DEFAULT_STAMP_DUTY;
-    const totalFinal = commercialTotalFinal(total, stampDuty);
+    const lineTotals = calculatePurchaseTotals(
+      items.map((item) => ({
+        grossHt: item.grossHt,
+        discountAmount: item.discountAmount,
+        netHt: item.total,
+        taxAmount: item.taxAmount,
+        totalTtc: purchaseRound3(item.total + item.taxAmount),
+      })),
+      stampDuty,
+    );
+    const grossSubtotal = lineTotals.grossSubtotal;
+    const subtotal = hasLinePricing
+      ? lineTotals.subtotal
+      : purchaseRound3(grossSubtotal - (dto.discount ?? 0));
+    const discount = hasLinePricing
+      ? lineTotals.discount
+      : purchaseRound3(dto.discount ?? 0);
+    const tax = hasLinePricing ? lineTotals.tax : purchaseRound3(dto.tax ?? 0);
+    const total = purchaseRound3(subtotal + tax);
+    const totalFinal = purchaseRound3(total + stampDuty);
 
     // All purchases start UNPAID — payments go through /payments/purchases/:id/pay
     return this.prisma.$transaction(async (tx) => {
@@ -78,32 +111,44 @@ export class PurchasesService {
           documentType: PurchaseDocumentType.BON_COMMANDE,
           createdById,
           ...(dto.date && { createdAt: new Date(dto.date) }),
-          items: { create: items.map(({ discountAmount: _discountAmount, taxAmount: _taxAmount, ...item }) => item) },
+          items: {
+            create: items.map(
+              ({
+                discountAmount: _discountAmount,
+                taxAmount: _taxAmount,
+                grossHt: _grossHt,
+                ...item
+              }) => item,
+            ),
+          },
         },
         include: { supplier: true, items: true },
       });
 
-      await this.auditLogs.audit({
-        action: 'purchase.created',
-        entity: 'Purchase',
-        entityId: purchase.id,
-        userId: createdById,
-        newValue: {
-          id: purchase.id,
-          orderNumber: purchase.orderNumber,
-          status: purchase.status,
-          total: Number(purchase.total),
-          supplierId: purchase.supplierId,
-          supplierReference: purchase.supplierReference,
+      await this.auditLogs.audit(
+        {
+          action: 'purchase.created',
+          entity: 'Purchase',
+          entityId: purchase.id,
+          userId: createdById,
+          newValue: {
+            id: purchase.id,
+            orderNumber: purchase.orderNumber,
+            status: purchase.status,
+            total: Number(purchase.total),
+            supplierId: purchase.supplierId,
+            supplierReference: purchase.supplierReference,
+          },
+          metadata: {
+            orderNumber: purchase.orderNumber,
+            supplierId: purchase.supplierId,
+            supplierName: purchase.supplier?.name ?? null,
+            total: Number(purchase.total),
+            itemCount: purchase.items.length,
+          },
         },
-        metadata: {
-          orderNumber: purchase.orderNumber,
-          supplierId: purchase.supplierId,
-          supplierName: purchase.supplier?.name ?? null,
-          total: Number(purchase.total),
-          itemCount: purchase.items.length,
-        },
-      }, tx);
+        tx,
+      );
 
       return purchase;
     });
@@ -128,7 +173,9 @@ export class PurchasesService {
       ...(query?.search && {
         OR: [
           { orderNumber: { contains: query.search, mode: 'insensitive' } },
-          { supplierReference: { contains: query.search, mode: 'insensitive' } },
+          {
+            supplierReference: { contains: query.search, mode: 'insensitive' },
+          },
           {
             supplier: { name: { contains: query.search, mode: 'insensitive' } },
           },
@@ -137,7 +184,10 @@ export class PurchasesService {
     };
 
     const sortOrder = query?.sortOrder ?? 'desc';
-    const allowedSortFields: Record<string, Prisma.PurchaseOrderByWithRelationInput> = {
+    const allowedSortFields: Record<
+      string,
+      Prisma.PurchaseOrderByWithRelationInput
+    > = {
       createdAt: { createdAt: sortOrder },
       date: { createdAt: sortOrder },
       totalTtc: { total: sortOrder },
@@ -152,8 +202,8 @@ export class PurchasesService {
       status: { status: sortOrder },
       paymentStatus: { paymentStatus: sortOrder },
     };
-    const orderBy: Prisma.PurchaseOrderByWithRelationInput =
-      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+    const orderBy: Prisma.PurchaseOrderByWithRelationInput = (query?.sortBy &&
+      allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
 
     const [data, total] = await Promise.all([
       this.prisma.purchase.findMany({
@@ -185,7 +235,9 @@ export class PurchasesService {
       ...(query?.search && {
         OR: [
           { orderNumber: { contains: query.search, mode: 'insensitive' } },
-          { supplierReference: { contains: query.search, mode: 'insensitive' } },
+          {
+            supplierReference: { contains: query.search, mode: 'insensitive' },
+          },
           {
             supplier: { name: { contains: query.search, mode: 'insensitive' } },
           },
@@ -271,7 +323,6 @@ export class PurchasesService {
         purchase.items.map((item) => [item.id, item]),
       );
 
-      let batchTotal = 0;
       for (const item of dto.items) {
         const purchaseItem = purchaseItemsById.get(item.purchaseItemId);
         if (!purchaseItem) {
@@ -286,8 +337,6 @@ export class PurchasesService {
             'Received quantity exceeds ordered quantity',
           );
         }
-
-        batchTotal += item.quantity * Number(purchaseItem.unitCost);
 
         await tx.purchaseItem.update({
           where: { id: purchaseItem.id },
@@ -324,49 +373,67 @@ export class PurchasesService {
       // le document devient un BR (dette fournisseur activée).
       // On ne touche pas au documentType si c'est déjà un BR ou FACTURE.
       const docActivation =
-        someReceived && purchase.documentType === PurchaseDocumentType.BON_COMMANDE
+        someReceived &&
+        purchase.documentType === PurchaseDocumentType.BON_COMMANDE
           ? {
               documentType: PurchaseDocumentType.BON_RECEPTION,
               paymentStatus: PaymentStatus.UNPAID,
               paidAmount: 0,
-              remainingAmount: commercialTotalFinal(purchase.total, purchase.stampDuty),
+              remainingAmount: commercialTotalFinal(
+                purchase.total,
+                purchase.stampDuty,
+              ),
             }
           : {};
 
       const supplierReferenceUpdate = {
-        ...(dto.supplierReference !== undefined && { supplierReference: this.optionalReference(dto.supplierReference) }),
+        ...(dto.supplierReference !== undefined && {
+          supplierReference: this.optionalReference(dto.supplierReference),
+        }),
       };
 
       const updated = await tx.purchase.update({
         where: { id },
-        data: { status: newStatus, ...docActivation, ...supplierReferenceUpdate },
+        data: {
+          status: newStatus,
+          ...docActivation,
+          ...supplierReferenceUpdate,
+        },
         include: { supplier: true, items: { include: { product: true } } },
       });
 
-      await this.auditLogs.audit({
-        action: 'purchase.received',
-        entity: 'Purchase',
-        entityId: id,
-        userId,
-        oldValue: { documentType: purchase.documentType, status: purchase.status },
-        newValue: {
-          documentType: updated.documentType,
-          status: newStatus,
-          supplierReference: updated.supplierReference,
-          ...(Object.keys(docActivation).length > 0 && { paymentStatus: PaymentStatus.UNPAID }),
+      await this.auditLogs.audit(
+        {
+          action: 'purchase.received',
+          entity: 'Purchase',
+          entityId: id,
+          userId,
+          oldValue: {
+            documentType: purchase.documentType,
+            status: purchase.status,
+          },
+          newValue: {
+            documentType: updated.documentType,
+            status: newStatus,
+            supplierReference: updated.supplierReference,
+            ...(Object.keys(docActivation).length > 0 && {
+              paymentStatus: PaymentStatus.UNPAID,
+            }),
+          },
+          metadata: {
+            orderNumber: purchase.orderNumber,
+            purchaseId: id,
+            totalTtc: Number(purchase.total),
+            paymentStatus: updated.paymentStatus,
+            documentTypeChanged: purchase.documentType !== updated.documentType,
+            receivedItems: dto.items.map((i) => ({
+              purchaseItemId: i.purchaseItemId,
+              quantity: i.quantity,
+            })),
+          },
         },
-        metadata: {
-          orderNumber: purchase.orderNumber,
-          purchaseId: id,
-          totalTtc: Number(purchase.total),
-          paymentStatus: updated.paymentStatus,
-          documentTypeChanged: purchase.documentType !== updated.documentType,
-          receivedItems: dto.items.map((i) => ({
-            purchaseItemId: i.purchaseItemId,
-            quantity: i.quantity,
-          })),
-        },
-      }, tx);
+        tx,
+      );
 
       return updated;
     });
@@ -409,7 +476,7 @@ export class PurchasesService {
             motif: `Annulation achat ${purchase.orderNumber} — paiement ${payment.reference}`,
             referenceDoc: purchase.orderNumber,
             userId,
-            paymentMethod: payment.method as string,
+            paymentMethod: payment.method,
           });
         }
         await tx.payment.update({
@@ -423,7 +490,10 @@ export class PurchasesService {
         data: {
           status: PurchaseStatus.CANCELLED,
           paidAmount: 0,
-          remainingAmount: commercialTotalFinal(purchase.total, purchase.stampDuty),
+          remainingAmount: commercialTotalFinal(
+            purchase.total,
+            purchase.stampDuty,
+          ),
           paymentStatus: PaymentStatus.UNPAID,
         },
         include: {
@@ -433,23 +503,26 @@ export class PurchasesService {
         },
       });
 
-      await this.auditLogs.audit({
-        action: 'purchase.cancelled',
-        entity: 'Purchase',
-        entityId: id,
-        userId,
-        oldValue: {
-          status: purchase.status,
-          paidAmount: Number(purchase.paidAmount),
-          remainingAmount: Number(purchase.remainingAmount),
+      await this.auditLogs.audit(
+        {
+          action: 'purchase.cancelled',
+          entity: 'Purchase',
+          entityId: id,
+          userId,
+          oldValue: {
+            status: purchase.status,
+            paidAmount: Number(purchase.paidAmount),
+            remainingAmount: Number(purchase.remainingAmount),
+          },
+          newValue: {
+            status: PurchaseStatus.CANCELLED,
+            paidAmount: 0,
+            remainingAmount: Number(purchase.total),
+          },
+          metadata: { orderNumber: purchase.orderNumber },
         },
-        newValue: {
-          status: PurchaseStatus.CANCELLED,
-          paidAmount: 0,
-          remainingAmount: Number(purchase.total),
-        },
-        metadata: { orderNumber: purchase.orderNumber },
-      }, tx);
+        tx,
+      );
 
       return cancelled;
     });
@@ -463,92 +536,250 @@ export class PurchasesService {
       await this.settings.assertActiveOption('purchase_statuses', dto.status);
     }
     if (dto.items) {
-      if (!dto.items.length) throw new BadRequestException('L’achat doit contenir au moins une ligne');
+      if (!dto.items.length)
+        throw new BadRequestException(
+          'L’achat doit contenir au moins une ligne',
+        );
       const requestedItems = dto.items;
       return this.prisma.$transaction(async (tx) => {
         const previous = await tx.purchase.findFirst({
           where: { id, deletedAt: null },
           include: { items: true, payments: { where: { deletedAt: null } } },
         });
-        if (!previous) throw new BadRequestException('Achat introuvable ou placé dans la corbeille');
-        if (previous.status === PurchaseStatus.CANCELLED) throw new BadRequestException('Impossible de modifier un achat annulé');
-        if (dto.documentType && dto.documentType !== previous.documentType) throw new BadRequestException('Le type d’un achat existant ne peut pas être changé');
+        if (!previous)
+          throw new BadRequestException(
+            'Achat introuvable ou placé dans la corbeille',
+          );
+        if (previous.status === PurchaseStatus.CANCELLED)
+          throw new BadRequestException(
+            'Impossible de modifier un achat annulé',
+          );
+        if (dto.documentType && dto.documentType !== previous.documentType)
+          throw new BadRequestException(
+            'Le type d’un achat existant ne peut pas être changé',
+          );
         const oldById = new Map(previous.items.map((item) => [item.id, item]));
         for (const item of requestedItems) {
-          if (item.id && !oldById.has(item.id)) throw new BadRequestException(`Ligne d’achat ${item.id} introuvable`);
+          if (item.id && !oldById.has(item.id))
+            throw new BadRequestException(
+              `Ligne d’achat ${item.id} introuvable`,
+            );
         }
-        const products = await tx.product.findMany({ where: { id: { in: [...new Set(requestedItems.map((item) => item.productId))] }, deletedAt: null } });
-        const productsById = new Map(products.map((product) => [product.id, product]));
+        const products = await tx.product.findMany({
+          where: {
+            id: {
+              in: [...new Set(requestedItems.map((item) => item.productId))],
+            },
+            deletedAt: null,
+          },
+        });
+        const productsById = new Map(
+          products.map((product) => [product.id, product]),
+        );
         const calculated = requestedItems.map((item) => {
           const product = productsById.get(item.productId);
-          if (!product) throw new BadRequestException(`Produit ${item.productId} introuvable`);
-          const gross = item.quantity * item.unitCost;
-          const discountAmount = gross * ((item.discountPercent ?? 0) / 100);
-          const netHt = gross - discountAmount;
-          const taxAmount = netHt * ((item.tvaPercent ?? Number(product.tva ?? 0)) / 100);
+          if (!product)
+            throw new BadRequestException(
+              `Produit ${item.productId} introuvable`,
+            );
+          const tvaPercent = item.tvaPercent ?? Number(product.tva ?? 0);
+          const values = calculatePurchaseLine({ ...item, tvaPercent });
           const old = item.id ? oldById.get(item.id) : undefined;
-          const receivedQuantity = previous.documentType === PurchaseDocumentType.BON_RECEPTION && previous.status === PurchaseStatus.RECEIVED
-            ? item.quantity
-            : Math.min(old?.receivedQuantity ?? 0, item.quantity);
-          return { id: item.id, productId: item.productId, designation: item.designation?.trim() || product.name, quantity: item.quantity, receivedQuantity, unitCost: item.unitCost, discountPercent: item.discountPercent ?? 0, tvaPercent: item.tvaPercent ?? Number(product.tva ?? 0), total: netHt, discountAmount, taxAmount };
+          const receivedQuantity =
+            previous.documentType === PurchaseDocumentType.BON_RECEPTION &&
+            previous.status === PurchaseStatus.RECEIVED
+              ? item.quantity
+              : Math.min(old?.receivedQuantity ?? 0, item.quantity);
+          return {
+            id: item.id,
+            productId: item.productId,
+            designation: item.designation?.trim() || product.name,
+            quantity: item.quantity,
+            receivedQuantity,
+            unitCost: purchaseRound3(item.unitCost),
+            discountPercent: item.discountPercent ?? 0,
+            tvaPercent,
+            total: values.netHt,
+            discountAmount: values.discountAmount,
+            taxAmount: values.taxAmount,
+            grossHt: values.grossHt,
+          };
         });
 
-        const desiredByOldId = new Map(calculated.filter((item) => item.id).map((item) => [item.id!, item]));
+        const desiredByOldId = new Map(
+          calculated.filter((item) => item.id).map((item) => [item.id!, item]),
+        );
         for (const old of previous.items) {
           const desired = desiredByOldId.get(old.id);
           const nextReceived = desired?.receivedQuantity ?? 0;
           const delta = nextReceived - old.receivedQuantity;
-          if (desired && desired.productId !== old.productId && old.receivedQuantity > 0) {
-            await this.stockService.applyMovement(tx, { productId: old.productId, type: StockMovementType.SUPPLIER_RETURN, quantity: old.receivedQuantity, reason: `Modification achat ${previous.orderNumber}`, userId });
-            if (desired.receivedQuantity > 0) await this.stockService.applyMovement(tx, { productId: desired.productId, type: StockMovementType.PURCHASE_RECEPTION, quantity: desired.receivedQuantity, reason: `Modification achat ${previous.orderNumber}`, userId });
+          if (
+            desired &&
+            desired.productId !== old.productId &&
+            old.receivedQuantity > 0
+          ) {
+            await this.stockService.applyMovement(tx, {
+              productId: old.productId,
+              type: StockMovementType.SUPPLIER_RETURN,
+              quantity: old.receivedQuantity,
+              reason: `Modification achat ${previous.orderNumber}`,
+              userId,
+            });
+            if (desired.receivedQuantity > 0)
+              await this.stockService.applyMovement(tx, {
+                productId: desired.productId,
+                type: StockMovementType.PURCHASE_RECEPTION,
+                quantity: desired.receivedQuantity,
+                reason: `Modification achat ${previous.orderNumber}`,
+                userId,
+              });
           } else {
-            if (delta > 0) await this.stockService.applyMovement(tx, { productId: desired!.productId, type: StockMovementType.PURCHASE_RECEPTION, quantity: delta, reason: `Modification achat ${previous.orderNumber}`, userId });
-            if (delta < 0) await this.stockService.applyMovement(tx, { productId: old.productId, type: StockMovementType.SUPPLIER_RETURN, quantity: -delta, reason: `Modification achat ${previous.orderNumber}`, userId });
+            if (delta > 0)
+              await this.stockService.applyMovement(tx, {
+                productId: desired!.productId,
+                type: StockMovementType.PURCHASE_RECEPTION,
+                quantity: delta,
+                reason: `Modification achat ${previous.orderNumber}`,
+                userId,
+              });
+            if (delta < 0)
+              await this.stockService.applyMovement(tx, {
+                productId: old.productId,
+                type: StockMovementType.SUPPLIER_RETURN,
+                quantity: -delta,
+                reason: `Modification achat ${previous.orderNumber}`,
+                userId,
+              });
           }
         }
-        for (const item of calculated.filter((entry) => !entry.id && entry.receivedQuantity > 0)) {
-          await this.stockService.applyMovement(tx, { productId: item.productId, type: StockMovementType.PURCHASE_RECEPTION, quantity: item.receivedQuantity, reason: `Modification achat ${previous.orderNumber}`, userId });
+        for (const item of calculated.filter(
+          (entry) => !entry.id && entry.receivedQuantity > 0,
+        )) {
+          await this.stockService.applyMovement(tx, {
+            productId: item.productId,
+            type: StockMovementType.PURCHASE_RECEPTION,
+            quantity: item.receivedQuantity,
+            reason: `Modification achat ${previous.orderNumber}`,
+            userId,
+          });
         }
 
-        const subtotal = calculated.reduce((sum, item) => sum + item.total, 0);
-        const discount = calculated.reduce((sum, item) => sum + item.discountAmount, 0);
-        const tax = calculated.reduce((sum, item) => sum + item.taxAmount, 0);
-        const total = subtotal + tax;
         const stampDuty = dto.stampDuty ?? Number(previous.stampDuty);
-        const totalFinal = commercialTotalFinal(total, stampDuty);
+        const nextTotals = calculatePurchaseTotals(
+          calculated.map((item) => ({
+            grossHt: item.grossHt,
+            discountAmount: item.discountAmount,
+            netHt: item.total,
+            taxAmount: item.taxAmount,
+            totalTtc: purchaseRound3(item.total + item.taxAmount),
+          })),
+          stampDuty,
+        );
+        const subtotal = nextTotals.subtotal;
+        const discount = nextTotals.discount;
+        const tax = nextTotals.tax;
+        const total = nextTotals.total;
+        const totalFinal = nextTotals.totalFinal;
         const paidAmount = Number(previous.paidAmount);
-        if (dto.paidAmount !== undefined && Math.abs(dto.paidAmount - paidAmount) > 0.001) throw new BadRequestException('Modifiez les paiements depuis l’action Payer');
-        if (paidAmount > totalFinal + 0.001) throw new BadRequestException('Le nouveau total ne peut pas être inférieur au montant déjà payé');
-        const nextStatus = previous.documentType === PurchaseDocumentType.BON_RECEPTION
-          ? calculated.every((item) => item.receivedQuantity >= item.quantity)
-            ? PurchaseStatus.RECEIVED
-            : calculated.some((item) => item.receivedQuantity > 0)
-              ? PurchaseStatus.PARTIALLY_RECEIVED
-              : PurchaseStatus.ORDERED
-          : previous.status;
+        if (
+          dto.paidAmount !== undefined &&
+          Math.abs(dto.paidAmount - paidAmount) > 0.001
+        )
+          throw new BadRequestException(
+            'Modifiez les paiements depuis l’action Payer',
+          );
+        if (paidAmount > totalFinal + 0.001)
+          throw new BadRequestException(
+            'Le nouveau total ne peut pas être inférieur au montant déjà payé',
+          );
+        const nextStatus =
+          previous.documentType === PurchaseDocumentType.BON_RECEPTION
+            ? calculated.every((item) => item.receivedQuantity >= item.quantity)
+              ? PurchaseStatus.RECEIVED
+              : calculated.some((item) => item.receivedQuantity > 0)
+                ? PurchaseStatus.PARTIALLY_RECEIVED
+                : PurchaseStatus.ORDERED
+            : previous.status;
 
-        const keptIds = calculated.flatMap((item) => item.id ? [item.id] : []);
-        await tx.purchaseItem.deleteMany({ where: { purchaseId: id, ...(keptIds.length ? { id: { notIn: keptIds } } : {}) } });
+        const keptIds = calculated.flatMap((item) =>
+          item.id ? [item.id] : [],
+        );
+        await tx.purchaseItem.deleteMany({
+          where: {
+            purchaseId: id,
+            ...(keptIds.length ? { id: { notIn: keptIds } } : {}),
+          },
+        });
         for (const item of calculated) {
-          const data = { productId: item.productId, designation: item.designation, quantity: item.quantity, receivedQuantity: item.receivedQuantity, unitCost: item.unitCost, discountPercent: item.discountPercent, tvaPercent: item.tvaPercent, total: item.total };
-          if (item.id) await tx.purchaseItem.update({ where: { id: item.id }, data });
-          else await tx.purchaseItem.create({ data: { purchaseId: id, ...data } });
+          const data = {
+            productId: item.productId,
+            designation: item.designation,
+            quantity: item.quantity,
+            receivedQuantity: item.receivedQuantity,
+            unitCost: item.unitCost,
+            discountPercent: item.discountPercent,
+            tvaPercent: item.tvaPercent,
+            total: item.total,
+          };
+          if (item.id)
+            await tx.purchaseItem.update({ where: { id: item.id }, data });
+          else
+            await tx.purchaseItem.create({ data: { purchaseId: id, ...data } });
         }
         const updated = await tx.purchase.update({
           where: { id },
-          data: { supplierId: dto.supplierId ?? previous.supplierId, supplierReference: dto.supplierReference === undefined ? previous.supplierReference : this.optionalReference(dto.supplierReference), ...(dto.date && { createdAt: new Date(dto.date) }), subtotal, discount, tax, total, stampDuty, remainingAmount: Math.max(totalFinal - paidAmount, 0), paymentStatus: this.paymentStatus(totalFinal, paidAmount), status: nextStatus, isEdited: true, editedAt: new Date() },
-          include: { supplier: true, items: { include: { product: true } }, payments: true },
+          data: {
+            supplierId: dto.supplierId ?? previous.supplierId,
+            supplierReference:
+              dto.supplierReference === undefined
+                ? previous.supplierReference
+                : this.optionalReference(dto.supplierReference),
+            ...(dto.date && { createdAt: new Date(dto.date) }),
+            subtotal,
+            discount,
+            tax,
+            total,
+            stampDuty,
+            remainingAmount: Math.max(totalFinal - paidAmount, 0),
+            paymentStatus: this.paymentStatus(totalFinal, paidAmount),
+            status: nextStatus,
+            isEdited: true,
+            editedAt: new Date(),
+          },
+          include: {
+            supplier: true,
+            items: { include: { product: true } },
+            payments: true,
+          },
         });
-        await this.auditLogs.audit({ action: 'purchase.updated', entity: 'Purchase', entityId: id, userId, oldValue: { total: Number(previous.total), itemCount: previous.items.length }, newValue: { total, itemCount: calculated.length }, metadata: { orderNumber: previous.orderNumber } }, tx);
+        await this.auditLogs.audit(
+          {
+            action: 'purchase.updated',
+            entity: 'Purchase',
+            entityId: id,
+            userId,
+            oldValue: {
+              total: Number(previous.total),
+              itemCount: previous.items.length,
+            },
+            newValue: { total, itemCount: calculated.length },
+            metadata: { orderNumber: previous.orderNumber },
+          },
+          tx,
+        );
         return updated;
       });
     }
-    const previous = await this.prisma.purchase.findFirstOrThrow({ where: { id, deletedAt: null } });
+    const previous = await this.prisma.purchase.findFirstOrThrow({
+      where: { id, deletedAt: null },
+    });
     const updated = await this.prisma.purchase.update({
       where: { id },
       data: {
         ...(dto.status && { status: dto.status }),
-        ...(dto.supplierReference !== undefined && { supplierReference: this.optionalReference(dto.supplierReference) }),
+        ...(dto.supplierReference !== undefined && {
+          supplierReference: this.optionalReference(dto.supplierReference),
+        }),
       },
       include: {
         supplier: true,
@@ -579,7 +810,13 @@ export class PurchasesService {
 
     const purchase = await this.prisma.purchase.findFirstOrThrow({
       where: { id, deletedAt: null },
-      select: { id: true, orderNumber: true, status: true, total: true, supplierId: true },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        total: true,
+        supplierId: true,
+      },
     });
 
     await this.prisma.purchase.update({
@@ -600,7 +837,10 @@ export class PurchasesService {
         supplierId: purchase.supplierId,
         deletedAt: null,
       },
-      newValue: { deletedAt: new Date().toISOString(), deletedBy: userId ?? null },
+      newValue: {
+        deletedAt: new Date().toISOString(),
+        deletedBy: userId ?? null,
+      },
       metadata: { orderNumber: purchase.orderNumber },
     });
 
@@ -627,7 +867,9 @@ export class PurchasesService {
       }
 
       if (purchase.status === PurchaseStatus.CANCELLED) {
-        throw new BadRequestException('Un achat annulé ne peut pas être transformé.');
+        throw new BadRequestException(
+          'Un achat annulé ne peut pas être transformé.',
+        );
       }
 
       const targetType =
@@ -671,30 +913,43 @@ export class PurchasesService {
           status: newStatus,
           paymentStatus: PaymentStatus.UNPAID,
           paidAmount: 0,
-          remainingAmount: commercialTotalFinal(purchase.total, purchase.stampDuty),
+          remainingAmount: commercialTotalFinal(
+            purchase.total,
+            purchase.stampDuty,
+          ),
         },
         include: { supplier: true, items: { include: { product: true } } },
       });
 
-      await this.auditLogs.audit({
-        action: 'purchase.transformed',
-        entity: 'Purchase',
-        entityId: id,
-        userId,
-        oldValue: { documentType: PurchaseDocumentType.BON_COMMANDE, status: purchase.status },
-        newValue: { documentType: targetType, status: newStatus, paymentStatus: PaymentStatus.UNPAID },
-        metadata: {
-          fromType: PurchaseDocumentType.BON_COMMANDE,
-          toType: targetType,
-          purchaseId: id,
-          purchaseNumber: purchase.orderNumber,
-          totalTtc: Number(purchase.total),
-          paymentStatus: PaymentStatus.UNPAID,
-          supplierId: purchase.supplierId,
-          supplierName: purchase.supplier?.name ?? null,
-          supplierReference: purchase.supplierReference,
+      await this.auditLogs.audit(
+        {
+          action: 'purchase.transformed',
+          entity: 'Purchase',
+          entityId: id,
+          userId,
+          oldValue: {
+            documentType: PurchaseDocumentType.BON_COMMANDE,
+            status: purchase.status,
+          },
+          newValue: {
+            documentType: targetType,
+            status: newStatus,
+            paymentStatus: PaymentStatus.UNPAID,
+          },
+          metadata: {
+            fromType: PurchaseDocumentType.BON_COMMANDE,
+            toType: targetType,
+            purchaseId: id,
+            purchaseNumber: purchase.orderNumber,
+            totalTtc: Number(purchase.total),
+            paymentStatus: PaymentStatus.UNPAID,
+            supplierId: purchase.supplierId,
+            supplierName: purchase.supplier?.name ?? null,
+            supplierReference: purchase.supplierReference,
+          },
         },
-      }, tx);
+        tx,
+      );
 
       return updated;
     });

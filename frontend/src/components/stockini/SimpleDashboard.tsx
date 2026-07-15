@@ -8,24 +8,16 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import {
-  startOfDay, endOfDay, startOfWeek, endOfWeek,
-  startOfMonth, endOfMonth, startOfYear, endOfYear,
-  format, isWithinInterval, parseISO,
-  eachDayOfInterval, subDays, getDay,
-} from 'date-fns';
-import { fr } from 'date-fns/locale';
-import {
   ShoppingCart, Truck, Package, AlertTriangle,
   ArrowUpRight, ArrowDownRight, TrendingUp, Bell, Boxes,
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { money } from '@/lib/stockini/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import type { Sale, Purchase, Product } from '@/lib/stockini/types';
+import type { Product, ReportPeriod } from '@/lib/stockini/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Period = 'day' | 'week' | 'month' | 'year' | 'custom';
-interface DateRange { start: Date; end: Date; }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PERIOD_OPTIONS: { value: Period; label: string }[] = [
@@ -36,50 +28,14 @@ const PERIOD_OPTIONS: { value: Period; label: string }[] = [
   { value: 'custom', label: 'Personnalisé' },
 ];
 
-const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function n(v: number | string | null | undefined): number {
-  if (v == null) return 0;
-  return typeof v === 'string' ? parseFloat(v) || 0 : v;
-}
-
 function compactMoney(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
   return String(Math.round(v));
 }
 
-function getPeriodRange(period: Period, now: Date, customRange?: DateRange): DateRange {
-  switch (period) {
-    case 'day':    return { start: startOfDay(now),                           end: endOfDay(now) };
-    case 'week':   return { start: startOfWeek(now, { weekStartsOn: 1 }),     end: endOfWeek(now, { weekStartsOn: 1 }) };
-    case 'month':  return { start: startOfMonth(now),                         end: endOfMonth(now) };
-    case 'year':   return { start: startOfYear(now),                          end: endOfYear(now) };
-    case 'custom': return customRange ?? { start: subDays(now, 30), end: now };
-  }
-}
-
-function getPrevRange(range: DateRange): DateRange {
-  const ms = range.end.getTime() - range.start.getTime();
-  return {
-    start: new Date(range.start.getTime() - ms - 86_400_000),
-    end:   new Date(range.start.getTime() - 1),
-  };
-}
-
-function inRange(dateStr: string | null | undefined, range: DateRange): boolean {
-  if (!dateStr) return false;
-  try { return isWithinInterval(parseISO(dateStr), range); }
-  catch { return false; }
-}
-
-function trendPct(cur: number, prev: number): number {
-  if (prev === 0) return cur > 0 ? 100 : 0;
-  return Math.round(((cur - prev) / Math.abs(prev)) * 100);
-}
-
-function dayStr(d: Date): string { return format(d, 'yyyy-MM-dd'); }
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 type KpiColor = 'blue' | 'purple' | 'amber' | 'teal' | 'green' | 'orange' | 'red' | 'slate';
@@ -182,87 +138,20 @@ function ClientOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ─── Build series helpers ─────────────────────────────────────────────────────
-function buildSalesSeries(period: Period, range: DateRange, filteredSales: Sale[]) {
-  if (period === 'year') {
-    return MONTH_LABELS.map((lbl, i) => {
-      const mStart = new Date(range.start.getFullYear(), i, 1);
-      const mEnd   = endOfMonth(mStart);
-      const mRange = { start: mStart, end: mEnd };
-      const dayS   = filteredSales.filter(s => inRange(s.createdAt, mRange));
-      return { label: lbl, CA: Math.round(dayS.reduce((a, s) => a + n(s.total), 0)), Ventes: dayS.length };
-    });
-  }
-  const days = eachDayOfInterval({ start: range.start, end: range.end }).slice(0, 92);
-  return days.map(day => {
-    const ds   = dayStr(day);
-    const lbl  = period === 'week' ? format(day, 'EEE', { locale: fr }) : format(day, 'dd/MM');
-    const dayS = filteredSales.filter(s => dayStr(parseISO(s.createdAt)) === ds);
-    return { label: lbl, CA: Math.round(dayS.reduce((a, s) => a + n(s.total), 0)), Ventes: dayS.length };
-  });
-}
-
-function buildPurchaseSeries(period: Period, range: DateRange, filteredPurch: Purchase[]) {
-  if (period === 'year') {
-    return MONTH_LABELS.map((lbl, i) => {
-      const mStart = new Date(range.start.getFullYear(), i, 1);
-      const mEnd   = endOfMonth(mStart);
-      const mRange = { start: mStart, end: mEnd };
-      return { label: lbl, Achats: filteredPurch.filter(p => inRange(p.createdAt, mRange)).length };
-    });
-  }
-  const days = eachDayOfInterval({ start: range.start, end: range.end }).slice(0, 92);
-  return days.map(day => {
-    const ds  = dayStr(day);
-    const lbl = period === 'week' ? format(day, 'EEE', { locale: fr }) : format(day, 'dd/MM');
-    return { label: lbl, Achats: filteredPurch.filter(p => dayStr(parseISO(p.createdAt)) === ds).length };
-  });
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 export function SimpleDashboard() {
   const [period, setPeriod]           = useState<Period>('month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
-  const [now, setNow] = useState(() => new Date('2000-01-01T12:00:00.000Z'));
-
-  useEffect(() => {
-    setNow(new Date());
-  }, []);
-
-  const customRange = useMemo<DateRange | undefined>(() => {
-    if (customStart && customEnd) {
-      try { return { start: parseISO(customStart), end: endOfDay(parseISO(customEnd)) }; }
-      catch { return undefined; }
-    }
-    return undefined;
-  }, [customStart, customEnd]);
-
-  const range     = useMemo(() => getPeriodRange(period, now, customRange), [period, now, customRange]);
-  const prevRange = useMemo(() => getPrevRange(range), [range]);
+  const dashboardQuery = useMemo(() => {
+    const mapped: ReportPeriod = period === 'day' ? 'today' : period;
+    return mapped === 'custom' ? { period: mapped, dateFrom: customStart, dateTo: customEnd } : { period: mapped };
+  }, [period, customStart, customEnd]);
 
   // ── Data fetching ─────────────────────────────────────────────────────────
-  const { data: salesResp }      = useQuery({ queryKey: ['op-sales'],     queryFn: () => stockiniApi.sales(),     staleTime: 30_000 });
-  const { data: purchasesResp }  = useQuery({ queryKey: ['op-purchases'], queryFn: () => stockiniApi.purchases(), staleTime: 30_000 });
+  const { data: dashboard }      = useQuery({ queryKey: ['op-dashboard', dashboardQuery], queryFn: () => stockiniApi.dashboard(dashboardQuery), staleTime: 30_000, enabled: period !== 'custom' || (!!customStart && !!customEnd) });
   const { data: products = [] }  = useQuery({ queryKey: ['op-products'],  queryFn: () => stockiniApi.products(), staleTime: 60_000 });
   const { data: alerts = [] }    = useQuery({ queryKey: ['op-alerts'],    queryFn: stockiniApi.alerts,           staleTime: 30_000 });
-  const { data: topSelling }     = useQuery({ queryKey: ['op-topsell'],   queryFn: stockiniApi.topSelling,       staleTime: 60_000 });
-
-  const sales:     Sale[]     = Array.isArray(salesResp?.data)     ? salesResp.data     : [];
-  const purchases: Purchase[] = Array.isArray(purchasesResp?.data) ? purchasesResp.data : [];
-
-  // ── Filtered slices ───────────────────────────────────────────────────────
-  const activeSales   = useMemo(() => sales.filter(s => s.status !== 'CANCELLED'),    [sales]);
-  const filteredSales = useMemo(() => activeSales.filter(s => inRange(s.createdAt, range)),     [activeSales, range]);
-  const prevSales     = useMemo(() => activeSales.filter(s => inRange(s.createdAt, prevRange)), [activeSales, prevRange]);
-
-  const activePurch   = useMemo(() => purchases.filter(p => p.status !== 'CANCELLED'), [purchases]);
-  const filteredPurch = useMemo(() => activePurch.filter(p => inRange(p.createdAt, range)),     [activePurch, range]);
-  const prevPurch     = useMemo(() => activePurch.filter(p => inRange(p.createdAt, prevRange)), [activePurch, prevRange]);
-
-  // ── Operational KPIs ──────────────────────────────────────────────────────
-  const pendingOrders  = useMemo(() => filteredSales.filter(s => s.status === 'PENDING' || s.status === 'CONFIRMED'), [filteredSales]);
-  const pendingRecept  = useMemo(() => filteredPurch.filter(p => p.status === 'PENDING' || p.status === 'ORDERED'),   [filteredPurch]);
 
   const ruptureProds   = useMemo(() => products.filter(p => p.quantity <= 0),                               [products]);
   const lowProds       = useMemo(() => products.filter(p => p.quantity > 0 && p.quantity <= p.minStock),    [products]);
@@ -272,30 +161,19 @@ export function SimpleDashboard() {
   const stockAlerts    = useMemo(() => alerts.filter(a => a.type === 'LOW_STOCK' || a.type === 'OUT_OF_STOCK').length, [alerts]);
 
   // ── Chart data ────────────────────────────────────────────────────────────
-  const salesSeries = useMemo(() => buildSalesSeries(period, range, filteredSales),   [period, range, filteredSales]);
-  const purchSeries = useMemo(() => buildPurchaseSeries(period, range, filteredPurch), [period, range, filteredPurch]);
-
-  const weeklyData = useMemo(() => {
-    const DOW    = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-    const counts = [0, 0, 0, 0, 0, 0, 0];
-    filteredSales.forEach(s => {
-      try { const dow = (getDay(parseISO(s.createdAt)) + 6) % 7; counts[dow]++; }
-      catch { /* noop */ }
-    });
-    return DOW.map((lbl, i) => ({ label: lbl, Ventes: counts[i] }));
-  }, [filteredSales]);
+  const salesSeries = useMemo(() => (dashboard?.series ?? []).map((item) => ({ label: item.label, CA: item.ca, Ventes: item.ventes })), [dashboard]);
+  const purchSeries = useMemo(() => (dashboard?.series ?? []).map((item) => ({ label: item.label, Achats: item.achatsCount })), [dashboard]);
+  const weeklyData = salesSeries;
 
   const topProductsData = useMemo(() => {
-    if (!topSelling) return [];
-    const arr: unknown[] = Array.isArray(topSelling) ? topSelling : ((topSelling as { data?: unknown[] }).data ?? []);
-    return arr.slice(0, 8).map(item => {
-      const it = item as Record<string, unknown>;
+    const arr = dashboard?.topProduits ?? [];
+    return arr.slice(0, 8).map(it => {
       return {
-        name:     String(it.productName ?? it.name ?? (it.product as { name?: string } | null)?.name ?? 'Inconnu').substring(0, 25),
-        Quantité: Number(it.totalQuantity ?? it.quantitySold ?? it.quantity ?? 0),
+        name: String(it.product?.name ?? 'Inconnu').substring(0, 25),
+        Quantité: it.quantitySold,
       };
     }).reverse();
-  }, [topSelling]);
+  }, [dashboard]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -342,30 +220,30 @@ export function SimpleDashboard() {
           <KpiCard
             icon={ShoppingCart}
             label="Ventes (période)"
-            value={filteredSales.length}
-            trend={trendPct(filteredSales.length, prevSales.length)}
+            value={dashboard?.ventes.count ?? 0}
+            trend={dashboard?.ventes.countTrend ?? 0}
             color="blue"
-            sub={`${prevSales.length} période précédente`}
+            sub={`${dashboard?.ventes.prevCount ?? 0} période précédente`}
           />
           <KpiCard
             icon={Truck}
             label="Achats / commandes"
-            value={filteredPurch.length}
-            trend={trendPct(filteredPurch.length, prevPurch.length)}
+            value={dashboard?.achats.count ?? 0}
+            trend={dashboard?.achats.countTrend ?? 0}
             color="purple"
-            sub={`${prevPurch.length} période précédente`}
+            sub={`${dashboard?.achats.prevCount ?? 0} période précédente`}
           />
           <KpiCard
             icon={ShoppingCart}
             label="Commandes en attente"
-            value={pendingOrders.length}
+            value={dashboard?.pendingCustomerOrders ?? 0}
             color="amber"
             sub="Clients non encore livrés"
           />
           <KpiCard
             icon={Truck}
             label="Réceptions en attente"
-            value={pendingRecept.length}
+            value={dashboard?.pendingSupplierReceipts ?? 0}
             color="teal"
             sub="Commandes fournisseurs"
           />

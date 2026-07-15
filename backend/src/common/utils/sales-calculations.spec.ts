@@ -1,36 +1,64 @@
-import { calculateSalesLine } from './sales-calculations';
+import { calculateSalesLine, calculateSalesTotals } from './sales-calculations';
 
-describe('calculateSalesLine', () => {
-  it('PA 30, marge 40, remise 20, TVA 19, quantité 1', () => {
-    expect(calculateSalesLine({ purchasePriceHt: 30, marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 }))
-      .toMatchObject({
-        netMarginPercent: 20,
-        marginAmount: 6,
-        unitPriceHt: 36,
-        unitPriceTtc: 42.84,
-        totalTtc: 42.84,
-      });
+describe('canonical sales calculations', () => {
+  it('applique la remise au prix brut (PA 100, marge 40, remise 15, TVA 19, qté 2)', () => {
+    const line = calculateSalesLine({
+      purchasePriceHt: 100,
+      marginPercent: 40,
+      discountPercent: 15,
+      taxPercent: 19,
+      quantity: 2,
+    });
+    expect(line).toMatchObject({
+      grossSalePriceHt: 140,
+      netSalePriceHt: 119,
+      marginAmount: 19,
+      marginAmountHt: 38,
+      marginPercentOnCost: 19,
+      totalHt: 238,
+      taxAmount: 45.22,
+      totalTtc: 283.22,
+    });
+    expect(calculateSalesTotals([line], 1)).toMatchObject({
+      totalHt: 238,
+      totalVat: 45.22,
+      totalMarginHt: 38,
+      totalTtc: 283.22,
+      totalToPay: 284.22,
+    });
   });
 
   it.each([
-    ['40%, remise 0%', 100, 40, 0, 19, 1, 40, 140, 166.6],
-    ['40%, remise 15%', 100, 40, 15, 19, 2, 25, 125, 297.5],
-    ['0%, remise 10%', 100, 0, 10, 19, 1, -10, 90, 107.1],
-    ['10%, remise 20%', 100, 10, 20, 19, 1, -10, 90, 107.1],
-    ['TVA 0%', 100, 40, 15, 0, 2, 25, 125, 250],
-    ['quantité décimale', 80, 40, 5, 19, 2.5, 35, 108, 321.3],
-    ['prix achat 0', 0, 40, 15, 19, 2, 25, 0, 0],
-    ['valeurs décimales', 33.333, 12.5, 2.25, 7, 1.5, 10.25, 36.75, 58.984],
-  ])('%s', (_label, purchase, margin, discount, tax, quantity, netMargin, unitHt, totalTtc) => {
-    const result = calculateSalesLine({ purchasePriceHt: purchase as number, marginPercent: margin as number,
-      discountPercent: discount as number, taxPercent: tax as number, quantity: quantity as number });
-    expect(result.netMarginPercent).toBe(netMargin);
-    expect(result.unitPriceHt).toBe(unitHt);
-    expect(result.totalTtc).toBe(totalTtc);
+    ['remise 0%', 0, 140, 40],
+    ['remise 100%', 100, 0, -100],
+    ['marge nette sous 20%', 15, 119, 19],
+  ])('%s', (_label, discount, expectedNet, expectedMargin) => {
+    const line = calculateSalesLine({
+      purchasePriceHt: 100,
+      marginPercent: 40,
+      discountPercent: discount,
+      taxPercent: 19,
+      quantity: 1,
+    });
+    expect(line.netSalePriceHt).toBe(expectedNet);
+    expect(line.marginPercentOnCost).toBe(expectedMargin);
   });
 
-  it('uses defaults for empty margin and discount', () => {
-    expect(calculateSalesLine({ purchasePriceHt: 100, marginPercent: null, discountPercent: null, taxPercent: 19, quantity: 1 }))
-      .toMatchObject({ netMarginPercent: 40, unitPriceHt: 140, totalTtc: 166.6 });
+  it('la somme du document est exactement la somme des lignes arrondies', () => {
+    const lines = [1, 2, 3].map(() =>
+      calculateSalesLine({
+        purchasePriceHt: 0.3335,
+        marginPercent: 40,
+        discountPercent: 12.5,
+        taxPercent: 19,
+        quantity: 1,
+      }),
+    );
+    const totals = calculateSalesTotals(lines, 0.7255);
+    expect(totals.totalHt).toBeCloseTo(
+      lines.reduce((sum, line) => sum + line.totalHt, 0),
+      3,
+    );
+    expect(totals.totalToPay).toBe(2.187);
   });
 });
