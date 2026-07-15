@@ -414,6 +414,24 @@ prod-migrate: prod-env-check ## Vérifier et appliquer uniquement les migrations
 	echo "$$status_output"; \
 	if [ $$status_rc -eq 0 ]; then \
 		echo -e "$(GREEN)Migrations déjà à jour.$(NC)"; \
+	elif echo "$$status_output" | grep -Fq 'Following migration have failed:' && \
+	     echo "$$status_output" | grep -Fxq '20260715120000_sale_item_financial_snapshots_v2'; then \
+		echo -e "$(YELLOW)Réparation ciblée de 20260715120000_sale_item_financial_snapshots_v2...$(NC)"; \
+		echo -e "$(BLUE)Création du backup PostgreSQL préalable...$(NC)"; \
+		docker exec "$(PROD_BACKEND_CONTAINER)" sh -lc 'set -eu; \
+			db_url="$${DATABASE_URL%%\?*}"; \
+			stamp="$$(date -u +%Y%m%d-%H%M%S)"; \
+			backup_file="$$BACKUP_DIRECTORY/pre-migration-repair-$$stamp.dump"; \
+			mkdir -p "$$BACKUP_DIRECTORY"; \
+			pg_dump --format=custom --file="$$backup_file" "$$db_url"; \
+			pg_restore --list "$$backup_file" >/dev/null; \
+			echo "Backup PostgreSQL validé: $$backup_file"'; \
+		docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate resolve \
+			--rolled-back 20260715120000_sale_item_financial_snapshots_v2; \
+		echo -e "$(BLUE)Nouvelle application des migrations...$(NC)"; \
+		docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate deploy; \
+		docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate status; \
+		echo -e "$(GREEN)Migration réparée et appliquée.$(NC)"; \
 	elif echo "$$status_output" | grep -Eqi 'not yet been applied|not yet applied|pending migration'; then \
 		echo -e "$(BLUE)Application des migrations en attente...$(NC)"; \
 		if docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate deploy; then \
