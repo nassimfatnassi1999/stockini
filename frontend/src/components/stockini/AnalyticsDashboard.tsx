@@ -12,12 +12,15 @@ import {
   Boxes, DollarSign, Activity, BarChart2, ArrowUpRight,
   ArrowDownRight, RefreshCw, Layers, Target, Zap, Truck,
   TrendingDown, Loader2, AlertCircle, Download,
+  SlidersHorizontal, X, CalendarDays, Info,
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
-import { money } from '@/lib/stockini/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import type { ReportPeriod, ReportOverview } from '@/lib/stockini/types';
+import { Button } from '@/components/ui/button';
+import { SlideOver } from '@/components/ui/SlideOver';
+import { SearchableFilterCombobox } from '@/components/reports/SearchableFilterCombobox';
+import type { ReportFilterOption, ReportOverviewQuery, ReportPeriod, ReportOverview } from '@/lib/stockini/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -46,15 +49,40 @@ function compactMoney(v: number): string {
   return String(Math.round(v));
 }
 
+const reportMoney = new Intl.NumberFormat('fr-TN', {
+  style: 'currency', currency: 'TND', minimumFractionDigits: 3, maximumFractionDigits: 3,
+}).format;
+
+function useDebouncedValue<T>(value: T, delay = 350) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timeout);
+  }, [delay, value]);
+  return debounced;
+}
+
+type AdvancedFilters = Pick<ReportOverviewQuery, 'customerId' | 'productId' | 'categoryId' | 'sellerId' | 'documentType' | 'paymentStatus'>;
+type FilterKey = keyof AdvancedFilters;
+const EMPTY_FILTERS: AdvancedFilters = {};
+
+const DOCUMENT_OPTIONS: ReportFilterOption[] = [
+  { id: 'FACTURE', label: 'Factures' },
+  { id: 'BON_LIVRAISON', label: 'Bons de livraison' },
+];
+const PAYMENT_OPTIONS: ReportFilterOption[] = [
+  { id: 'PAID', label: 'Payé' }, { id: 'PARTIAL', label: 'Partiel' }, { id: 'UNPAID', label: 'Impayé' },
+];
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 type KpiColor = 'default' | 'green' | 'orange' | 'red' | 'blue' | 'purple' | 'teal';
 
 function KpiCard({
-  icon: Icon, label, value, sub, trend, color = 'default',
+  icon: Icon, label, value, sub, trend, color = 'default', formula, trendPositiveWhen = 'up',
 }: {
   icon: React.ElementType; label: string; value: string | number;
-  sub?: string; trend?: number | null; color?: KpiColor;
+  sub?: string; trend?: number | null; color?: KpiColor; formula?: string; trendPositiveWhen?: 'up' | 'down';
 }) {
   const iconBg: Record<KpiColor, string> = {
     default: 'bg-slate-100 text-slate-500',
@@ -66,22 +94,25 @@ function KpiCard({
     teal:    'bg-teal-100 text-teal-600',
   };
   return (
-    <Card className="shadow-card transition-shadow hover:shadow-card-hover">
-      <CardContent className="p-5">
+    <Card className="h-full border-border/80 shadow-card transition-shadow hover:shadow-card-hover">
+      <CardContent className="flex h-full min-h-36 flex-col p-5">
         <div className="flex items-start justify-between">
           <div className={`rounded-xl p-2.5 ${iconBg[color]}`}>
             <Icon size={18} />
           </div>
-          {trend != null && (
-            <span className={`flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-              trend >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-            }`}>
-              {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-              {Math.abs(trend)}%
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {formula && <span title={formula} aria-label={`Formule : ${formula}`}><Info size={15} className="text-text-muted" /></span>}
+            {trend !== undefined && (trend === null ? (
+              <span title="Comparaison indisponible" className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">—</span>
+            ) : (() => {
+              const favorable = trendPositiveWhen === 'up' ? trend >= 0 : trend <= 0;
+              return <span aria-label={`${trend >= 0 ? 'Hausse' : 'Baisse'} de ${Math.abs(trend)} %`} className={`flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${favorable ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}{Math.abs(trend)}%
+              </span>;
+            })())}
+          </div>
         </div>
-        <div className="mt-4">
+        <div className="mt-auto pt-4">
           <p className="truncate text-xl font-bold leading-tight text-text-primary">{value}</p>
           <p className="mt-0.5 text-xs text-text-secondary">{label}</p>
           {sub && <p className="mt-1 text-[11px] text-text-muted">{sub}</p>}
@@ -170,55 +201,83 @@ export function AnalyticsDashboard() {
   const [period, setPeriod]     = useState<ReportPeriod>('month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
-  const [customerId, setCustomerId] = useState('');
-  const [productId, setProductId] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [sellerId, setSellerId] = useState('');
-  const [documentType, setDocumentType] = useState('');
-  const [paymentStatus, setPaymentStatus] = useState('');
-  const { data: customers = [] } = useQuery({ queryKey: ['report-customers'], queryFn: stockiniApi.customers, staleTime: 300_000 });
-  const { data: products = [] } = useQuery({ queryKey: ['report-products'], queryFn: () => stockiniApi.products(), staleTime: 300_000 });
-  const { data: categories = [] } = useQuery({ queryKey: ['report-categories'], queryFn: stockiniApi.categories, staleTime: 300_000 });
+  const [customDraftStart, setCustomDraftStart] = useState('');
+  const [customDraftEnd, setCustomDraftEnd] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+  const [appliedFilters, setAppliedFilters] = useState<AdvancedFilters>(EMPTY_FILTERS);
+  const [draftFilters, setDraftFilters] = useState<AdvancedFilters>(EMPTY_FILTERS);
+  const [appliedOptions, setAppliedOptions] = useState<Partial<Record<FilterKey, ReportFilterOption>>>({});
+  const [draftOptions, setDraftOptions] = useState<Partial<Record<FilterKey, ReportFilterOption>>>({});
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [categorySearch, setCategorySearch] = useState('');
+  const [sellerSearch, setSellerSearch] = useState('');
+  const debouncedCustomerSearch = useDebouncedValue(customerSearch);
+  const debouncedProductSearch = useDebouncedValue(productSearch);
+  const debouncedSellerSearch = useDebouncedValue(sellerSearch);
+
+  const optionQuery = (kind: 'products' | 'clients' | 'categories' | 'sellers', search: string, enabled: boolean, categoryId?: string) => ({
+    queryKey: [`report-${kind}`, search, categoryId ?? ''],
+    queryFn: ({ signal }: { signal: AbortSignal }) => stockiniApi.reportFilterOptions(kind, { search, categoryId, limit: kind === 'categories' ? 50 : 20 }, signal),
+    enabled,
+    staleTime: 300_000,
+  });
+  const clientsQuery = useQuery(optionQuery('clients', debouncedCustomerSearch, filtersOpen && debouncedCustomerSearch.trim().length >= 2));
+  const productsQuery = useQuery(optionQuery('products', debouncedProductSearch, filtersOpen && debouncedProductSearch.trim().length >= 2, draftFilters.categoryId));
+  const categoriesQuery = useQuery(optionQuery('categories', categorySearch, filtersOpen));
+  const sellersQuery = useQuery(optionQuery('sellers', debouncedSellerSearch, filtersOpen && debouncedSellerSearch.trim().length >= 2));
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const savedPeriod = params.get('period') as ReportPeriod | null;
     if (savedPeriod && PERIOD_OPTIONS.some((option) => option.value === savedPeriod)) setPeriod(savedPeriod);
-    setCustomStart(params.get('dateFrom') ?? ''); setCustomEnd(params.get('dateTo') ?? '');
-    setCustomerId(params.get('customerId') ?? ''); setProductId(params.get('productId') ?? '');
-    setCategoryId(params.get('categoryId') ?? ''); setSellerId(params.get('sellerId') ?? '');
-    setDocumentType(params.get('documentType') ?? ''); setPaymentStatus(params.get('paymentStatus') ?? '');
+    const restoredStart = params.get('dateFrom') ?? '';
+    const restoredEnd = params.get('dateTo') ?? '';
+    setCustomStart(restoredStart); setCustomEnd(restoredEnd);
+    setCustomDraftStart(restoredStart); setCustomDraftEnd(restoredEnd);
+    const restored: AdvancedFilters = {
+      ...(params.get('customerId') && { customerId: params.get('customerId')! }),
+      ...(params.get('productId') && { productId: params.get('productId')! }),
+      ...(params.get('categoryId') && { categoryId: params.get('categoryId')! }),
+      ...(params.get('sellerId') && { sellerId: params.get('sellerId')! }),
+      ...(params.get('documentType') && { documentType: params.get('documentType') as AdvancedFilters['documentType'] }),
+      ...(params.get('paymentStatus') && { paymentStatus: params.get('paymentStatus') as AdvancedFilters['paymentStatus'] }),
+    };
+    setAppliedFilters(restored); setDraftFilters(restored); setInitialized(true);
   }, []);
 
   const query = useMemo(() => {
     if (period === 'custom' && customStart && customEnd) {
-      return { period, dateFrom: customStart, dateTo: customEnd, ...(customerId && { customerId }), ...(productId && { productId }), ...(categoryId && { categoryId }), ...(sellerId && { sellerId }), ...(documentType && { documentType: documentType as 'FACTURE' | 'BON_LIVRAISON' }), ...(paymentStatus && { paymentStatus: paymentStatus as 'PAID' | 'PARTIAL' | 'UNPAID' }) };
+      return { period, dateFrom: customStart, dateTo: customEnd, ...appliedFilters };
     }
-    if (period !== 'custom') return { period, ...(customerId && { customerId }), ...(productId && { productId }), ...(categoryId && { categoryId }), ...(sellerId && { sellerId }), ...(documentType && { documentType: documentType as 'FACTURE' | 'BON_LIVRAISON' }), ...(paymentStatus && { paymentStatus: paymentStatus as 'PAID' | 'PARTIAL' | 'UNPAID' }) };
+    if (period !== 'custom') return { period, ...appliedFilters };
     return undefined;
-  }, [period, customStart, customEnd, customerId, productId, categoryId, sellerId, documentType, paymentStatus]);
+  }, [period, customStart, customEnd, appliedFilters]);
 
   useEffect(() => {
-    if (!query) return;
+    if (!query || !initialized) return;
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => value && params.set(key, String(value)));
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
-  }, [query]);
+  }, [initialized, query]);
 
   const {
     data: overview,
     isLoading,
+    isFetching,
     isError,
     refetch,
   } = useQuery<ReportOverview>({
     queryKey: ['reports-overview', query],
     queryFn: () => stockiniApi.reportsOverview(query),
     staleTime: 60_000,
-    enabled: period !== 'custom' || (!!customStart && !!customEnd),
+    placeholderData: (previous) => previous,
+    enabled: initialized && (period !== 'custom' || (!!customStart && !!customEnd)),
   });
 
   const exportCsv = () => {
-    if (!overview) return;
+    if (!overview || isFetching) return;
     const rows: Array<[string, string | number]> = [
       ['Indicateur', 'Valeur'],
       ['Chiffre d’affaires net HT', overview.financier.caNet],
@@ -243,15 +302,71 @@ export function AnalyticsDashboard() {
     URL.revokeObjectURL(url);
   };
 
+  const activeFilterEntries = (Object.entries(appliedFilters) as Array<[FilterKey, string]>).filter(([, value]) => Boolean(value));
+  const activeFilterCount = activeFilterEntries.length;
+  const labels: Record<FilterKey, string> = { customerId: 'Client', productId: 'Produit', categoryId: 'Catégorie', sellerId: 'Vendeur', documentType: 'Document', paymentStatus: 'Paiement' };
+  const optionsWithSelected = (key: FilterKey, options: ReportFilterOption[] = []) => {
+    const selected = draftOptions[key];
+    return selected && !options.some((option) => option.id === selected.id) ? [selected, ...options] : options;
+  };
+  const updateDraft = (key: FilterKey, value?: string, option?: ReportFilterOption) => {
+    setDraftFilters((current) => {
+      const next = { ...current, [key]: value || undefined };
+      if (key === 'categoryId' && current.categoryId !== value) delete next.productId;
+      return next;
+    });
+    setDraftOptions((current) => {
+      const next = { ...current, [key]: option };
+      if (key === 'categoryId') delete next.productId;
+      return next;
+    });
+  };
+  const clearAllAdvancedFilters = () => {
+    setAppliedFilters(EMPTY_FILTERS); setDraftFilters(EMPTY_FILTERS); setAppliedOptions({}); setDraftOptions({});
+  };
+  const applyDraftFilters = () => { setAppliedFilters(draftFilters); setAppliedOptions(draftOptions); setFiltersOpen(false); };
+  const closeFilters = () => { setDraftFilters(appliedFilters); setDraftOptions(appliedOptions); setFiltersOpen(false); };
+
+  const comboboxProps = {
+    getOptionValue: (item: ReportFilterOption) => item.id,
+    getOptionLabel: (item: ReportFilterOption) => item.label,
+    getOptionSecondaryLabel: (item: ReportFilterOption) => item.secondaryLabel,
+  };
+
+  const filtersPanel = (
+    <SlideOver open={filtersOpen} onClose={closeFilters} title="Filtres du rapport" subtitle="Les données ne seront actualisées qu'après validation" width={720}
+      footer={<><Button type="button" variant="ghost" onClick={() => { setDraftFilters(EMPTY_FILTERS); setDraftOptions({}); }}>Réinitialiser</Button><Button type="button" variant="outline" onClick={closeFilters}>Fermer</Button><Button type="button" onClick={applyDraftFilters}>Appliquer les filtres</Button></>}>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <SearchableFilterCombobox label="Client" placeholder="Tous les clients" searchPlaceholder="Nom, téléphone, MF ou référence…" minSearchLength={2}
+          value={draftFilters.customerId} options={optionsWithSelected('customerId', clientsQuery.data)} isLoading={clientsQuery.isFetching} error={clientsQuery.isError}
+          onSearch={setCustomerSearch} onRetry={() => clientsQuery.refetch()} onChange={(value, option) => updateDraft('customerId', value, option)} {...comboboxProps} />
+        <SearchableFilterCombobox label="Catégorie" placeholder="Toutes les catégories" searchPlaceholder="Rechercher une catégorie…"
+          value={draftFilters.categoryId} options={optionsWithSelected('categoryId', categoriesQuery.data)} isLoading={categoriesQuery.isFetching} error={categoriesQuery.isError}
+          onSearch={setCategorySearch} onRetry={() => categoriesQuery.refetch()} onChange={(value, option) => updateDraft('categoryId', value, option)} {...comboboxProps} />
+        <SearchableFilterCombobox label="Produit" placeholder="Tous les produits" searchPlaceholder="Nom, référence, code ou code-barres…" minSearchLength={2}
+          value={draftFilters.productId} options={optionsWithSelected('productId', productsQuery.data)} isLoading={productsQuery.isFetching} error={productsQuery.isError}
+          onSearch={setProductSearch} onRetry={() => productsQuery.refetch()} onChange={(value, option) => updateDraft('productId', value, option)} {...comboboxProps} />
+        <SearchableFilterCombobox label="Vendeur" placeholder="Tous les vendeurs" searchPlaceholder="Nom, email ou téléphone…" minSearchLength={2}
+          value={draftFilters.sellerId} options={optionsWithSelected('sellerId', sellersQuery.data)} isLoading={sellersQuery.isFetching} error={sellersQuery.isError}
+          onSearch={setSellerSearch} onRetry={() => sellersQuery.refetch()} onChange={(value, option) => updateDraft('sellerId', value, option)} {...comboboxProps} />
+        <SearchableFilterCombobox label="Type de document" placeholder="Tous les documents" searchPlaceholder="Rechercher…"
+          value={draftFilters.documentType} options={DOCUMENT_OPTIONS} onChange={(value, option) => updateDraft('documentType', value, option)} {...comboboxProps} />
+        <SearchableFilterCombobox label="Statut de paiement" placeholder="Tous les paiements" searchPlaceholder="Rechercher…"
+          value={draftFilters.paymentStatus} options={PAYMENT_OPTIONS} onChange={(value, option) => updateDraft('paymentStatus', value, option)} {...comboboxProps} />
+      </div>
+    </SlideOver>
+  );
+
   // ── Period selector ───────────────────────────────────────────────────────
   const periodBar = (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex rounded-xl border border-border bg-white p-1 shadow-sm">
+    <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+      <div className="hidden max-w-full overflow-x-auto rounded-xl border border-border bg-white p-1 shadow-sm md:flex">
         {PERIOD_OPTIONS.map((opt) => (
           <button
             key={opt.value}
             onClick={() => setPeriod(opt.value)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+            aria-pressed={period === opt.value}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               period === opt.value
                 ? 'bg-accent text-white shadow-sm'
                 : 'text-text-secondary hover:bg-muted hover:text-text-primary'
@@ -262,43 +377,50 @@ export function AnalyticsDashboard() {
         ))}
       </div>
 
+      <label className="relative min-w-0 flex-1 md:hidden">
+        <span className="sr-only">Période du rapport</span>
+        <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+        <select value={period} onChange={(event) => setPeriod(event.target.value as ReportPeriod)} className="h-10 w-full appearance-none rounded-lg border border-border bg-white pl-9 pr-8 text-sm font-medium focus:ring-2 focus:ring-app-ring">
+          {PERIOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+
       {period === 'custom' && (
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-white px-3 py-1.5 shadow-sm">
+        <div className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-border bg-white px-3 py-2 shadow-sm xl:w-auto">
           <input
             type="date"
-            value={customStart}
-            onChange={(e) => setCustomStart(e.target.value)}
-            className="text-xs focus:outline-none"
+            aria-label="Date de début" value={customDraftStart}
+            onChange={(e) => setCustomDraftStart(e.target.value)}
+            className="min-w-0 flex-1 text-xs focus:outline-none"
           />
           <span className="text-text-muted">→</span>
           <input
             type="date"
-            value={customEnd}
-            onChange={(e) => setCustomEnd(e.target.value)}
-            className="text-xs focus:outline-none"
+            aria-label="Date de fin" value={customDraftEnd}
+            onChange={(e) => setCustomDraftEnd(e.target.value)}
+            className="min-w-0 flex-1 text-xs focus:outline-none"
           />
+          <Button size="sm" disabled={!customDraftStart || !customDraftEnd || customDraftStart > customDraftEnd} onClick={() => { setCustomStart(customDraftStart); setCustomEnd(customDraftEnd); }}>Appliquer</Button>
         </div>
       )}
-      <button type="button" onClick={exportCsv} disabled={!overview} className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50">
-        <Download size={14} /> Exporter CSV
-      </button>
-      <button type="button" onClick={() => { setPeriod('month'); setCustomStart(''); setCustomEnd(''); setCustomerId(''); setProductId(''); setCategoryId(''); setSellerId(''); setDocumentType(''); setPaymentStatus(''); }} className="rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-muted">Réinitialiser les filtres</button>
+      <Button type="button" variant={activeFilterCount ? 'secondary' : 'outline'} size="sm" onClick={() => { setDraftFilters(appliedFilters); setDraftOptions(appliedOptions); setFiltersOpen(true); }} className="flex-1 md:flex-none">
+        <SlidersHorizontal /> Filtres {activeFilterCount > 0 && <Badge className="ml-1 bg-app-primary text-white">{activeFilterCount}</Badge>}
+      </Button>
+      <Button type="button" variant="outline" size="sm" onClick={exportCsv} disabled={!overview || isFetching} className="flex-1 md:flex-none"><Download /> Exporter CSV</Button>
     </div>
   );
 
   const header = (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h1 className="app-page-title">Rapports — Analyse complète</h1>
-        <p className="app-page-subtitle">
-          Vue financière et opérationnelle détaillée — Stockini
-        </p>
+      <div className="shrink-0">
+        <h1 className="app-page-title">Rapports financiers</h1>
+        <p className="app-page-subtitle">Analyse détaillée des ventes, coûts et bénéfices</p>
       </div>
       {periodBar}
     </div>
   );
 
-  if (isLoading) return <div className="space-y-6 pb-10">{header}<LoadingState /></div>;
+  if (!initialized || isLoading) return <div className="space-y-6 pb-10">{header}<LoadingState /></div>;
   if (isError || !overview) return (
     <div className="space-y-6 pb-10">{header}<ErrorState onRetry={() => refetch()} /></div>
   );
@@ -350,14 +472,14 @@ export function AnalyticsDashboard() {
   return (
     <div className="space-y-6 pb-10">
       {header}
-      <div className="grid gap-2 rounded-xl border border-border bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
-        <select aria-label="Client" value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les clients</option>{customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-        <select aria-label="Produit" value={productId} onChange={(e) => setProductId(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les produits</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-        <select aria-label="Catégorie" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Toutes les catégories</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-        <select aria-label="Type de document" value={documentType} onChange={(e) => setDocumentType(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les documents</option><option value="FACTURE">Factures</option><option value="BON_LIVRAISON">Bons de livraison</option></select>
-        <select aria-label="Statut de paiement" value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les paiements</option><option value="PAID">Payé</option><option value="PARTIAL">Partiel</option><option value="UNPAID">Impayé</option></select>
-        <input aria-label="Identifiant vendeur" value={sellerId} onChange={(e) => setSellerId(e.target.value)} placeholder="Identifiant vendeur" className="rounded-lg border border-border px-3 py-2 text-xs" />
-      </div>
+      {filtersPanel}
+      {activeFilterCount > 0 && <div aria-label="Filtres actifs" className="flex flex-wrap items-center gap-2">
+        {activeFilterEntries.map(([key, value]) => <Badge key={key} variant="secondary" className="gap-1.5 rounded-full border border-border bg-white py-1.5 pl-3 pr-1.5 text-xs font-medium text-text-secondary">
+          {labels[key]} : {appliedOptions[key]?.label ?? (key === 'documentType' ? DOCUMENT_OPTIONS.find((item) => item.id === value)?.label : key === 'paymentStatus' ? PAYMENT_OPTIONS.find((item) => item.id === value)?.label : 'Sélection')}
+          <button type="button" aria-label={`Supprimer le filtre ${labels[key]}`} onClick={() => { const next = { ...appliedFilters }; delete next[key]; const nextOptions = { ...appliedOptions }; delete nextOptions[key]; setAppliedFilters(next); setDraftFilters(next); setAppliedOptions(nextOptions); setDraftOptions(nextOptions); }} className="rounded-full p-1 hover:bg-muted focus-visible:ring-2 focus-visible:ring-app-ring"><X className="h-3 w-3" /></button>
+        </Badge>)}
+        <button type="button" onClick={clearAllAdvancedFilters} className="text-xs font-semibold text-app-primary hover:underline">Effacer tous les filtres</button>
+      </div>}
       {!financier.dataQuality.complete && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Marge historique partielle : {financier.dataQuality.unknownCostLines} ligne(s) sans coût reconstructible.
@@ -370,44 +492,49 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={DollarSign} title="Synthèse financière" />
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             icon={DollarSign}
             label="CA net HT hors timbre"
-            value={money(financier.caNet)}
+            value={reportMoney(financier.caNet)}
             trend={financier.caTrend}
+            formula="Somme des ventes reconnues HT, nette des remises et avoirs, hors timbre"
             color="orange"
           />
           <KpiCard
             icon={TrendingUp}
             label="Encaissements clients"
-            value={money(financier.encaissementsClients)}
+            value={reportMoney(financier.encaissementsClients)}
+            formula="Somme des paiements clients encaissés sur la période"
             color="green"
           />
           <KpiCard
             icon={AlertTriangle}
             label="Impayés clients"
-            value={money(financier.impayesClients)}
+            value={reportMoney(financier.impayesClients)}
+            formula="Somme des montants restant dus sur les ventes de la période"
             color="red"
           />
           <KpiCard
             icon={TrendingUp}
             label="Bénéfice brut réel"
-            value={money(financier.beneficeBrut)}
+            value={reportMoney(financier.beneficeBrut)}
             sub={`Taux de marque sur vente : ${financier.tauxMarque}%`}
+            formula="CA net HT − coût d'achat HT des produits vendus"
             color={financier.beneficeBrut >= 0 ? 'green' : 'red'}
           />
           <KpiCard
             icon={ShoppingCart}
             label="Coût des produits vendus"
-            value={money(financier.coutProduitsVendus)}
+            value={reportMoney(financier.coutProduitsVendus)}
             sub={`Taux de marge sur coût : ${financier.tauxMargeSurCout}%`}
+            formula="Somme des quantités vendues × coût d'achat unitaire HT historique"
             color="blue"
           />
           <KpiCard
             icon={Truck}
             label="Paiements fournisseurs"
-            value={money(financier.paiementsFournisseurs)}
+            value={reportMoney(financier.paiementsFournisseurs)}
             sub={
               financier.totalAchats > 0
                 ? `${Math.round((financier.paiementsFournisseurs / financier.totalAchats) * 100)}% réglé`
@@ -418,13 +545,13 @@ export function AnalyticsDashboard() {
           <KpiCard
             icon={AlertTriangle}
             label="Impayés fournisseurs"
-            value={money(financier.impayesFournisseurs)}
+            value={reportMoney(financier.impayesFournisseurs)}
             color="orange"
           />
           <KpiCard
             icon={Boxes}
             label="Remises accordées"
-            value={money(financier.remisesAccordees)}
+            value={reportMoney(financier.remisesAccordees)}
             sub="Réduction du CA HT catalogue"
             color="purple"
           />
@@ -436,29 +563,29 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={DollarSign} title="Trésorerie" />
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             icon={DollarSign}
             label="Caisse physique"
-            value={money(financier.soldeCaisse)}
+            value={reportMoney(financier.soldeCaisse)}
             color="green"
           />
           <KpiCard
             icon={DollarSign}
             label="Trésorerie bancaire"
-            value={money(financier.soldeBanque)}
+            value={reportMoney(financier.soldeBanque)}
             color="blue"
           />
           <KpiCard
             icon={DollarSign}
             label="Solde global"
-            value={money(financier.soldeGlobal)}
+            value={reportMoney(financier.soldeGlobal)}
             color="teal"
           />
           <KpiCard
             icon={TrendingDown}
             label="Dépenses (période)"
-            value={money(financier.depenses)}
+            value={reportMoney(financier.depenses)}
             color="red"
           />
         </div>
@@ -469,11 +596,11 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={DollarSign} title="Ventes" />
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <KpiCard
             icon={DollarSign}
             label="CA période"
-            value={money(financier.caNet)}
+            value={reportMoney(financier.caNet)}
             trend={financier.caTrend}
             color="orange"
           />
@@ -487,7 +614,7 @@ export function AnalyticsDashboard() {
           <KpiCard
             icon={Activity}
             label="Panier moyen"
-            value={money(ventes.panierMoyen)}
+            value={reportMoney(ventes.panierMoyen)}
             color="purple"
           />
           <KpiCard
@@ -512,7 +639,7 @@ export function AnalyticsDashboard() {
 
         {/* Avoirs */}
         {ventes.avoirs.count > 0 && (
-          <div className="mt-3 grid gap-3 grid-cols-2 md:grid-cols-3">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <KpiCard
               icon={RefreshCw}
               label="Avoirs émis"
@@ -522,13 +649,13 @@ export function AnalyticsDashboard() {
             <KpiCard
               icon={DollarSign}
               label="Montant avoirs"
-              value={money(ventes.avoirs.total)}
+              value={reportMoney(ventes.avoirs.total)}
               color="orange"
             />
             <KpiCard
               icon={DollarSign}
               label="Montant remboursé"
-              value={money(ventes.avoirs.montantRembourse)}
+              value={reportMoney(ventes.avoirs.montantRembourse)}
               color="orange"
             />
           </div>
@@ -540,7 +667,7 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={Package} title="Produits & Stock" />
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <KpiCard icon={Package}       label="Total produits"   value={stock.totalProduits}  color="blue" />
           <KpiCard icon={AlertTriangle} label="Ruptures stock"   value={stock.ruptureCount}   color="red" />
           <KpiCard icon={AlertTriangle} label="Sous seuil"       value={stock.lowStockCount}  color="orange" />
@@ -555,11 +682,11 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={ShoppingCart} title="Achats" />
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-          <KpiCard icon={ShoppingCart}  label="Total achats"        value={money(financier.totalAchats)}       trend={financier.achatsTrend} color="blue" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard icon={ShoppingCart} label="Total achats" value={reportMoney(financier.totalAchats)} trend={financier.achatsTrend} trendPositiveWhen="down" formula="Somme des achats actifs sur la période" color="blue" />
           <KpiCard icon={Layers}        label="Nb commandes"         value={achats.count}                       trend={achats.countTrend}     color="purple" />
-          <KpiCard icon={Truck}         label="Paiements fournisseurs" value={money(financier.paiementsFournisseurs)} color="teal" />
-          <KpiCard icon={AlertTriangle} label="Impayés fournisseurs" value={money(financier.impayesFournisseurs)}  color="orange" />
+          <KpiCard icon={Truck}         label="Paiements fournisseurs" value={reportMoney(financier.paiementsFournisseurs)} color="teal" />
+          <KpiCard icon={AlertTriangle} label="Impayés fournisseurs" value={reportMoney(financier.impayesFournisseurs)}  color="orange" />
         </div>
       </section>
 
@@ -568,10 +695,10 @@ export function AnalyticsDashboard() {
       ═══════════════════════════════════════════════════════════════════ */}
       <section>
         <SectionHead icon={Users} title="Clients" />
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard icon={Users}         label="Total clients"        value={clients.total}                        color="blue" />
-          <KpiCard icon={DollarSign}    label="Encaissements période" value={money(financier.encaissementsClients)} color="green" />
-          <KpiCard icon={AlertTriangle} label="Impayés période"       value={money(financier.impayesClients)}       color="red" />
+          <KpiCard icon={DollarSign}    label="Encaissements période" value={reportMoney(financier.encaissementsClients)} color="green" />
+          <KpiCard icon={AlertTriangle} label="Impayés période"       value={reportMoney(financier.impayesClients)}       color="red" />
         </div>
       </section>
 
@@ -604,7 +731,7 @@ export function AnalyticsDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                     <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} width={52} />
-                    <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                    <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                     <Area
                       type="monotone" dataKey="CA" name="CA"
                       stroke="#E67E22" fill="url(#gCA)" strokeWidth={2.5}
@@ -630,7 +757,7 @@ export function AnalyticsDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                     <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} width={52} />
-                    <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                    <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                     <Line type="monotone" dataKey="CA"       stroke="#E67E22" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                     <Line type="monotone" dataKey="Marge brute" stroke="#2563EB" strokeWidth={2} dot={false} strokeDasharray="5 3" activeDot={{ r: 4 }} />
@@ -659,7 +786,7 @@ export function AnalyticsDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                     <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} width={52} />
-                    <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                    <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                     <Bar dataKey="Encaissements" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={20} />
                     <Bar dataKey="Dépenses"      fill="#EF4444" radius={[4, 4, 0, 0]} maxBarSize={20} />
@@ -733,7 +860,7 @@ export function AnalyticsDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" width={145} tick={{ fontSize: 10, fill: '#5A6A7E' }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                       <Bar dataKey="CA" fill="#E67E22" radius={[0, 4, 4, 0]} maxBarSize={18} />
                       <Bar dataKey="Bénéfice" fill="#10B981" radius={[0, 4, 4, 0]} maxBarSize={18} />
                     </BarChart>
@@ -767,7 +894,7 @@ export function AnalyticsDashboard() {
                             <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(v) => money(Number(v ?? 0))} />
+                        <Tooltip formatter={(v) => reportMoney(Number(v ?? 0))} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1.5">
@@ -789,7 +916,7 @@ export function AnalyticsDashboard() {
           <CardHeader className="p-4"><CardTitle className="flex items-center gap-2 text-sm"><AlertTriangle size={14} className="text-red-500" /> Produits à faible marge ou déficitaires</CardTitle></CardHeader>
           <CardContent className="p-0">
             {produitsFaibleMarge.length === 0 ? <p className="py-8 text-center text-sm text-text-muted">Aucun produit sous le seuil de 10 %.</p> : (
-              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b bg-muted/30">{['Référence', 'Produit', 'Quantité', 'CA net', 'Coût', 'Bénéfice', 'Taux de marque'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold text-text-secondary">{h}</th>)}</tr></thead><tbody>{produitsFaibleMarge.map((item) => <tr key={item.productId} className="border-b last:border-0"><td className="px-4 py-3 font-mono text-xs">{item.product.reference}</td><td className="px-4 py-3 font-medium">{item.product.name}</td><td className="px-4 py-3">{item.quantitySold}</td><td className="px-4 py-3">{money(item.revenue)}</td><td className="px-4 py-3">{money(item.cost)}</td><td className={`px-4 py-3 font-semibold ${item.profit < 0 ? 'text-red-600' : ''}`}>{money(item.profit)}</td><td className="px-4 py-3">{item.markupRate.toFixed(3)} %</td></tr>)}</tbody></table></div>
+              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b bg-muted/30">{['Référence', 'Produit', 'Quantité', 'CA net', 'Coût', 'Bénéfice', 'Taux de marque'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold text-text-secondary">{h}</th>)}</tr></thead><tbody>{produitsFaibleMarge.map((item) => <tr key={item.productId} className="border-b last:border-0"><td className="px-4 py-3 font-mono text-xs">{item.product.reference}</td><td className="px-4 py-3 font-medium">{item.product.name}</td><td className="px-4 py-3">{item.quantitySold}</td><td className="px-4 py-3">{reportMoney(item.revenue)}</td><td className="px-4 py-3">{reportMoney(item.cost)}</td><td className={`px-4 py-3 font-semibold ${item.profit < 0 ? 'text-red-600' : ''}`}>{reportMoney(item.profit)}</td><td className="px-4 py-3">{item.markupRate.toFixed(3)} %</td></tr>)}</tbody></table></div>
             )}
           </CardContent>
         </Card>
@@ -813,7 +940,7 @@ export function AnalyticsDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" horizontal={false} />
                       <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: '#5A6A7E' }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                       <Bar dataKey="CA"     name="CA"     fill="#E67E22" radius={[0, 4, 4, 0]} maxBarSize={18} />
                       <Bar dataKey="Impayé" name="Impayé" fill="#EF4444" radius={[0, 4, 4, 0]} maxBarSize={18} />
                     </BarChart>
@@ -839,7 +966,7 @@ export function AnalyticsDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" horizontal={false} />
                       <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: '#5A6A7E' }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                       <Bar dataKey="Total achats" fill="#2563EB" radius={[0, 4, 4, 0]} maxBarSize={18} />
                       <Bar dataKey="Impayé"       fill="#F59E0B" radius={[0, 4, 4, 0]} maxBarSize={18} />
                     </BarChart>
@@ -956,7 +1083,7 @@ export function AnalyticsDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" vertical={false} />
                       <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                       <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} width={52} />
-                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Tooltip content={<ChartTip fmt={(v) => reportMoney(v)} />} />
                       <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                       <Bar dataKey="CA"     fill="#E67E22" radius={[4, 4, 0, 0]} maxBarSize={24} />
                       <Bar dataKey="Achats" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={24} />

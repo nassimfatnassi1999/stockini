@@ -26,6 +26,7 @@ import type {
   ExpensesQueryParams,
   ReportOverview,
   ReportOverviewQuery,
+  ReportFilterOption,
   PaginatedResponse,
   PayablePurchasesResponse,
   PayablePurchasesQueryParams,
@@ -121,6 +122,14 @@ export const stockiniApi = {
         params: cleanQueryParams(query),
       })
       .then((r) => r.data),
+  reportFilterOptions: (
+    kind: 'products' | 'clients' | 'categories' | 'sellers',
+    params?: { search?: string; categoryId?: string; limit?: number },
+    signal?: AbortSignal,
+  ) => api.get<ReportFilterOption[]>(`/reports/filters/${kind}`, {
+    params: cleanQueryParams(params),
+    signal,
+  }).then((r) => r.data),
   dashboard: (query?: ReportOverviewQuery) =>
     api.get<DashboardReport>("/reports/dashboard", { params: cleanQueryParams(query) }).then((r) => r.data),
   stockValue: () =>

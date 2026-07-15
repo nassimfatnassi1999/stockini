@@ -695,6 +695,13 @@ export interface ReportOverviewQuery {
   paymentStatus?: 'PAID' | 'PARTIAL' | 'UNPAID';
 }
 
+export interface ReportFilterOption {
+  id: string;
+  label: string;
+  secondaryLabel?: string;
+  categoryId?: string;
+}
+
 export interface ReportTimeSeries {
   label: string;
   ca: number;

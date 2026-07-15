@@ -348,3 +348,83 @@ describe('critical stock', () => {
   it('minStock=0 quantity=0 → rupture', () =>
     expect(classify({ quantity: 0, minStock: 0 })).toBe('rupture'));
 });
+
+describe('report filter searches', () => {
+  it('does not query remote product lists before two characters', async () => {
+    const findMany = jest.fn();
+    const service = new ReportsService({ product: { findMany } } as any);
+    await expect(
+      service.filterProducts({ search: 'P', limit: 20 }),
+    ).resolves.toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('searches products by name, reference, internal code, SKU and barcode with a server limit', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 'p1',
+        name: 'Plaquette de frein',
+        reference: 'PF-0012',
+        categoryId: 'c1',
+      },
+    ]);
+    const service = new ReportsService({ product: { findMany } } as any);
+    await expect(
+      service.filterProducts({
+        search: 'PF-0012',
+        categoryId: 'c1',
+        limit: 20,
+      }),
+    ).resolves.toEqual([
+      {
+        id: 'p1',
+        label: 'Plaquette de frein',
+        secondaryLabel: 'Réf. PF-0012',
+        categoryId: 'c1',
+      },
+    ]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 20,
+        where: expect.objectContaining({
+          categoryId: 'c1',
+          OR: expect.arrayContaining([
+            { name: { contains: 'PF-0012', mode: 'insensitive' } },
+            { reference: { contains: 'PF-0012', mode: 'insensitive' } },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('searches clients by name, reference, phone and tax number', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new ReportsService({ customer: { findMany } } as any);
+    await service.filterClients({ search: '54 123', limit: 20 });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 20,
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { name: { contains: '54 123', mode: 'insensitive' } },
+            { phone: { contains: '54 123', mode: 'insensitive' } },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('only exposes active sellers and cashiers in seller results', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new ReportsService({ user: { findMany } } as any);
+    await service.filterSellers({ search: 'ali', limit: 20 });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isActive: true,
+          role: { name: { in: ['SELLER', 'CASHIER'] } },
+        }),
+      }),
+    );
+  });
+});

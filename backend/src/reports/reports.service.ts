@@ -15,6 +15,10 @@ import type {
   ReportPeriod,
 } from './dto/report-overview.dto';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import type {
+  ReportFilterOption,
+  ReportFilterQueryDto,
+} from './dto/report-filter-query.dto';
 import {
   financialRates,
   revenueRecognizedSaleWhere,
@@ -272,6 +276,123 @@ const STOCK_EXIT_TYPES = [
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async filterProducts(
+    query: ReportFilterQueryDto,
+  ): Promise<ReportFilterOption[]> {
+    const search = query.search?.trim();
+    if (!search || search.length < 2) return [];
+    const products = await this.prisma.product.findMany({
+      where: {
+        deletedAt: null,
+        isActive: true,
+        ...(query.categoryId && { categoryId: query.categoryId }),
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { reference: { contains: search, mode: 'insensitive' } },
+          { idProduct: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+          { barcode: { contains: search, mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true, name: true, reference: true, categoryId: true },
+      orderBy: [{ name: 'asc' }, { reference: 'asc' }],
+      take: query.limit,
+    });
+    return products.map((product) => ({
+      id: product.id,
+      label: product.name,
+      secondaryLabel: `Réf. ${product.reference}`,
+      categoryId: product.categoryId,
+    }));
+  }
+
+  async filterClients(
+    query: ReportFilterQueryDto,
+  ): Promise<ReportFilterOption[]> {
+    const search = query.search?.trim();
+    if (!search || search.length < 2) return [];
+    const clients = await this.prisma.customer.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { reference: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+          { taxNumber: { contains: search, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        taxNumber: true,
+        reference: true,
+      },
+      orderBy: { name: 'asc' },
+      take: query.limit,
+    });
+    return clients.map((client) => ({
+      id: client.id,
+      label: client.name,
+      secondaryLabel: [
+        client.phone,
+        client.taxNumber && `MF ${client.taxNumber}`,
+        client.reference,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    }));
+  }
+
+  async filterCategories(
+    query: ReportFilterQueryDto,
+  ): Promise<ReportFilterOption[]> {
+    const search = query.search?.trim();
+    const categories = await this.prisma.category.findMany({
+      where: search
+        ? { name: { contains: search, mode: 'insensitive' } }
+        : undefined,
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+      take: query.limit,
+    });
+    return categories.map((category) => ({
+      id: category.id,
+      label: category.name,
+    }));
+  }
+
+  async filterSellers(
+    query: ReportFilterQueryDto,
+  ): Promise<ReportFilterOption[]> {
+    const search = query.search?.trim();
+    if (!search || search.length < 2) return [];
+    const sellers = await this.prisma.user.findMany({
+      where: {
+        isActive: true,
+        role: { name: { in: ['SELLER', 'CASHIER'] } },
+        OR: [
+          { fullName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: { select: { name: true } },
+      },
+      orderBy: { fullName: 'asc' },
+      take: query.limit,
+    });
+    return sellers.map((seller) => ({
+      id: seller.id,
+      label: seller.fullName,
+      secondaryLabel: `${seller.email} · ${seller.role.name === 'CASHIER' ? 'Caissier' : 'Vendeur'}`,
+    }));
+  }
 
   private saleFilter(query: ReportOverviewQueryDto): Prisma.SaleWhereInput {
     return {
