@@ -48,21 +48,24 @@ export function calculateSalesLine(input: SalesLineCalculationInput) {
   );
   const taxPercent = Decimal.max(0, decimal(input.taxPercent));
   const quantity = Decimal.max(0, decimal(input.quantity));
-  const grossSalePriceHt =
-    input.grossSalePriceHt === null || input.grossSalePriceHt === undefined
-      ? purchasePriceHt.mul(new Decimal(1).plus(grossMarginPercent.div(100)))
-      : Decimal.max(0, decimal(input.grossSalePriceHt));
+  // Avec un coût connu, aucun prix transmis (brut ou déjà net) ne peut devenir
+  // une seconde base de remise. Le taux de marge est l'unique source du prix.
+  const grossSalePriceHt = purchasePriceHt.gt(0)
+    ? purchasePriceHt.mul(new Decimal(1).plus(grossMarginPercent.div(100)))
+    : Decimal.max(0, decimal(input.grossSalePriceHt));
 
   // Stockini : la remise retire des points au taux de marge. Ce n'est pas une
   // remise commerciale appliquée au prix de vente brut.
   const roundedGrossUnit = decimal(salesRound3(grossSalePriceHt));
-  const netMarginPercent = grossMarginPercent.minus(discountPercent);
-  const grossMarginAmount = roundedGrossUnit.minus(purchasePriceHt);
-  const netMarginAmount = grossMarginPercent.isZero()
-    ? purchasePriceHt.mul(netMarginPercent).div(100)
-    : grossMarginAmount.mul(netMarginPercent).div(grossMarginPercent);
+  const netMarginPercent = Decimal.max(
+    0,
+    grossMarginPercent.minus(discountPercent),
+  );
+  const netMarginAmount = purchasePriceHt.mul(netMarginPercent).div(100);
   const netSalePriceHt = decimal(
-    salesRound3(purchasePriceHt.plus(netMarginAmount)),
+    purchasePriceHt.gt(0)
+      ? salesRound3(purchasePriceHt.plus(netMarginAmount))
+      : roundedGrossUnit,
   );
   const lineNetHt = decimal(salesRound3(netSalePriceHt.mul(quantity)));
   const purchaseCostHt = decimal(salesRound3(purchasePriceHt.mul(quantity)));

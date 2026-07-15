@@ -3,8 +3,8 @@
 ## Définitions appliquées
 
 - `prixVenteBrutHT = prixAchatHT × (1 + margeBrute / 100)`
-- `margeNettePct = margeBrutePct - remisePct`
-- `margeNetteDT = margeBruteDT × (margeNettePct / margeBrutePct)`
+- `margeNettePct = max(margeBrutePct - remisePct, 0)`
+- `margeNetteDT = prixAchatHT × margeNettePct / 100`
 - `prixVenteNetHT = prixAchatHT + margeNetteDT`
 - `CA net HT = lignes vendues HT - lignes retournées HT`, hors TVA et timbre
 - `marge brute réelle = CA net HT - coût historique net des produits vendus`

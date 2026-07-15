@@ -183,7 +183,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                             {item.quantity}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
-                            {fmt3(item.unitPrice)}
+                            {fmt3(unitPrice)}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {grossMargin === null ? "Historique" : `${grossMargin.toFixed(2)} %`}

@@ -36,16 +36,15 @@ export function calculateSalesLine(input: SalesLineCalculationInput) {
   const discountPercent = Decimal.min(100, Decimal.max(0, decimal(input.discountPercent)));
   const taxPercent = Decimal.max(0, decimal(input.taxPercent));
   const quantity = Decimal.max(0, decimal(input.quantity));
-  const gross = input.grossSalePriceHt == null
+  const gross = purchasePriceHt.gt(0)
     ? purchasePriceHt.mul(new Decimal(1).plus(grossMarginPercent.div(100)))
     : Decimal.max(0, decimal(input.grossSalePriceHt));
   const grossSalePriceHt = decimal(salesRound3(gross));
-  const netMarginPercent = grossMarginPercent.minus(discountPercent);
-  const grossMarginAmount = grossSalePriceHt.minus(purchasePriceHt);
-  const netMarginAmount = grossMarginPercent.isZero()
-    ? purchasePriceHt.mul(netMarginPercent).div(100)
-    : grossMarginAmount.mul(netMarginPercent).div(grossMarginPercent);
-  const netSalePriceHt = decimal(salesRound3(purchasePriceHt.plus(netMarginAmount)));
+  const netMarginPercent = Decimal.max(0, grossMarginPercent.minus(discountPercent));
+  const netMarginAmount = purchasePriceHt.mul(netMarginPercent).div(100);
+  const netSalePriceHt = decimal(purchasePriceHt.gt(0)
+    ? salesRound3(purchasePriceHt.plus(netMarginAmount))
+    : grossSalePriceHt);
   const lineNetHt = decimal(salesRound3(netSalePriceHt.mul(quantity)));
   const purchaseCostHt = decimal(salesRound3(purchasePriceHt.mul(quantity)));
   const marginAmountHt = lineNetHt.minus(purchaseCostHt);

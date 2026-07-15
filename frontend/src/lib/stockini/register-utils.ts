@@ -37,42 +37,23 @@ export function calcDefaultSellingPriceHt(purchasePriceHt: number): number {
   return round3(purchasePriceHt * (1 + DEFAULT_MARGIN_PERCENT / 100));
 }
 
-/** Prix net Stockini : la remise retire des points au taux de marge. */
-export function calcNetUnitPriceHt(
-  puHt: number,
-  discountPercent: number,
-  purchasePriceHt = 0,
-): number {
-  const grossMarginAmount = puHt - purchasePriceHt;
-  const grossMarginPercent = purchasePriceHt > 0
-    ? (grossMarginAmount / purchasePriceHt) * 100
-    : DEFAULT_MARGIN_PERCENT;
-  const netMarginPercent = grossMarginPercent - discountPercent;
-  const netMarginAmount = grossMarginPercent === 0
-    ? purchasePriceHt * (netMarginPercent / 100)
-    : grossMarginAmount * (netMarginPercent / grossMarginPercent);
-  return round3(purchasePriceHt + netMarginAmount);
-}
-
-/** Profit amount per unit after discount, null when purchasePriceHt is 0 */
-export function calcMargeAmount(
-  puHt: number,
-  discountPercent: number,
-  purchasePriceHt: number,
-): number | null {
-  if (purchasePriceHt <= 0) return null;
-  return round3(calcNetUnitPriceHt(puHt, discountPercent, purchasePriceHt) - purchasePriceHt);
-}
-
-/** Profit % based on net price after discount, null when purchasePriceHt is 0 */
-export function calcMargePercent(
-  puHt: number,
-  discountPercent: number,
-  purchasePriceHt: number,
-): number | null {
-  if (purchasePriceHt <= 0) return null;
-  const net = calcNetUnitPriceHt(puHt, discountPercent, purchasePriceHt);
-  return Math.round(((net - purchasePriceHt) / purchasePriceHt) * 10000) / 100;
+/** Comparaison achat uniquement : la remise fournisseur réduit le coût d'achat. */
+function calculatePurchaseReferenceMargin(line: RegisterLine): {
+  percent: number | null;
+  amount: number | null;
+} {
+  if (line.purchasePriceHt <= 0) return { percent: null, amount: null };
+  const netUnitCost = calculatePurchaseLine({
+    quantity: 1,
+    unitCost: line.puHt,
+    discountPercent: line.remisePercent,
+    tvaPercent: 0,
+  }).netHt;
+  const amount = round3(netUnitCost - line.purchasePriceHt);
+  return {
+    amount,
+    percent: Math.round((amount / line.purchasePriceHt) * 10000) / 100,
+  };
 }
 
 export interface DocumentTotals {
@@ -124,9 +105,8 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
   const result = calculatePurchaseLine({ quantity: line.quantity, unitCost: line.puHt, discountPercent: line.remisePercent, tvaPercent: line.tvaPercent });
   const netHt = result.netHt;
   const netTtc = result.totalTtc;
-  const margePercent = calcMargePercent(line.puHt, line.remisePercent, line.purchasePriceHt);
-  const margeAmount = calcMargeAmount(line.puHt, line.remisePercent, line.purchasePriceHt);
-  return { ...line, netHt, netTtc, margePercent, margeAmount };
+  const margin = calculatePurchaseReferenceMargin(line);
+  return { ...line, netHt, netTtc, margePercent: margin.percent, margeAmount: margin.amount };
 }
 
 /**

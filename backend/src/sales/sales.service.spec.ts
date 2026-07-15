@@ -76,6 +76,7 @@ describe('SalesService document references', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: jest.fn(),
         findFirstOrThrow: jest.fn(),
+        findFirst: jest.fn(),
       },
       payment: {
         create: jest.fn(({ data }: { data: any }) =>
@@ -83,6 +84,7 @@ describe('SalesService document references', () => {
         ),
       },
       saleItem: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         findMany: jest.fn((args: any) => {
           if (args?.select?.saleId)
             return Promise.resolve([{ saleId: 'sale-1' }]);
@@ -228,6 +230,86 @@ describe('SalesService document references', () => {
       );
     },
   );
+
+  it('crée une vente v3 sans double remise avec le vecteur 68,989/40/20', async () => {
+    const { service, tx } = buildService();
+    tx.product.findMany.mockResolvedValueOnce([
+      { ...product, purchasePrice: 68.989, salePrice: 96.585 },
+    ]);
+
+    await service.create({
+      documentType: DocumentType.FACTURE,
+      customerId: 'customer-1',
+      paidAmount: 0,
+      items: [{
+        productId: product.id,
+        quantity: 1,
+        unitPrice: 82.787, // prix déjà net : ne doit jamais subir une seconde remise
+        marginPercent: 40,
+        discountPercent: 20,
+      }],
+    });
+
+    const data = tx.sale.create.mock.calls[0][0].data;
+    expect(data).toEqual(expect.objectContaining({
+      subtotal: 82.787,
+      discount: 13.798,
+      tax: 15.73,
+      total: 98.517,
+    }));
+    expect(data.items.create[0]).toEqual(expect.objectContaining({
+      unitPrice: 96.585,
+      finalUnitPrice: 82.787,
+      total: 82.787,
+      calculationVersion: 3,
+    }));
+  });
+
+  it('recalcule toute vente modifiée avec la règle v3 sans double remise', async () => {
+    const { service, tx } = buildService();
+    tx.product.findMany.mockResolvedValueOnce([
+      { ...product, purchasePrice: 68.989, salePrice: 96.585 },
+    ]);
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'sale-edit',
+      invoiceNumber: 'DEV-EDIT',
+      customerId: 'customer-1',
+      clientType: 'PERSISTENT',
+      documentType: DocumentType.DEVIS,
+      status: SaleStatus.DRAFT,
+      stockImpactDone: false,
+      stampDuty: 1,
+      paidAmount: 0,
+      items: [],
+      payments: [],
+    });
+    tx.sale.update.mockImplementationOnce(({ data }: { data: any }) =>
+      Promise.resolve({ id: 'sale-edit', ...data }),
+    );
+
+    await service.update('sale-edit', {
+      items: [{
+        productId: product.id,
+        quantity: 1,
+        unitPrice: 82.787,
+        marginPercent: 40,
+        discountPercent: 20,
+      }],
+    });
+
+    const data = tx.sale.update.mock.calls[0][0].data;
+    expect(data).toEqual(expect.objectContaining({
+      subtotal: 82.787,
+      discount: 13.798,
+      tax: 15.73,
+      total: 98.517,
+      isEdited: true,
+    }));
+    expect(data.items.create[0]).toEqual(expect.objectContaining({
+      finalUnitPrice: 82.787,
+      calculationVersion: 3,
+    }));
+  });
 
   it('rejects AVOIR creation through /sales with a clear error', async () => {
     const { service } = buildService();
