@@ -274,7 +274,7 @@ describe('ReportsService real profit', () => {
       },
     } as any;
     const service = new ReportsService(prisma);
-    const result = await (service as any).calculateFinancials({
+    const result = await service.getSalesProfitForPeriod({
       gte: new Date('2026-07-01'),
       lte: new Date('2026-07-31'),
     });
@@ -315,9 +315,10 @@ describe('ReportsService real profit', () => {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
       },
     } as any;
-    const result = await (
-      new ReportsService(prisma) as any
-    ).calculateFinancials({ gte: new Date(), lte: new Date() });
+    const result = await new ReportsService(prisma).getSalesProfitForPeriod({
+      gte: new Date(),
+      lte: new Date(),
+    });
     expect(result.dataQuality).toEqual({
       unknownCostLines: 1,
       estimatedCostLines: 0,

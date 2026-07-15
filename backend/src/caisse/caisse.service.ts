@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { CustomersService } from '../customers/customers.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { ReportsService } from '../reports/reports.service';
 import type {
   CashPeriod,
   CashQueryDto,
@@ -61,8 +62,10 @@ export function resolveCashDateRange(
       return { gte: yd, lte: new Date(today.getTime() - 1) };
     }
     case 'week': {
-      const weekAgo = new Date(today.getTime() - 7 * 86_400_000);
-      return { gte: weekAgo, lte: now };
+      const monday = new Date(
+        today.getTime() - ((localNow.getUTCDay() + 6) % 7) * 86_400_000,
+      );
+      return { gte: monday, lte: now };
     }
     case 'month': {
       const monthStart = new Date(
@@ -107,6 +110,7 @@ export class CaisseService {
     private readonly references: ReferenceGeneratorService,
     private readonly customers: CustomersService,
     private readonly auditLogs: AuditLogsService,
+    private readonly reports: ReportsService,
   ) {}
 
   // ─── Balance ─────────────────────────────────────────────────────────────────
@@ -217,33 +221,31 @@ export class CaisseService {
     ]);
 
     const entreesCaisse = Number(cashIn._sum.montant ?? 0);
-    const sortiesCaisse = Number(cashOut._sum.montant ?? 0);
+    const sortiesCaisse = Math.abs(Number(cashOut._sum.montant ?? 0));
     const entreesBanque = Number(bankIn._sum.montant ?? 0);
-    const sortiesBanque = Number(bankOut._sum.montant ?? 0);
+    const sortiesBanque = Math.abs(Number(bankOut._sum.montant ?? 0));
     const entrees = entreesCaisse + entreesBanque;
     const sorties = sortiesCaisse + sortiesBanque;
 
-    // Weekly/monthly/yearly aggregations (cash only — used for profit cards)
-    const [
-      weekCashIn, weekCashOut, weekBankIn, weekBankOut,
-      monthCashIn, monthCashOut, monthBankIn, monthBankOut,
-      yearCashIn, yearCashOut, yearBankIn, yearBankOut,
-    ] = await Promise.all([
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('week', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('month', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.PHYSICAL_CASH } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: IN_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
-      this.prisma.caisseMovement.aggregate({ _sum: { montant: true }, where: { type: { in: OUT_TYPES }, createdAt: resolveCashDateRange('year', undefined, undefined), treasuryAccount: TreasuryAccount.BANK_TREASURY } }),
+    // La marge commerciale est indépendante du compte de trésorerie et réutilise
+    // exactement le calcul financier des rapports (snapshots + avoirs).
+    const [selectedSales, weekSales, monthSales, yearSales] = await Promise.all([
+      this.reports.getSalesProfitForPeriod(range),
+      this.reports.getSalesProfitForPeriod(
+        resolveCashDateRange('week', undefined, undefined),
+      ),
+      this.reports.getSalesProfitForPeriod(
+        resolveCashDateRange('month', undefined, undefined),
+      ),
+      this.reports.getSalesProfitForPeriod(
+        resolveCashDateRange('year', undefined, undefined),
+      ),
     ]);
 
-    const n = (a: { _sum: { montant: any } }) => Number(a._sum.montant ?? 0);
+    const selectedProfit = selectedSales.grossProfit;
+    const weekProfit = weekSales.grossProfit;
+    const monthProfit = monthSales.grossProfit;
+    const yearProfit = yearSales.grossProfit;
 
     return {
       // Backward-compat flat fields
@@ -251,11 +253,40 @@ export class CaisseService {
       entrees,
       sorties,
       totalClientDebt,
-      profitPeriode: entrees - sorties,
-      profitSemaine: (n(weekCashIn) + n(weekBankIn)) - (n(weekCashOut) + n(weekBankOut)),
-      profitMois:    (n(monthCashIn) + n(monthBankIn)) - (n(monthCashOut) + n(monthBankOut)),
-      profitAnnee:   (n(yearCashIn) + n(yearBankIn)) - (n(yearCashOut) + n(yearBankOut)),
+      profitPeriode: selectedProfit,
+      profitSemaine: weekProfit,
+      profitMois: monthProfit,
+      profitAnnee: yearProfit,
       period: query.period ?? 'today',
+
+      cash: {
+        physicalBalance: soldeCaisse,
+        cashInflows: entreesCaisse,
+        cashOutflows: sortiesCaisse,
+      },
+      bank: {
+        balance: soldeBanque,
+        inflows: entreesBanque,
+        outflows: sortiesBanque,
+      },
+      treasury: {
+        totalBalance: soldeCaisse + soldeBanque,
+        inflows: entrees,
+        outflows: sorties,
+      },
+      sales: {
+        netRevenueHt: selectedSales.netRevenueHt,
+        costOfGoodsSold: selectedSales.costOfGoodsSold,
+        grossProfit: selectedProfit,
+        creditNoteImpact: selectedSales.creditNoteImpact,
+        saleCount: selectedSales.saleCount,
+        dataQuality: selectedSales.dataQuality,
+      },
+      salesPeriods: {
+        week: weekSales,
+        month: monthSales,
+        year: yearSales,
+      },
 
       // Per-account detail
       soldeCaisse,
@@ -264,19 +295,19 @@ export class CaisseService {
         solde: soldeCaisse,
         entrees: entreesCaisse,
         sorties: sortiesCaisse,
-        profit: entreesCaisse - sortiesCaisse,
-        profitSemaine: n(weekCashIn) - n(weekCashOut),
-        profitMois:    n(monthCashIn) - n(monthCashOut),
-        profitAnnee:   n(yearCashIn) - n(yearCashOut),
+        profit: selectedProfit,
+        profitSemaine: weekProfit,
+        profitMois: monthProfit,
+        profitAnnee: yearProfit,
       },
       banque: {
         solde: soldeBanque,
         entrees: entreesBanque,
         sorties: sortiesBanque,
-        profit: entreesBanque - sortiesBanque,
-        profitSemaine: n(weekBankIn) - n(weekBankOut),
-        profitMois:    n(monthBankIn) - n(monthBankOut),
-        profitAnnee:   n(yearBankIn) - n(yearBankOut),
+        profit: selectedProfit,
+        profitSemaine: weekProfit,
+        profitMois: monthProfit,
+        profitAnnee: yearProfit,
       },
     };
   }
@@ -457,7 +488,7 @@ export class CaisseService {
         ]);
 
         const entrees = Number(inMvt._sum.montant ?? 0);
-        const sorties = Number(outMvt._sum.montant ?? 0);
+        const sorties = Math.abs(Number(outMvt._sum.montant ?? 0));
 
         let label: string;
         if (isYearly) {
@@ -468,7 +499,7 @@ export class CaisseService {
           label = bucketStart.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
         }
 
-        return { label, entrees, sorties, profit: entrees - sorties };
+        return { label, entrees, sorties, netCashFlow: entrees - sorties };
       }),
     );
 

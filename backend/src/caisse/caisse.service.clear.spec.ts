@@ -18,7 +18,8 @@ function buildService(countResult = 5) {
   const references = {} as any;
   const customers = { getTotalClientDebt: jest.fn() } as any;
   const auditLogs = { create: jest.fn(), audit: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new CaisseService(prisma, references, customers, auditLogs);
+  const reports = { getSalesProfitForPeriod: jest.fn() } as any;
+  const service = new CaisseService(prisma, references, customers, auditLogs, reports);
   return { service, prisma };
 }
 

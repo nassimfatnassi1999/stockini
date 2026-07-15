@@ -81,7 +81,7 @@ export function CashDashboard() {
   function buildParams(withAccount: boolean): Record<string, string> {
     const base: Record<string, string> =
       filters.period === 'custom' && filters.startDate && filters.endDate
-        ? { startDate: filters.startDate, endDate: filters.endDate }
+        ? { period: 'custom', startDate: filters.startDate, endDate: filters.endDate }
         : { period: filters.period };
     if (withAccount && accountParam) base.account = accountParam;
     return base;

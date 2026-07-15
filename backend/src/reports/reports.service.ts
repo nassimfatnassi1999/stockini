@@ -433,7 +433,15 @@ export class ReportsService {
     };
   }
 
-  private async calculateFinancials(
+  /**
+   * Source unique de vérité pour la marge commerciale reconnue.
+   *
+   * Les ventes sont reconnues à leur date de création et les avoirs à leur
+   * date d'avoir. Les coûts proviennent exclusivement du snapshot de la ligne
+   * de vente (`unitPurchaseCostHt`) : le prix d'achat courant du produit n'est
+   * jamais utilisé pour réécrire l'historique.
+   */
+  async getSalesProfitForPeriod(
     range: { gte: Date; lte: Date },
     query: ReportOverviewQueryDto = {},
   ) {
@@ -519,12 +527,19 @@ export class ReportsService {
     const netProfit = grossMarginHt.minus(expenseTotal);
     const rates = financialRates(netRevenueHt, netCogsHt, grossMarginHt);
     return {
+      // Noms explicites utilisés par les consommateurs hors rapports.
+      netRevenueHt: round(netRevenueHt),
+      costOfGoodsSold: round(netCogsHt),
+      grossProfit: round(grossMarginHt),
+      creditNoteImpact: round(creditsHt),
+      saleCount: sales.length,
+
+      // Champs historiques du rapport, alimentés par les mêmes décimaux.
       salesCount: sales.length,
       quantitySold,
       discountsHt: round(discountsHt),
       grossRevenueHt: round(grossRevenueHt),
       creditNotesHt: round(creditsHt),
-      netRevenueHt: round(netRevenueHt),
       cogsHt: round(netCogsHt),
       returnedCogsHt: round(returnedCogsHt),
       grossMarginHt: round(grossMarginHt),
@@ -540,6 +555,14 @@ export class ReportsService {
         complete: unknownCostLines === 0,
       },
     };
+  }
+
+  /** @deprecated Utiliser getSalesProfitForPeriod. */
+  private calculateFinancials(
+    range: { gte: Date; lte: Date },
+    query: ReportOverviewQueryDto = {},
+  ) {
+    return this.getSalesProfitForPeriod(range, query);
   }
 
   private async productPerformance(

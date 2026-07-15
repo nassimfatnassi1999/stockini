@@ -36,7 +36,8 @@ function buildService() {
   const references = {} as any;
   const customers = { getTotalClientDebt: jest.fn() } as any;
   const auditLogs = { create: jest.fn(), audit: jest.fn().mockResolvedValue(undefined) } as any;
-  return { service: new CaisseService(prisma, references, customers, auditLogs), prisma };
+  const reports = { getSalesProfitForPeriod: jest.fn() } as any;
+  return { service: new CaisseService(prisma, references, customers, auditLogs, reports), prisma };
 }
 
 // ─── resolveAccount unit tests ────────────────────────────────────────────────
@@ -373,7 +374,7 @@ describe('CaisseService.getTransactions — direction', () => {
       },
       caisseConfig: { findFirst: jest.fn().mockResolvedValue({ id: 'cfg', solde: 1000, soldeBanque: 500 }) },
     };
-    const service = new CaisseService(prisma, {} as any, { getTotalClientDebt: jest.fn() } as any, { create: jest.fn(), audit: jest.fn().mockResolvedValue(undefined) } as any);
+    const service = new CaisseService(prisma, {} as any, { getTotalClientDebt: jest.fn() } as any, { create: jest.fn(), audit: jest.fn().mockResolvedValue(undefined) } as any, { getSalesProfitForPeriod: jest.fn() } as any);
     return service;
   }
 

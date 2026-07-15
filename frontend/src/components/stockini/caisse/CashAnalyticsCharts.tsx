@@ -21,7 +21,7 @@ export interface CashAnalytics {
     label:   string;
     entrees: number;
     sorties: number;
-    profit:  number;
+    netCashFlow: number;
   }>;
   topClients: Array<{ name: string; montant: number }>;
   topFournisseurs: Array<{ name: string; montant: number }>;
@@ -77,21 +77,21 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
             <YAxis tickFormatter={(v) => fmtDT(v as number)} tick={{ fontSize: 10 }} width={72} />
             <Tooltip
-              formatter={(v, name) => [fmtDT(Number(v)), name === 'entrees' ? 'Entrées' : name === 'sorties' ? 'Sorties' : 'Profit']}
+              formatter={(v, name) => [fmtDT(Number(v)), name === 'entrees' ? 'Entrées' : name === 'sorties' ? 'Sorties' : 'Flux net']}
               labelStyle={{ fontSize: 11 }}
               contentStyle={{ fontSize: 11, border: '1px solid var(--bd)', borderRadius: 8 }}
             />
-            <Legend formatter={(v) => v === 'entrees' ? 'Entrées' : v === 'sorties' ? 'Sorties' : 'Profit'} iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+            <Legend formatter={(v) => v === 'entrees' ? 'Entrées' : v === 'sorties' ? 'Sorties' : 'Flux net'} iconSize={10} wrapperStyle={{ fontSize: 11 }} />
             <Area type="monotone" dataKey="entrees" stroke="#10b981" strokeWidth={2} fill="url(#gradEntrees)" dot={false} />
             <Area type="monotone" dataKey="sorties" stroke="#ef4444" strokeWidth={2} fill="url(#gradSorties)" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Profit par période */}
+      {/* Flux net de trésorerie par période */}
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <h3 className="mb-4 text-[13px] font-semibold text-text-primary">
-          Évolution du bénéfice
+          Évolution du flux net de trésorerie
         </h3>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={cashflow} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
@@ -99,12 +99,12 @@ export function CashAnalyticsCharts({ analytics, isLoading }: Props) {
             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
             <YAxis tickFormatter={(v) => fmtDT(v as number)} tick={{ fontSize: 10 }} width={72} />
             <Tooltip
-              formatter={(v) => [fmtDT(Number(v)), 'Profit']}
+              formatter={(v) => [fmtDT(Number(v)), 'Flux net']}
               contentStyle={{ fontSize: 11, border: '1px solid var(--bd)', borderRadius: 8 }}
             />
-            <Bar dataKey="profit" radius={[4, 4, 0, 0]}>
+            <Bar dataKey="netCashFlow" radius={[4, 4, 0, 0]}>
               {cashflow.map((entry, i) => (
-                <Cell key={i} fill={entry.profit >= 0 ? '#E67E22' : '#ef4444'} />
+                <Cell key={i} fill={entry.netCashFlow >= 0 ? '#E67E22' : '#ef4444'} />
               ))}
             </Bar>
           </BarChart>
