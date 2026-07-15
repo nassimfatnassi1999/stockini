@@ -10,6 +10,7 @@ import {
 import {
   ShoppingCart, Truck, Package, AlertTriangle,
   ArrowUpRight, ArrowDownRight, TrendingUp, Bell, Boxes,
+  Banknote, WalletCards, BadgePercent,
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { money } from '@/lib/stockini/format';
@@ -140,7 +141,7 @@ function ClientOnly({ children }: { children: React.ReactNode }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export function SimpleDashboard() {
-  const [period, setPeriod]           = useState<Period>('month');
+  const [period, setPeriod]           = useState<Period>('day');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
   const dashboardQuery = useMemo(() => {
@@ -209,6 +210,24 @@ export function SimpleDashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      <div>
+        <SectionDivider label="Suivi quotidien" />
+        <div className="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <KpiCard icon={ShoppingCart} label="CA HT net" value={money(dashboard?.operationnel.caNet ?? 0)} trend={dashboard?.ventes.countTrend ?? undefined} color="blue" sub={`${dashboard?.ventes.count ?? 0} vente(s) comptabilisée(s)`} />
+          <KpiCard icon={Banknote} label="Encaissements" value={money(dashboard?.operationnel.encaissements ?? 0)} color="green" sub="Montants réellement payés" />
+          <KpiCard icon={WalletCards} label="Reste à encaisser" value={money(dashboard?.operationnel.resteAEncaisser ?? 0)} color="orange" sub="Créances de la période" />
+          <KpiCard icon={TrendingUp} label="Panier moyen" value={money(dashboard?.operationnel.panierMoyen ?? 0)} color="purple" />
+        </div>
+        {dashboard?.financier && (
+          <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiCard icon={TrendingUp} label="Bénéfice brut réel" value={money(dashboard.financier.beneficeBrut)} color={dashboard.financier.beneficeBrut >= 0 ? 'green' : 'red'} />
+            <KpiCard icon={Boxes} label="Coût des produits vendus" value={money(dashboard.financier.coutProduitsVendus)} color="slate" />
+            <KpiCard icon={BadgePercent} label="Taux de marque sur vente" value={`${dashboard.financier.tauxMarque.toFixed(3)} %`} color="teal" />
+            <KpiCard icon={BadgePercent} label="Remises accordées" value={money(dashboard.financier.remisesAccordees)} color="amber" />
+          </div>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════

@@ -11,7 +11,7 @@ import {
   Package, TrendingUp, AlertTriangle, Users, ShoppingCart,
   Boxes, DollarSign, Activity, BarChart2, ArrowUpRight,
   ArrowDownRight, RefreshCw, Layers, Target, Zap, Truck,
-  TrendingDown, Loader2, AlertCircle,
+  TrendingDown, Loader2, AlertCircle, Download,
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { money } from '@/lib/stockini/format';
@@ -28,8 +28,12 @@ const CHART_COLORS = [
 
 const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
   { value: 'today',  label: "Aujourd'hui" },
+  { value: 'yesterday', label: 'Hier' },
+  { value: 'last7', label: '7 jours' },
   { value: 'week',   label: 'Cette semaine' },
+  { value: 'last30', label: '30 jours' },
   { value: 'month',  label: 'Ce mois' },
+  { value: 'quarter', label: 'Ce trimestre' },
   { value: 'year',   label: 'Cette année' },
   { value: 'custom', label: 'Personnalisé' },
 ];
@@ -166,14 +170,40 @@ export function AnalyticsDashboard() {
   const [period, setPeriod]     = useState<ReportPeriod>('month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
+  const [customerId, setCustomerId] = useState('');
+  const [productId, setProductId] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [sellerId, setSellerId] = useState('');
+  const [documentType, setDocumentType] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState('');
+  const { data: customers = [] } = useQuery({ queryKey: ['report-customers'], queryFn: stockiniApi.customers, staleTime: 300_000 });
+  const { data: products = [] } = useQuery({ queryKey: ['report-products'], queryFn: () => stockiniApi.products(), staleTime: 300_000 });
+  const { data: categories = [] } = useQuery({ queryKey: ['report-categories'], queryFn: stockiniApi.categories, staleTime: 300_000 });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const savedPeriod = params.get('period') as ReportPeriod | null;
+    if (savedPeriod && PERIOD_OPTIONS.some((option) => option.value === savedPeriod)) setPeriod(savedPeriod);
+    setCustomStart(params.get('dateFrom') ?? ''); setCustomEnd(params.get('dateTo') ?? '');
+    setCustomerId(params.get('customerId') ?? ''); setProductId(params.get('productId') ?? '');
+    setCategoryId(params.get('categoryId') ?? ''); setSellerId(params.get('sellerId') ?? '');
+    setDocumentType(params.get('documentType') ?? ''); setPaymentStatus(params.get('paymentStatus') ?? '');
+  }, []);
 
   const query = useMemo(() => {
     if (period === 'custom' && customStart && customEnd) {
-      return { period, dateFrom: customStart, dateTo: customEnd };
+      return { period, dateFrom: customStart, dateTo: customEnd, ...(customerId && { customerId }), ...(productId && { productId }), ...(categoryId && { categoryId }), ...(sellerId && { sellerId }), ...(documentType && { documentType: documentType as 'FACTURE' | 'BON_LIVRAISON' }), ...(paymentStatus && { paymentStatus: paymentStatus as 'PAID' | 'PARTIAL' | 'UNPAID' }) };
     }
-    if (period !== 'custom') return { period };
+    if (period !== 'custom') return { period, ...(customerId && { customerId }), ...(productId && { productId }), ...(categoryId && { categoryId }), ...(sellerId && { sellerId }), ...(documentType && { documentType: documentType as 'FACTURE' | 'BON_LIVRAISON' }), ...(paymentStatus && { paymentStatus: paymentStatus as 'PAID' | 'PARTIAL' | 'UNPAID' }) };
     return undefined;
-  }, [period, customStart, customEnd]);
+  }, [period, customStart, customEnd, customerId, productId, categoryId, sellerId, documentType, paymentStatus]);
+
+  useEffect(() => {
+    if (!query) return;
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([key, value]) => value && params.set(key, String(value)));
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  }, [query]);
 
   const {
     data: overview,
@@ -186,6 +216,32 @@ export function AnalyticsDashboard() {
     staleTime: 60_000,
     enabled: period !== 'custom' || (!!customStart && !!customEnd),
   });
+
+  const exportCsv = () => {
+    if (!overview) return;
+    const rows: Array<[string, string | number]> = [
+      ['Indicateur', 'Valeur'],
+      ['Chiffre d’affaires net HT', overview.financier.caNet],
+      ['Bénéfice brut réel', overview.financier.beneficeBrut],
+      ['Coût des produits vendus', overview.financier.coutProduitsVendus],
+      ['Taux de marque sur vente (%)', overview.financier.tauxMarque],
+      ['Taux de marge sur coût (%)', overview.financier.tauxMargeSurCout],
+      ['Montant encaissé', overview.financier.encaissementsClients],
+      ['Reste à encaisser', overview.financier.impayesClients],
+      ['Remises accordées', overview.financier.remisesAccordees],
+      ['Avoirs HT', overview.ventes.avoirs.total],
+      ['Nombre de ventes', overview.ventes.count],
+      ['Quantité vendue', overview.ventes.quantiteVendue],
+      ['Panier moyen', overview.ventes.panierMoyen],
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';')).join('\n');
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `rapport-stockini-${period}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   // ── Period selector ───────────────────────────────────────────────────────
   const periodBar = (
@@ -223,6 +279,10 @@ export function AnalyticsDashboard() {
           />
         </div>
       )}
+      <button type="button" onClick={exportCsv} disabled={!overview} className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50">
+        <Download size={14} /> Exporter CSV
+      </button>
+      <button type="button" onClick={() => { setPeriod('month'); setCustomStart(''); setCustomEnd(''); setCustomerId(''); setProductId(''); setCategoryId(''); setSellerId(''); setDocumentType(''); setPaymentStatus(''); }} className="rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium hover:bg-muted">Réinitialiser les filtres</button>
     </div>
   );
 
@@ -243,7 +303,7 @@ export function AnalyticsDashboard() {
     <div className="space-y-6 pb-10">{header}<ErrorState onRetry={() => refetch()} /></div>
   );
 
-  const { financier, ventes, achats, stock, clients, topProduits, topClients, topFournisseurs, series } = overview;
+  const { financier, ventes, achats, stock, clients, topProduitsBenefice, produitsFaibleMarge, topClients, topFournisseurs, series } = overview;
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const seriesChart = series.map((s) => ({
@@ -251,15 +311,17 @@ export function AnalyticsDashboard() {
     CA:         Math.round(s.ca),
     Achats:     Math.round(s.achats),
     'Marge brute': Math.round(s.margeBrute),
+    'Coût vendu': Math.round(s.coutVendu),
     Bénéfice:   Math.round(s.benefice),
     Encaissements: Math.round(s.encaissements),
     Dépenses:   Math.round(s.depenses),
   }));
 
-  const topProduitsChart = [...topProduits].reverse().map((item) => ({
+  const topProduitsChart = [...topProduitsBenefice].reverse().map((item) => ({
     name:      (item.product?.name ?? 'Inconnu').substring(0, 28),
     Quantité:  item.quantitySold,
-    Montant:   Math.round(item.revenue),
+    CA: item.revenue,
+    Bénéfice: item.profit,
   }));
 
   const topClientsChart = [...topClients].reverse().map((item) => ({
@@ -288,6 +350,14 @@ export function AnalyticsDashboard() {
   return (
     <div className="space-y-6 pb-10">
       {header}
+      <div className="grid gap-2 rounded-xl border border-border bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
+        <select aria-label="Client" value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les clients</option>{customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select aria-label="Produit" value={productId} onChange={(e) => setProductId(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les produits</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select aria-label="Catégorie" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Toutes les catégories</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select aria-label="Type de document" value={documentType} onChange={(e) => setDocumentType(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les documents</option><option value="FACTURE">Factures</option><option value="BON_LIVRAISON">Bons de livraison</option></select>
+        <select aria-label="Statut de paiement" value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)} className="rounded-lg border border-border px-3 py-2 text-xs"><option value="">Tous les paiements</option><option value="PAID">Payé</option><option value="PARTIAL">Partiel</option><option value="UNPAID">Impayé</option></select>
+        <input aria-label="Identifiant vendeur" value={sellerId} onChange={(e) => setSellerId(e.target.value)} placeholder="Identifiant vendeur" className="rounded-lg border border-border px-3 py-2 text-xs" />
+      </div>
       {!financier.dataQuality.complete && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Marge historique partielle : {financier.dataQuality.unknownCostLines} ligne(s) sans coût reconstructible.
@@ -322,16 +392,16 @@ export function AnalyticsDashboard() {
           />
           <KpiCard
             icon={TrendingUp}
-            label="Bénéfice réel"
-            value={money(financier.beneficeEstime)}
-            sub={`Marge brute : ${money(financier.margeBruteReelle)} (${financier.margePercent}%)`}
-            color={financier.beneficeEstime >= 0 ? 'green' : 'red'}
+            label="Bénéfice brut réel"
+            value={money(financier.beneficeBrut)}
+            sub={`Taux de marque sur vente : ${financier.tauxMarque}%`}
+            color={financier.beneficeBrut >= 0 ? 'green' : 'red'}
           />
           <KpiCard
             icon={ShoppingCart}
-            label="Total achats"
-            value={money(financier.totalAchats)}
-            trend={financier.achatsTrend}
+            label="Coût des produits vendus"
+            value={money(financier.coutProduitsVendus)}
+            sub={`Taux de marge sur coût : ${financier.tauxMargeSurCout}%`}
             color="blue"
           />
           <KpiCard
@@ -353,9 +423,9 @@ export function AnalyticsDashboard() {
           />
           <KpiCard
             icon={Boxes}
-            label="Valeur stock (achat)"
-            value={money(stock.valeurAchat)}
-            sub={`Vente : ${money(stock.valeurVente)}`}
+            label="Remises accordées"
+            value={money(financier.remisesAccordees)}
+            sub="Réduction du CA HT catalogue"
             color="purple"
           />
         </div>
@@ -646,11 +716,11 @@ export function AnalyticsDashboard() {
         {/* ─── ROW 3: Top produits + Catégories stock ──────────────────────── */}
         <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_360px]">
 
-          {/* Chart 5 — Top produits vendus */}
+          {/* Chart 5 — Top produits par bénéfice */}
           <Card className="shadow-card">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Target size={14} className="text-accent" /> Top 10 produits vendus (période)
+                <Target size={14} className="text-accent" /> Top 10 produits par bénéfice
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
@@ -663,8 +733,9 @@ export function AnalyticsDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E9F0" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 10, fill: '#9AAFC5' }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" width={145} tick={{ fontSize: 10, fill: '#5A6A7E' }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTip />} />
-                      <Bar dataKey="Quantité" fill="#E67E22" radius={[0, 4, 4, 0]} maxBarSize={18} />
+                      <Tooltip content={<ChartTip fmt={(v) => money(v)} />} />
+                      <Bar dataKey="CA" fill="#E67E22" radius={[0, 4, 4, 0]} maxBarSize={18} />
+                      <Bar dataKey="Bénéfice" fill="#10B981" radius={[0, 4, 4, 0]} maxBarSize={18} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -713,6 +784,15 @@ export function AnalyticsDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="mt-4 shadow-card">
+          <CardHeader className="p-4"><CardTitle className="flex items-center gap-2 text-sm"><AlertTriangle size={14} className="text-red-500" /> Produits à faible marge ou déficitaires</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {produitsFaibleMarge.length === 0 ? <p className="py-8 text-center text-sm text-text-muted">Aucun produit sous le seuil de 10 %.</p> : (
+              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b bg-muted/30">{['Référence', 'Produit', 'Quantité', 'CA net', 'Coût', 'Bénéfice', 'Taux de marque'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold text-text-secondary">{h}</th>)}</tr></thead><tbody>{produitsFaibleMarge.map((item) => <tr key={item.productId} className="border-b last:border-0"><td className="px-4 py-3 font-mono text-xs">{item.product.reference}</td><td className="px-4 py-3 font-medium">{item.product.name}</td><td className="px-4 py-3">{item.quantitySold}</td><td className="px-4 py-3">{money(item.revenue)}</td><td className="px-4 py-3">{money(item.cost)}</td><td className={`px-4 py-3 font-semibold ${item.profit < 0 ? 'text-red-600' : ''}`}>{money(item.profit)}</td><td className="px-4 py-3">{item.markupRate.toFixed(3)} %</td></tr>)}</tbody></table></div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* ─── ROW 4: Top clients + Top fournisseurs ────────────────────── */}
         <div className="mt-4 grid gap-4 lg:grid-cols-2">

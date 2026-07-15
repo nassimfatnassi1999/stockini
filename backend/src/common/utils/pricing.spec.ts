@@ -26,7 +26,7 @@ describe('pricing formulas', () => {
   });
 
   describe('calculateSalesLine', () => {
-    it('retire la remise du taux de marge', () => {
+    it('applique la remise au prix de vente brut', () => {
       const r = calculateSalesLine({
         quantity: 2,
         purchasePriceHt: 100,
@@ -34,11 +34,11 @@ describe('pricing formulas', () => {
         discountPercent: 15,
         taxPercent: 19,
       });
-      expect(r.netMarginPercent).toBe(25);
-      expect(r.unitPriceHt).toBe(125);
-      expect(r.totalHt).toBe(250);
-      expect(r.taxAmount).toBe(47.5);
-      expect(r.totalTtc).toBe(297.5);
+      expect(r.netMarginPercent).toBe(19);
+      expect(r.unitPriceHt).toBe(119);
+      expect(r.totalHt).toBe(238);
+      expect(r.taxAmount).toBe(45.22);
+      expect(r.totalTtc).toBe(283.22);
     });
   });
 });

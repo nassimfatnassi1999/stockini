@@ -432,4 +432,3 @@ describe('PurchasesService.receive — activation documentType', () => {
     ).rejects.toThrow(BadRequestException);
   });
 });
-

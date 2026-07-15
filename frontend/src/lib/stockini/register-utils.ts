@@ -111,7 +111,7 @@ export function recalculateLine(line: RegisterLine): RegisterLine {
 
 /**
  * For sales (auto mode): puHt = purchasePriceHt × (1 + defaultMarginPercent / 100) — always
- * the GROSS unit price (no discount baked in). Remise removes points from the gross margin
+ * the GROSS unit price (no discount baked in). Remise is applied to that catalogue price
  * so the payload sent to the backend is unambiguous: unitPrice = gross, discountPercent = remise.
  *
  * When manualUnitPriceHt is true, puHt is frozen (user-set) and only the
@@ -137,7 +137,7 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
     };
   }
 
-  // Devis sans coût connu : conserver le brut saisi et appliquer la réduction de marge.
+  // Devis sans coût connu : conserver le brut saisi et appliquer la remise commerciale.
   const result = calculateSalesLine({
     purchasePriceHt: 0,
     grossSalePriceHt: line.puHt,

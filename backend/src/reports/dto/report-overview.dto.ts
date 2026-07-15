@@ -1,11 +1,31 @@
-import { IsDateString, IsIn, IsOptional, ValidateIf } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 
-export type ReportPeriod = 'today' | 'week' | 'month' | 'year' | 'custom';
+export type ReportPeriod =
+  | 'today'
+  | 'yesterday'
+  | 'last7'
+  | 'week'
+  | 'last30'
+  | 'month'
+  | 'quarter'
+  | 'year'
+  | 'custom';
 
 const REPORT_PERIOD_VALUES: ReportPeriod[] = [
   'today',
+  'yesterday',
+  'last7',
   'week',
+  'last30',
   'month',
+  'quarter',
   'year',
   'custom',
 ];
@@ -22,4 +42,16 @@ export class ReportOverviewQueryDto {
   @ValidateIf((o: ReportOverviewQueryDto) => o.period === 'custom')
   @IsDateString()
   dateTo?: string;
+
+  @IsOptional() @IsString() @MaxLength(64) sellerId?: string;
+  @IsOptional() @IsString() @MaxLength(64) customerId?: string;
+  @IsOptional() @IsString() @MaxLength(64) productId?: string;
+  @IsOptional() @IsString() @MaxLength(64) categoryId?: string;
+  @IsOptional() @IsIn(['FACTURE', 'BON_LIVRAISON']) documentType?:
+    | 'FACTURE'
+    | 'BON_LIVRAISON';
+  @IsOptional() @IsIn(['PAID', 'PARTIAL', 'UNPAID']) paymentStatus?:
+    | 'PAID'
+    | 'PARTIAL'
+    | 'UNPAID';
 }

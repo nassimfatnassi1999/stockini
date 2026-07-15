@@ -1,4 +1,9 @@
 import { ReportsService, resolveReportDateRange } from './reports.service';
+import {
+  financialRates,
+  isRevenueRecognizedDocument,
+} from './reports-financial.utils';
+import { DocumentType, SaleStatus } from '@prisma/client';
 
 // ─── resolveReportDateRange ───────────────────────────────────────────────────
 
@@ -16,11 +21,12 @@ describe('resolveReportDateRange', () => {
     expect(lte.getTime() - gte.getTime()).toBe(86_400_000 - 1);
   });
 
-  it('week: range is 7 days ago → now', () => {
+  it('week: range starts on Monday in Africa/Tunis', () => {
     const now = Date.now();
     const { gte, lte } = resolveReportDateRange('week', undefined, undefined);
-    const diffDays = (lte.getTime() - gte.getTime()) / 86_400_000;
-    expect(diffDays).toBeCloseTo(7, 0);
+    const localGte = new Date(gte.getTime() + TZ_OFFSET_MS);
+    expect(localGte.getUTCDay()).toBe(1);
+    expect(localGte.getUTCHours()).toBe(0);
     expect(lte.getTime()).toBeLessThanOrEqual(now + 1000);
   });
 
@@ -203,6 +209,37 @@ describe('CA business rules', () => {
       )
       .reduce((acc, s) => acc + s.total, 0);
     expect(ca).toBe(1300); // 1000 + 300; CANCELLED and DEVIS excluded
+  });
+});
+
+describe('centralized financial rules', () => {
+  it('reconnaît une facture validée mais jamais un devis ou un BL transformé', () => {
+    expect(
+      isRevenueRecognizedDocument({
+        documentType: DocumentType.FACTURE,
+        status: SaleStatus.COMPLETED,
+      }),
+    ).toBe(true);
+    expect(
+      isRevenueRecognizedDocument({
+        documentType: DocumentType.DEVIS,
+        status: SaleStatus.COMPLETED,
+      }),
+    ).toBe(false);
+    expect(
+      isRevenueRecognizedDocument({
+        documentType: DocumentType.BON_LIVRAISON,
+        status: SaleStatus.COMPLETED,
+        transformedToId: 'invoice',
+      }),
+    ).toBe(false);
+  });
+
+  it('distingue taux de marque et taux de marge sans division par zéro', () => {
+    const rates = financialRates(196, 140, 56);
+    expect(rates.markupRateOnRevenue.toNumber()).toBeCloseTo(28.571, 3);
+    expect(rates.marginRateOnCost.toNumber()).toBe(40);
+    expect(financialRates(0, 0, 0).markupRateOnRevenue.toNumber()).toBe(0);
   });
 });
 

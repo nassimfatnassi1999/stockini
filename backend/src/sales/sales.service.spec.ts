@@ -54,6 +54,8 @@ describe('SalesService document references', () => {
           Promise.resolve({
             id: 'sale-1',
             ...data,
+            // Test double intentionally mirrors the untyped nested Prisma payload.
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-return
             items: data.items.create.map((item: any, index: number) => ({
               id: `sale-item-${index + 1}`,
               saleId: 'sale-1',
@@ -132,6 +134,7 @@ describe('SalesService document references', () => {
     );
 
     const prisma = {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       $transaction: jest.fn((callback) => callback(tx)),
     };
 
@@ -218,7 +221,7 @@ describe('SalesService document references', () => {
           unitPrice: 140,
           finalUnitPrice: 140,
           unitPurchaseCostHt: 100,
-          calculationVersion: 3,
+          calculationVersion: 4,
           total: 140,
         }),
       );
@@ -231,41 +234,50 @@ describe('SalesService document references', () => {
     },
   );
 
-  it('crée une vente v3 sans double remise avec le vecteur 68,989/40/20', async () => {
+  it('crée une vente v4 avec une remise commerciale de 20%', async () => {
     const { service, tx } = buildService();
     tx.product.findMany.mockResolvedValueOnce([
       { ...product, purchasePrice: 68.989, salePrice: 96.585 },
     ]);
 
-    await service.create({
-      documentType: DocumentType.FACTURE,
-      customerId: 'customer-1',
-      paidAmount: 0,
-      items: [{
-        productId: product.id,
-        quantity: 1,
-        unitPrice: 82.787, // prix déjà net : ne doit jamais subir une seconde remise
-        marginPercent: 40,
-        discountPercent: 20,
-      }],
-    });
+    await service.create(
+      {
+        documentType: DocumentType.FACTURE,
+        customerId: 'customer-1',
+        paidAmount: 0,
+        items: [
+          {
+            productId: product.id,
+            quantity: 1,
+            unitPrice: 96.585,
+            marginPercent: 40,
+            discountPercent: 20,
+          },
+        ],
+      },
+      { id: 'admin', permissions: ['sales.allow_low_margin'] } as any,
+    );
 
     const data = tx.sale.create.mock.calls[0][0].data;
-    expect(data).toEqual(expect.objectContaining({
-      subtotal: 82.787,
-      discount: 13.798,
-      tax: 15.73,
-      total: 98.517,
-    }));
-    expect(data.items.create[0]).toEqual(expect.objectContaining({
-      unitPrice: 96.585,
-      finalUnitPrice: 82.787,
-      total: 82.787,
-      calculationVersion: 3,
-    }));
+    expect(data).toEqual(
+      expect.objectContaining({
+        subtotal: 77.268,
+        discount: 19.317,
+        tax: 14.681,
+        total: 91.949,
+      }),
+    );
+    expect(data.items.create[0]).toEqual(
+      expect.objectContaining({
+        unitPrice: 96.585,
+        finalUnitPrice: 77.268,
+        total: 77.268,
+        calculationVersion: 4,
+      }),
+    );
   });
 
-  it('recalcule toute vente modifiée avec la règle v3 sans double remise', async () => {
+  it('recalcule toute vente modifiée avec la règle v4', async () => {
     const { service, tx } = buildService();
     tx.product.findMany.mockResolvedValueOnce([
       { ...product, purchasePrice: 68.989, salePrice: 96.585 },
@@ -288,27 +300,33 @@ describe('SalesService document references', () => {
     );
 
     await service.update('sale-edit', {
-      items: [{
-        productId: product.id,
-        quantity: 1,
-        unitPrice: 82.787,
-        marginPercent: 40,
-        discountPercent: 20,
-      }],
+      items: [
+        {
+          productId: product.id,
+          quantity: 1,
+          unitPrice: 82.787,
+          marginPercent: 40,
+          discountPercent: 20,
+        },
+      ],
     });
 
     const data = tx.sale.update.mock.calls[0][0].data;
-    expect(data).toEqual(expect.objectContaining({
-      subtotal: 82.787,
-      discount: 13.798,
-      tax: 15.73,
-      total: 98.517,
-      isEdited: true,
-    }));
-    expect(data.items.create[0]).toEqual(expect.objectContaining({
-      finalUnitPrice: 82.787,
-      calculationVersion: 3,
-    }));
+    expect(data).toEqual(
+      expect.objectContaining({
+        subtotal: 77.268,
+        discount: 19.317,
+        tax: 14.681,
+        total: 91.949,
+        isEdited: true,
+      }),
+    );
+    expect(data.items.create[0]).toEqual(
+      expect.objectContaining({
+        finalUnitPrice: 77.268,
+        calculationVersion: 4,
+      }),
+    );
   });
 
   it('rejects AVOIR creation through /sales with a clear error', async () => {
@@ -326,7 +344,7 @@ describe('SalesService document references', () => {
     ).rejects.toThrow('Un avoir doit être créé via le module Avoirs');
   });
 
-  it('sauvegarde le brut/net et le coût historique avec une remise en points de marge', async () => {
+  it('sauvegarde le brut/net et le coût historique avec une remise commerciale', async () => {
     const { service, tx } = buildService();
     await service.create(
       {
@@ -353,21 +371,21 @@ describe('SalesService document references', () => {
     const data = tx.sale.create.mock.calls[0][0].data;
     expect(data).toEqual(
       expect.objectContaining({
-        subtotal: 250,
-        discount: 30,
-        tax: 47.5,
-        total: 297.5,
+        subtotal: 238,
+        discount: 42,
+        tax: 45.22,
+        total: 283.22,
       }),
     );
     expect(data.items.create[0]).toEqual(
       expect.objectContaining({
         unitPrice: 140,
-        finalUnitPrice: 125,
+        finalUnitPrice: 119,
         unitPurchaseCostHt: 100,
         discountPercent: 15,
         marginPercent: 40,
-        total: 250,
-        calculationVersion: 3,
+        total: 238,
+        calculationVersion: 4,
       }),
     );
   });

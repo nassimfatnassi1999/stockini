@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   DocumentType,
   ExpenseStatus,
@@ -14,6 +14,11 @@ import type {
   ReportOverviewQueryDto,
   ReportPeriod,
 } from './dto/report-overview.dto';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import {
+  financialRates,
+  revenueRecognizedSaleWhere,
+} from './reports-financial.utils';
 
 // ─── KPI CALCULATION RULES ────────────────────────────────────────────────────
 //
@@ -82,14 +87,35 @@ export function resolveReportDateRange(
     const end = new Date(
       new Date(dateTo).getTime() - TZ_OFFSET_MS + 86_400_000 - 1,
     );
+    if (start > end)
+      throw new BadRequestException(
+        'La date de début doit précéder la date de fin',
+      );
+    if (end.getTime() - start.getTime() > 2 * 366 * 86_400_000)
+      throw new BadRequestException(
+        'La période personnalisée est limitée à deux ans',
+      );
     return { gte: start, lte: end };
   }
 
   switch (period) {
     case 'today':
       return { gte: today, lte: new Date(today.getTime() + 86_400_000 - 1) };
+    case 'yesterday': {
+      const yesterday = new Date(today.getTime() - 86_400_000);
+      return { gte: yesterday, lte: new Date(today.getTime() - 1) };
+    }
+    case 'last7':
+      return { gte: new Date(today.getTime() - 6 * 86_400_000), lte: now };
     case 'week':
-      return { gte: new Date(today.getTime() - 7 * 86_400_000), lte: now };
+      return {
+        gte: new Date(
+          today.getTime() - ((localNow.getUTCDay() + 6) % 7) * 86_400_000,
+        ),
+        lte: now,
+      };
+    case 'last30':
+      return { gte: new Date(today.getTime() - 29 * 86_400_000), lte: now };
     case 'month':
       return {
         gte: new Date(
@@ -103,6 +129,15 @@ export function resolveReportDateRange(
         gte: new Date(Date.UTC(localNow.getUTCFullYear(), 0, 1) - TZ_OFFSET_MS),
         lte: now,
       };
+    case 'quarter': {
+      const quarterMonth = Math.floor(localNow.getUTCMonth() / 3) * 3;
+      return {
+        gte: new Date(
+          Date.UTC(localNow.getUTCFullYear(), quarterMonth, 1) - TZ_OFFSET_MS,
+        ),
+        lte: now,
+      };
+    }
     default:
       return {
         gte: new Date(
@@ -119,9 +154,10 @@ function getPrevRange(range: { gte: Date; lte: Date }): {
   lte: Date;
 } {
   const durationMs = range.lte.getTime() - range.gte.getTime();
+  const lte = new Date(range.gte.getTime() - 1);
   return {
-    gte: new Date(range.gte.getTime() - durationMs - 86_400_000),
-    lte: new Date(range.gte.getTime() - 1),
+    gte: new Date(lte.getTime() - durationMs),
+    lte,
   };
 }
 
@@ -219,13 +255,6 @@ function trend(cur: number, prev: number): number | null {
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
-const REVENUE_STATUSES = [
-  SaleStatus.COMPLETED,
-  SaleStatus.PARTIALLY_REFUNDED,
-  SaleStatus.REFUNDED,
-  SaleStatus.RETURNED,
-];
-
 const STOCK_ENTRY_TYPES = [
   StockMovementType.ENTRY,
   StockMovementType.PURCHASE_RECEPTION,
@@ -244,24 +273,62 @@ const STOCK_EXIT_TYPES = [
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async calculateFinancials(range: { gte: Date; lte: Date }) {
+  private saleFilter(query: ReportOverviewQueryDto): Prisma.SaleWhereInput {
+    return {
+      ...revenueRecognizedSaleWhere(),
+      ...(query.sellerId && { sellerId: query.sellerId }),
+      ...(query.customerId && { customerId: query.customerId }),
+      ...(query.documentType && { documentType: query.documentType }),
+      ...(query.paymentStatus && { paymentStatus: query.paymentStatus }),
+      ...((query.productId || query.categoryId) && {
+        items: {
+          some: {
+            ...(query.productId && { productId: query.productId }),
+            ...(query.categoryId && {
+              product: { categoryId: query.categoryId },
+            }),
+          },
+        },
+      }),
+    };
+  }
+
+  private customerPaymentFilter(
+    query: ReportOverviewQueryDto,
+  ): Prisma.PaymentWhereInput {
+    const hasSaleFilter = !!(
+      query.sellerId ||
+      query.customerId ||
+      query.productId ||
+      query.categoryId ||
+      query.documentType ||
+      query.paymentStatus
+    );
+    return {
+      type: PaymentType.CUSTOMER_PAYMENT,
+      cashImpactDone: true,
+      deletedAt: null,
+      ...(hasSaleFilter && { sale: this.saleFilter(query) }),
+    };
+  }
+
+  private async calculateFinancials(
+    range: { gte: Date; lte: Date },
+    query: ReportOverviewQueryDto = {},
+  ) {
     const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
     const round = (value: Prisma.Decimal.Value) =>
       D(value).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toNumber();
     const where: Prisma.SaleWhereInput = {
+      ...this.saleFilter(query),
       createdAt: range,
-      deletedAt: null,
-      status: { in: REVENUE_STATUSES },
-      OR: [
-        { documentType: DocumentType.FACTURE },
-        { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
-      ],
     };
     const [sales, creditNotes, expenses] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         select: {
           subtotal: true,
+          discount: true,
           items: {
             select: {
               quantity: true,
@@ -272,7 +339,11 @@ export class ReportsService {
         },
       }),
       this.prisma.creditNote.findMany({
-        where: { dateAvoir: range, statut: { not: 'CANCELLED' } },
+        where: {
+          dateAvoir: range,
+          statut: { not: 'CANCELLED' },
+          sale: this.saleFilter(query),
+        },
         select: {
           subtotal: true,
           items: {
@@ -291,11 +362,15 @@ export class ReportsService {
 
     let grossRevenueHt = D(0);
     let cogsHt = D(0);
+    let discountsHt = D(0);
+    let quantitySold = 0;
     let unknownCostLines = 0;
     let estimatedCostLines = 0;
     for (const sale of sales) {
       grossRevenueHt = grossRevenueHt.plus(sale.subtotal);
+      discountsHt = discountsHt.plus(sale.discount ?? 0);
       for (const item of sale.items) {
+        quantitySold += item.quantity;
         if (item.unitPurchaseCostHt == null) unknownCostLines += 1;
         else
           cogsHt = cogsHt.plus(D(item.unitPurchaseCostHt).mul(item.quantity));
@@ -317,12 +392,15 @@ export class ReportsService {
     }
 
     const netRevenueHt = grossRevenueHt.minus(creditsHt);
-    const netCogsHt = Prisma.Decimal.max(cogsHt.minus(returnedCogsHt), D(0));
+    const netCogsHt = cogsHt.minus(returnedCogsHt);
     const grossMarginHt = netRevenueHt.minus(netCogsHt);
     const expenseTotal = D(expenses._sum.amount ?? 0);
     const netProfit = grossMarginHt.minus(expenseTotal);
+    const rates = financialRates(netRevenueHt, netCogsHt, grossMarginHt);
     return {
       salesCount: sales.length,
+      quantitySold,
+      discountsHt: round(discountsHt),
       grossRevenueHt: round(grossRevenueHt),
       creditNotesHt: round(creditsHt),
       netRevenueHt: round(netRevenueHt),
@@ -332,8 +410,9 @@ export class ReportsService {
       expenses: round(expenseTotal),
       netProfit: round(netProfit),
       grossMarginRateOnRevenue: netRevenueHt.gt(0)
-        ? round(grossMarginHt.div(netRevenueHt).mul(100))
+        ? round(rates.markupRateOnRevenue)
         : 0,
+      marginRateOnCost: netCogsHt.isZero() ? 0 : round(rates.marginRateOnCost),
       dataQuality: {
         unknownCostLines,
         estimatedCostLines,
@@ -342,20 +421,101 @@ export class ReportsService {
     };
   }
 
+  private async productPerformance(
+    range: { gte: Date; lte: Date },
+    query: ReportOverviewQueryDto,
+  ) {
+    const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
+    const [lines, returns] = await Promise.all([
+      this.prisma.saleItem.findMany({
+        where: { sale: { ...this.saleFilter(query), createdAt: range } },
+        select: {
+          productId: true,
+          quantity: true,
+          total: true,
+          unitPurchaseCostHt: true,
+          product: {
+            select: {
+              name: true,
+              reference: true,
+              category: { select: { name: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.creditNoteItem.findMany({
+        where: {
+          creditNote: {
+            dateAvoir: range,
+            statut: { not: 'CANCELLED' },
+            sale: this.saleFilter(query),
+          },
+        },
+        select: {
+          productId: true,
+          quantiteRetournee: true,
+          totalHt: true,
+          saleItem: { select: { unitPurchaseCostHt: true } },
+        },
+      }),
+    ]);
+    const map = new Map<
+      string,
+      {
+        product: (typeof lines)[number]['product'];
+        quantity: number;
+        revenue: Prisma.Decimal;
+        cost: Prisma.Decimal;
+      }
+    >();
+    for (const line of lines) {
+      const entry = map.get(line.productId) ?? {
+        product: line.product,
+        quantity: 0,
+        revenue: D(0),
+        cost: D(0),
+      };
+      entry.quantity += line.quantity;
+      entry.revenue = entry.revenue.plus(line.total);
+      entry.cost = entry.cost.plus(
+        D(line.unitPurchaseCostHt ?? 0).mul(line.quantity),
+      );
+      map.set(line.productId, entry);
+    }
+    for (const item of returns) {
+      const entry = map.get(item.productId);
+      if (!entry) continue;
+      entry.quantity -= item.quantiteRetournee;
+      entry.revenue = entry.revenue.minus(item.totalHt);
+      entry.cost = entry.cost.minus(
+        D(item.saleItem?.unitPurchaseCostHt ?? 0).mul(item.quantiteRetournee),
+      );
+    }
+    return [...map.entries()]
+      .map(([productId, entry]) => {
+        const profit = entry.revenue.minus(entry.cost);
+        return {
+          productId,
+          product: entry.product,
+          quantitySold: entry.quantity,
+          revenue: moneyRound(entry.revenue),
+          cost: moneyRound(entry.cost),
+          profit: moneyRound(profit),
+          markupRate: entry.revenue.isZero()
+            ? 0
+            : moneyRound(profit.div(entry.revenue).mul(100)),
+        };
+      })
+      .sort((a, b) => b.profit - a.profit);
+  }
+
   async getOverview(query: ReportOverviewQueryDto) {
     const period = query.period ?? 'month';
     const range = resolveReportDateRange(period, query.dateFrom, query.dateTo);
     const prevRange = getPrevRange(range);
     const buckets = buildTimeBuckets(period, range);
 
-    const salesFilter = {
-      status: { in: REVENUE_STATUSES },
-      deletedAt: null,
-      OR: [
-        { documentType: DocumentType.FACTURE },
-        { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
-      ],
-    };
+    const salesFilter: Prisma.SaleWhereInput = this.saleFilter(query);
 
     const purchasesFilter = {
       status: { notIn: [PurchaseStatus.CANCELLED] },
@@ -420,9 +580,7 @@ export class ReportsService {
       }),
       this.prisma.payment.aggregate({
         where: {
-          type: PaymentType.CUSTOMER_PAYMENT,
-          cashImpactDone: true,
-          deletedAt: null,
+          ...this.customerPaymentFilter(query),
           createdAt: range,
         },
         _sum: { amount: true },
@@ -585,13 +743,15 @@ export class ReportsService {
       select: { id: true, name: true, reference: true },
     });
 
-    const [financials, previousFinancials] = await Promise.all([
-      this.calculateFinancials(range),
-      this.calculateFinancials(prevRange),
-    ]);
+    const [financials, previousFinancials, productPerformance] =
+      await Promise.all([
+        this.calculateFinancials(range, query),
+        this.calculateFinancials(prevRange, query),
+        this.productPerformance(range, query),
+      ]);
 
     // ── Time-series ───────────────────────────────────────────────────────────
-    const series = await this.buildTimeSeries(buckets, purchasesFilter);
+    const series = await this.buildTimeSeries(buckets, purchasesFilter, query);
 
     // ── Scalar KPIs ───────────────────────────────────────────────────────────
     const caNet = financials.netRevenueHt;
@@ -671,8 +831,12 @@ export class ReportsService {
         depenses: financials.expenses,
         coutProduitsVendus: financials.cogsHt,
         margeBruteReelle: financials.grossMarginHt,
+        beneficeBrut: financials.grossMarginHt,
         beneficeEstime: benefice,
         margePercent: marge,
+        tauxMarque: financials.grossMarginRateOnRevenue,
+        tauxMargeSurCout: financials.marginRateOnCost,
+        remisesAccordees: financials.discountsHt,
         dataQuality: financials.dataQuality,
         soldeCaisse: moneyRound(num(caisseConfig?.solde)),
         soldeBanque: moneyRound(num(caisseConfig?.soldeBanque)),
@@ -686,6 +850,11 @@ export class ReportsService {
         prevCount: prevSalesAgg._count,
         countTrend: trend(salesAgg._count, prevSalesAgg._count),
         panierMoyen: moneyRound(panierMoyen),
+        quantiteVendue: financials.quantitySold,
+        beneficeMoyen:
+          salesAgg._count > 0
+            ? moneyRound(financials.grossMarginHt / salesAgg._count)
+            : 0,
         devisCount,
         bonCommandeCount,
         blCount,
@@ -746,6 +915,10 @@ export class ReportsService {
         quantitySold: num(item._sum.quantity),
         revenue: moneyRound(num(item._sum.total)),
       })),
+      topProduitsBenefice: productPerformance.slice(0, 10),
+      produitsFaibleMarge: productPerformance
+        .filter((item) => item.profit <= 0 || item.markupRate < 10)
+        .slice(0, 20),
 
       topClients: topClientSales.map((item) => ({
         customer: clientById.get(item.customerId!) ?? null,
@@ -772,51 +945,140 @@ export class ReportsService {
   private async buildTimeSeries(
     buckets: TimeBucket[],
     purchasesFilter: Record<string, unknown>,
+    query: ReportOverviewQueryDto,
   ) {
-    return Promise.all(
-      buckets.map(async (bucket) => {
-        const range = { gte: bucket.start, lte: bucket.end };
-        const [p, enc, financials] = await Promise.all([
-          this.prisma.purchase.aggregate({
-            where: { ...purchasesFilter, createdAt: range },
-            _sum: { total: true, stampDuty: true },
-            _count: true,
-          }),
-          this.prisma.payment.aggregate({
-            where: {
-              type: PaymentType.CUSTOMER_PAYMENT,
-              cashImpactDone: true,
-              deletedAt: null,
-              createdAt: range,
-            },
-            _sum: { amount: true },
-          }),
-          this.calculateFinancials(range),
-        ]);
-
-        const ca = financials.netRevenueHt;
-        const achats = num(p._sum.total) + num(p._sum.stampDuty);
-        return {
-          label: bucket.label,
-          ca,
-          achats: new Prisma.Decimal(achats).toDecimalPlaces(3).toNumber(),
-          encaissements: new Prisma.Decimal(num(enc._sum.amount))
-            .toDecimalPlaces(3)
-            .toNumber(),
-          depenses: financials.expenses,
-          benefice: financials.netProfit,
-          margeBrute: financials.grossMarginHt,
-          ventes: financials.salesCount,
-          achatsCount: p._count,
-        };
+    if (!buckets.length) return [];
+    const fullRange = {
+      gte: buckets[0].start,
+      lte: buckets[buckets.length - 1].end,
+    };
+    const [sales, credits, purchases, payments, expenses] = await Promise.all([
+      this.prisma.sale.findMany({
+        where: { ...this.saleFilter(query), createdAt: fullRange },
+        select: {
+          createdAt: true,
+          subtotal: true,
+          items: { select: { quantity: true, unitPurchaseCostHt: true } },
+        },
       }),
-    );
+      this.prisma.creditNote.findMany({
+        where: {
+          dateAvoir: fullRange,
+          statut: { not: 'CANCELLED' },
+          sale: this.saleFilter(query),
+        },
+        select: {
+          dateAvoir: true,
+          subtotal: true,
+          items: {
+            select: {
+              quantiteRetournee: true,
+              saleItem: { select: { unitPurchaseCostHt: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.purchase.findMany({
+        where: { ...purchasesFilter, createdAt: fullRange },
+        select: { createdAt: true, total: true, stampDuty: true },
+      }),
+      this.prisma.payment.findMany({
+        where: { ...this.customerPaymentFilter(query), createdAt: fullRange },
+        select: { createdAt: true, amount: true },
+      }),
+      this.prisma.expense.findMany({
+        where: { expenseDate: fullRange, status: ExpenseStatus.ACTIVE },
+        select: { expenseDate: true, amount: true },
+      }),
+    ]);
+    const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
+    const bucketFor = (date: Date) =>
+      buckets.findIndex((bucket) => date >= bucket.start && date <= bucket.end);
+    const values = buckets.map((bucket) => ({
+      label: bucket.label,
+      revenue: D(0),
+      cost: D(0),
+      purchases: D(0),
+      payments: D(0),
+      expenses: D(0),
+      sales: 0,
+      purchaseCount: 0,
+    }));
+    for (const sale of sales) {
+      const index = bucketFor(sale.createdAt);
+      if (index < 0) continue;
+      values[index].revenue = values[index].revenue.plus(sale.subtotal);
+      values[index].sales++;
+      for (const item of sale.items)
+        values[index].cost = values[index].cost.plus(
+          D(item.unitPurchaseCostHt ?? 0).mul(item.quantity),
+        );
+    }
+    for (const credit of credits) {
+      const index = bucketFor(credit.dateAvoir);
+      if (index < 0) continue;
+      values[index].revenue = values[index].revenue.minus(credit.subtotal);
+      for (const item of credit.items)
+        values[index].cost = values[index].cost.minus(
+          D(item.saleItem?.unitPurchaseCostHt ?? 0).mul(item.quantiteRetournee),
+        );
+    }
+    for (const purchase of purchases) {
+      const index = bucketFor(purchase.createdAt);
+      if (index >= 0) {
+        values[index].purchases = values[index].purchases
+          .plus(purchase.total)
+          .plus(purchase.stampDuty);
+        values[index].purchaseCount++;
+      }
+    }
+    for (const payment of payments) {
+      const index = bucketFor(payment.createdAt);
+      if (index >= 0)
+        values[index].payments = values[index].payments.plus(payment.amount);
+    }
+    for (const expense of expenses) {
+      const index = bucketFor(expense.expenseDate);
+      if (index >= 0)
+        values[index].expenses = values[index].expenses.plus(expense.amount);
+    }
+    return values.map((value) => {
+      const grossProfit = value.revenue.minus(value.cost);
+      return {
+        label: value.label,
+        ca: moneyRound(value.revenue),
+        achats: moneyRound(value.purchases),
+        encaissements: moneyRound(value.payments),
+        depenses: moneyRound(value.expenses),
+        benefice: moneyRound(grossProfit.minus(value.expenses)),
+        margeBrute: moneyRound(grossProfit),
+        coutVendu: moneyRound(value.cost),
+        ventes: value.sales,
+        achatsCount: value.purchaseCount,
+      };
+    });
   }
 
   // ─── Legacy endpoints ─────────────────────────────────────────────────────────
 
-  async dashboard(query: ReportOverviewQueryDto = {}) {
-    const overview = await this.getOverview(query);
+  async dashboard(query: ReportOverviewQueryDto = {}, user?: AuthUser) {
+    const isAdmin = ['ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin'].includes(
+      user?.role ?? '',
+    );
+    const canSeeFinancials =
+      isAdmin ||
+      !!user?.permissions?.some((permission) =>
+        [
+          '*',
+          'reports.*',
+          'reports.financial.view',
+          'reports.margins',
+        ].includes(permission),
+      );
+    const scopedQuery = canSeeFinancials
+      ? query
+      : { ...query, sellerId: user?.id };
+    const overview = await this.getOverview(scopedQuery);
     const range = {
       gte: new Date(overview.range.from),
       lte: new Date(overview.range.to),
@@ -828,6 +1090,7 @@ export class ReportsService {
           status: SaleStatus.DRAFT,
           deletedAt: null,
           createdAt: range,
+          ...(!canSeeFinancials && user?.id ? { sellerId: user.id } : {}),
         },
       }),
       this.prisma.purchase.count({
@@ -841,14 +1104,52 @@ export class ReportsService {
         },
       }),
     ]);
+    const dashboardSeries = canSeeFinancials
+      ? overview.series
+      : overview.series.map(({ label, ca, encaissements, ventes }) => ({
+          label,
+          ca,
+          encaissements,
+          ventes,
+        }));
+    const operationalStock = canSeeFinancials
+      ? overview.stock
+      : {
+          totalProduits: overview.stock.totalProduits,
+          ruptureCount: overview.stock.ruptureCount,
+          lowStockCount: overview.stock.lowStockCount,
+          totalQuantite: overview.stock.totalQuantite,
+          mouvements: overview.stock.mouvements,
+          produitsCritiques: overview.stock.produitsCritiques,
+          parCategorie: overview.stock.parCategorie.map(({ name, count }) => ({
+            name,
+            count,
+          })),
+        };
     return {
       period: overview.period,
       range: overview.range,
       ventes: overview.ventes,
       achats: overview.achats,
-      stock: overview.stock,
+      stock: operationalStock,
       topProduits: overview.topProduits,
-      series: overview.series,
+      series: dashboardSeries,
+      operationnel: {
+        caNet: overview.financier.caNet,
+        encaissements: overview.financier.encaissementsClients,
+        resteAEncaisser: overview.financier.impayesClients,
+        panierMoyen: overview.ventes.panierMoyen,
+      },
+      ...(canSeeFinancials && {
+        financier: {
+          beneficeBrut: overview.financier.beneficeBrut,
+          coutProduitsVendus: overview.financier.coutProduitsVendus,
+          tauxMarque: overview.financier.tauxMarque,
+          tauxMargeSurCout: overview.financier.tauxMargeSurCout,
+          remisesAccordees: overview.financier.remisesAccordees,
+          dataQuality: overview.financier.dataQuality,
+        },
+      }),
       pendingCustomerOrders,
       pendingSupplierReceipts,
     };

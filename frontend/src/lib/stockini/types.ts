@@ -663,6 +663,15 @@ export interface DashboardReport {
   series: ReportTimeSeries[];
   pendingCustomerOrders: number;
   pendingSupplierReceipts: number;
+  operationnel: { caNet: number; encaissements: number; resteAEncaisser: number; panierMoyen: number };
+  financier?: {
+    beneficeBrut: number;
+    coutProduitsVendus: number;
+    tauxMarque: number;
+    tauxMargeSurCout: number;
+    remisesAccordees: number;
+    dataQuality: { unknownCostLines: number; estimatedCostLines: number; complete: boolean };
+  };
   productsCount?: number;
   lowStockCount?: number;
   customersCount?: number;
@@ -672,12 +681,18 @@ export interface DashboardReport {
   unpaidSales?: number;
 }
 
-export type ReportPeriod = 'today' | 'week' | 'month' | 'year' | 'custom';
+export type ReportPeriod = 'today' | 'yesterday' | 'last7' | 'week' | 'last30' | 'month' | 'quarter' | 'year' | 'custom';
 
 export interface ReportOverviewQuery {
   period?: ReportPeriod;
   dateFrom?: string;
   dateTo?: string;
+  sellerId?: string;
+  customerId?: string;
+  productId?: string;
+  categoryId?: string;
+  documentType?: 'FACTURE' | 'BON_LIVRAISON';
+  paymentStatus?: 'PAID' | 'PARTIAL' | 'UNPAID';
 }
 
 export interface ReportTimeSeries {
@@ -688,6 +703,7 @@ export interface ReportTimeSeries {
   depenses: number;
   benefice: number;
   margeBrute: number;
+  coutVendu: number;
   ventes: number;
   achatsCount: number;
 }
@@ -720,6 +736,16 @@ export interface ReportTopProduct {
   } | null;
   quantitySold: number;
   revenue: number;
+}
+
+export interface ReportProductPerformance {
+  productId: string;
+  product: { name: string; reference: string; category: { name: string } | null };
+  quantitySold: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  markupRate: number;
 }
 
 export interface ReportTopClient {
@@ -758,8 +784,12 @@ export interface ReportOverview {
     depenses: number;
     coutProduitsVendus: number;
     margeBruteReelle: number;
+    beneficeBrut: number;
     beneficeEstime: number;
     margePercent: number;
+    tauxMarque: number;
+    tauxMargeSurCout: number;
+    remisesAccordees: number;
     dataQuality: { unknownCostLines: number; estimatedCostLines: number; complete: boolean };
     soldeCaisse: number;
     soldeBanque: number;
@@ -771,6 +801,8 @@ export interface ReportOverview {
     prevCount: number;
     countTrend: number | null;
     panierMoyen: number;
+    quantiteVendue: number;
+    beneficeMoyen: number;
     devisCount: number;
     bonCommandeCount: number;
     blCount: number;
@@ -801,6 +833,8 @@ export interface ReportOverview {
   clients: { total: number };
 
   topProduits: ReportTopProduct[];
+  topProduitsBenefice: ReportProductPerformance[];
+  produitsFaibleMarge: ReportProductPerformance[];
   topClients: ReportTopClient[];
   topFournisseurs: ReportTopSupplier[];
   series: ReportTimeSeries[];

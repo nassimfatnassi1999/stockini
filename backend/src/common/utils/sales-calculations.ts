@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 
 export const DEFAULT_SALES_MARGIN_PERCENT = 40;
-export const SALES_CALCULATION_VERSION = 3;
+export const SALES_CALCULATION_VERSION = 4;
 export const SALES_SNAPSHOT_VERSION = 2;
 export const SALES_MONEY_DECIMALS = 3;
 
@@ -54,30 +54,23 @@ export function calculateSalesLine(input: SalesLineCalculationInput) {
     ? purchasePriceHt.mul(new Decimal(1).plus(grossMarginPercent.div(100)))
     : Decimal.max(0, decimal(input.grossSalePriceHt));
 
-  // Stockini : la remise retire des points au taux de marge. Ce n'est pas une
-  // remise commerciale appliquée au prix de vente brut.
+  // A commercial discount is applied to the catalogue selling price.  It must
+  // never be subtracted from the margin percentage: 40% margin and 20%
+  // discount is not a 20% margin.
   const roundedGrossUnit = decimal(salesRound3(grossSalePriceHt));
-  const netMarginPercent = Decimal.max(
-    0,
-    grossMarginPercent.minus(discountPercent),
-  );
-  const netMarginAmount = purchasePriceHt.mul(netMarginPercent).div(100);
+  const unitDiscountHt = roundedGrossUnit.mul(discountPercent).div(100);
   const netSalePriceHt = decimal(
-    purchasePriceHt.gt(0)
-      ? salesRound3(purchasePriceHt.plus(netMarginAmount))
-      : roundedGrossUnit,
+    salesRound3(roundedGrossUnit.minus(unitDiscountHt)),
   );
   const lineNetHt = decimal(salesRound3(netSalePriceHt.mul(quantity)));
   const purchaseCostHt = decimal(salesRound3(purchasePriceHt.mul(quantity)));
   const marginAmountHt = lineNetHt.minus(purchaseCostHt);
   const marginPercentOnCost = purchasePriceHt.gt(0)
-    ? netMarginPercent
+    ? netSalePriceHt.minus(purchasePriceHt).div(purchasePriceHt).mul(100)
     : new Decimal(0);
   const vatAmount = decimal(salesRound3(lineNetHt.mul(taxPercent).div(100)));
   const lineTtc = lineNetHt.plus(vatAmount);
-  const discountAmountHt = decimal(
-    salesRound3(roundedGrossUnit.minus(netSalePriceHt).mul(quantity)),
-  );
+  const discountAmountHt = decimal(salesRound3(unitDiscountHt.mul(quantity)));
 
   return {
     grossMarginPercent: grossMarginPercent.toNumber(),

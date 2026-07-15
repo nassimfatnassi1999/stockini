@@ -4,6 +4,10 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { ReportsService } from './reports.service';
 import { ReportOverviewQueryDto } from './dto/report-overview.dto';
+import {
+  CurrentUser,
+  type AuthUser,
+} from '../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermissions('reports.view')
@@ -24,8 +28,11 @@ export class ReportsController {
 
   @Get('dashboard')
   @RequirePermissions('dashboard.view')
-  dashboard(@Query() query: ReportOverviewQueryDto) {
-    return this.reportsService.dashboard(query);
+  dashboard(
+    @Query() query: ReportOverviewQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.reportsService.dashboard(query, user);
   }
 
   @RequirePermissions('reports.financial.view')

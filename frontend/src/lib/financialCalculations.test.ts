@@ -8,23 +8,23 @@ test('frontend: vecteur canonique de vente', () => {
   const line = calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 15, taxPercent: 19, quantity: 2 });
   assert.deepEqual({ gross: line.grossSalePriceHt, net: line.netSalePriceHt, marginUnit: line.marginAmount,
     marginTotal: line.marginAmountHt, marginPct: line.marginPercentOnCost, ht: line.totalHt, vat: line.taxAmount, ttc: line.totalTtc },
-  { gross: 140, net: 125, marginUnit: 25, marginTotal: 50, marginPct: 25, ht: 250, vat: 47.5, ttc: 297.5 });
-  assert.equal(calculateSalesTotals([line], 1).totalToPay, 298.5);
+  { gross: 140, net: 119, marginUnit: 19, marginTotal: 38, marginPct: 19, ht: 238, vat: 45.22, ttc: 283.22 });
+  assert.equal(calculateSalesTotals([line], 1).totalToPay, 284.22);
 });
 
 test('frontend: remises limites et seuil de marge', () => {
   assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 0, quantity: 1 }).netSalePriceHt, 140);
-  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 10, quantity: 1 }).netSalePriceHt, 130);
-  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 40, quantity: 1 }).netSalePriceHt, 100);
-  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 50, quantity: 1 }).marginPercentOnCost, 0);
+  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 10, quantity: 1 }).netSalePriceHt, 126);
+  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 40, quantity: 1 }).netSalePriceHt, 84);
+  assert.equal(calculateSalesLine({ purchasePriceHt: 100, marginPercent: 40, discountPercent: 50, quantity: 1 }).marginPercentOnCost, -30);
 
   const exact = calculateSalesLine({ purchasePriceHt: 68.989, marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 });
   assert.deepEqual({ margin: exact.marginAmount, netHt: exact.totalHt, vat: exact.taxAmount, ttc: exact.totalTtc },
-    { margin: 13.798, netHt: 82.787, vat: 15.73, ttc: 98.517 });
+    { margin: 8.279, netHt: 77.268, vat: 14.681, ttc: 91.949 });
 
   const restoredNetPu = calculateSalesLine({ purchasePriceHt: 68.989, grossSalePriceHt: 82.787,
     marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 });
-  assert.equal(restoredNetPu.netSalePriceHt, 82.787);
+  assert.equal(restoredNetPu.netSalePriceHt, 77.268);
 });
 
 test('frontend: le rechargement du brouillon ne réapplique pas la remise', () => {
@@ -42,7 +42,7 @@ test('frontend: le rechargement du brouillon ne réapplique pas la remise', () =
   const restoredAgain = recalculateSaleLine(restored);
   assert.deepEqual({ puHt: restoredAgain.puHt, marginPct: restoredAgain.margePercent,
     margin: restoredAgain.margeAmount, netHt: restoredAgain.netHt, netTtc: restoredAgain.netTtc },
-  { puHt: 96.585, marginPct: 20, margin: 13.798, netHt: 82.787, netTtc: 98.517 });
+  { puHt: 96.585, marginPct: 12, margin: 8.279, netHt: 77.268, netTtc: 91.949 });
 });
 
 test('frontend: achat, somme des lignes et timbre saisi', () => {
