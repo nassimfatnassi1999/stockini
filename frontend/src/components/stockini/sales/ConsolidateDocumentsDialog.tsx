@@ -19,10 +19,11 @@ export function ConsolidateDocumentsDialog({ sales, onClose, onConfirm, loading 
   const [note, setNote] = useState('');
   const summary = useMemo(() => sales.reduce((acc, sale) => ({
     articles: acc.articles + (sale.items?.reduce((n, item) => n + Number(item.quantity), 0) ?? 0),
-    total: acc.total + Number(sale.total), stamp: acc.stamp + Number(sale.stampDuty ?? 0),
+    total: acc.total + Number(sale.total),
     paid: acc.paid + Number(sale.paidAmount ?? 0), credits: acc.credits + Number(sale.totalRefunded ?? 0),
-  }), { articles: 0, total: 0, stamp: 0, paid: 0, credits: 0 }), [sales]);
-  const net = summary.total + summary.stamp;
+  }), { articles: 0, total: 0, paid: 0, credits: 0 }), [sales]);
+  const consolidatedStamp = 1;
+  const net = summary.total + consolidatedStamp;
   const remaining = Math.max(net - summary.paid - summary.credits, 0);
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="consolidation-title">
@@ -33,7 +34,7 @@ export function ConsolidateDocumentsDialog({ sales, onClose, onConfirm, loading 
           <div className="flex flex-wrap gap-2">{sales.map((sale) => <span key={sale.id} className="rounded bg-slate-100 px-2 py-1 font-mono text-xs">{sale.invoiceNumber}</span>)}</div>
           <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 sm:grid-cols-4">
             <Metric label="Documents" value={String(sales.length)} /><Metric label="Articles" value={String(summary.articles)} />
-            <Metric label="TTC hors timbre" value={money(summary.total)} /><Metric label="Timbre" value={money(summary.stamp)} />
+            <Metric label="TTC hors timbre" value={money(summary.total)} /><Metric label="Timbre" value={money(consolidatedStamp)} />
             <Metric label="Net à payer" value={money(net)} /><Metric label="Déjà payé" value={money(summary.paid)} />
             <Metric label="Avoirs" value={money(summary.credits)} /><Metric label="Reste" value={money(remaining)} />
           </div>

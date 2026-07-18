@@ -145,8 +145,9 @@ export class SalesService {
       const discount = sum(sources.map((sale) => sale.discount));
       const tax = sum(sources.map((sale) => sale.tax));
       const total = sum(sources.map((sale) => sale.total));
-      // Règle Stockini: conserver la somme exacte des timbres historiques.
-      const stampDuty = sum(sources.map((sale) => sale.stampDuty));
+      // Un regroupement est un nouveau document unique : son timbre n'est
+      // jamais la somme des timbres historiques des documents sources.
+      const stampDuty = new Prisma.Decimal(DEFAULT_STAMP_DUTY);
       const historicalPaid = sum(sources.flatMap((sale) => sale.payments.map((payment) => payment.amount)));
       const credits = sum(sources.flatMap((sale) => sale.creditNotes.map((credit) => credit.montantRembourse)));
       const net = total.plus(stampDuty);

@@ -53,12 +53,13 @@ function build(sources: ReturnType<typeof source>[]) {
 }
 
 describe('SalesService consolidations', () => {
-  it('regroupe deux BL, conserve deux lignes traçables et somme les timbres', async () => {
+  it('regroupe deux BL avec un seul timbre fiscal de 1 DT', async () => {
     const { service, created } = build([source('1'), source('2')]);
     await service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.BON_LIVRAISON, date: '2026-07-18' });
     expect(created.data.invoiceNumber).toBe('BLG-CLIENTTEST-18072026-001');
     expect(created.data.total.toNumber()).toBe(238);
-    expect(created.data.stampDuty.toNumber()).toBe(2);
+    expect(created.data.stampDuty.toNumber()).toBe(1);
+    expect(created.data.total.plus(created.data.stampDuty).toNumber()).toBe(239);
     expect(created.data.items.create).toHaveLength(2);
     expect(created.data.items.create[0]).toEqual(expect.objectContaining({ sourceSaleId: '1', sourceReference: 'BL-1' }));
     expect(created.data.paymentStatus).toBe(PaymentStatus.UNPAID);
@@ -70,8 +71,42 @@ describe('SalesService consolidations', () => {
     await service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.FACTURE });
     expect(created.data.paidAmount.toNumber()).toBe(50);
     expect(created.data.totalRefunded.toNumber()).toBe(10);
-    expect(created.data.remainingAmount.toNumber()).toBe(180);
+    expect(created.data.remainingAmount.toNumber()).toBe(179);
     expect(tx.payment).toBeUndefined();
+  });
+
+  it('regroupe six BL sans multiplier le timbre fiscal', async () => {
+    const sources = Array.from({ length: 6 }, (_, index) => source(String(index + 1)));
+    const { service, created } = build(sources);
+    await service.createConsolidation({ sourceIds: sources.map((sale) => sale.id), targetType: DocumentType.BON_LIVRAISON });
+    expect(created.data.total.toNumber()).toBe(714);
+    expect(created.data.stampDuty.toNumber()).toBe(1);
+    expect(created.data.remainingAmount.toNumber()).toBe(715);
+  });
+
+  it('applique un timbre unique même si les sources sont sans timbre ou ont des timbres historiques différents', async () => {
+    const sources = [
+      source('1', { stampDuty: new Prisma.Decimal(0) }),
+      source('2', { stampDuty: new Prisma.Decimal(2) }),
+    ];
+    const { service, created } = build(sources);
+    await service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.FACTURE });
+    expect(created.data.total.toNumber()).toBe(238);
+    expect(created.data.stampDuty.toNumber()).toBe(1);
+    expect(created.data.remainingAmount.toNumber()).toBe(239);
+  });
+
+  it('calcule le reste partiellement payé avec le timbre unique', async () => {
+    const sources = [
+      source('1', { payments: [{ amount: new Prisma.Decimal(50) }] }),
+      source('2'),
+    ];
+    const { service, created } = build(sources);
+    await service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.BON_LIVRAISON });
+    expect(created.data.stampDuty.toNumber()).toBe(1);
+    expect(created.data.paidAmount.toNumber()).toBe(50);
+    expect(created.data.remainingAmount.toNumber()).toBe(189);
+    expect(created.data.paymentStatus).toBe(PaymentStatus.PARTIAL);
   });
 
   it('refuse des clients différents', async () => {
