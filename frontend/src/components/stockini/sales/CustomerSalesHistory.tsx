@@ -14,6 +14,7 @@ import type { CustomerSaleHistoryItem, SalesQueryParams } from '@/lib/stockini/t
 import { PaymentStatusBadge } from './PaymentStatusBadge';
 import { ConsolidateDocumentsDialog } from './ConsolidateDocumentsDialog';
 import { ConsolidatedDocumentBadge } from './ConsolidatedDocumentBadge';
+import { isSourceOfActiveConsolidation, SalePaymentCell } from './SaleConsolidationDisplay';
 import { toast } from '@/lib/toast';
 import type { Sale } from '@/lib/stockini/types';
 
@@ -175,23 +176,25 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
             <Head label="Reste" right onClick={() => sort('remainingAmount')} /><Head label="Paiement" onClick={() => sort('paymentStatus')} />
             <Head label="Document" onClick={() => sort('documentStatus')} /><th className="px-3 py-3 text-right">Actions</th>
           </tr></thead>
-          <tbody className="divide-y divide-border/50">
+          <tbody className="divide-y divide-border/50 [&_td]:whitespace-nowrap [&_td]:align-middle">
             {query.isLoading ? Array.from({ length: limit }).map((_, index) => <tr key={index}>{Array.from({ length: 10 }).map((__, cell) => <td key={cell} className="px-3 py-3"><div className="h-4 animate-pulse rounded bg-slate-100" /></td>)}</tr>) :
             query.isError ? <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-red-600">Impossible de charger l’historique des ventes.</td></tr> :
             !query.data?.data.length ? <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-text-muted">Aucune vente enregistrée pour ce client</td></tr> :
-            query.data.data.map((sale) => <tr key={sale.id} className={sale.activeConsolidation ? 'bg-slate-100 text-slate-400' : 'hover:bg-slate-50/70'}>
+            query.data.data.map((sale) => {
+              const isConsolidationSource = isSourceOfActiveConsolidation(sale);
+              return <tr key={sale.id} className={isConsolidationSource ? 'bg-slate-50/70 hover:bg-slate-100/70' : 'hover:bg-slate-50/70'}>
               <td className="px-3 py-3 text-center"><input type="checkbox" checked={selected.some((item) => item.id === sale.id)} disabled={Boolean(sale.activeConsolidation)} onChange={() => toggle(sale)} aria-label={`Sélectionner ${sale.invoiceNumber}`} /></td>
-              <td className="px-3 py-3 font-mono text-xs font-semibold">{sale.invoiceNumber}</td>
-              <td className="px-3 py-3"><span className={`app-status-badge ${DOCUMENT_COLORS[sale.documentType] ?? DOCUMENT_COLORS.DEVIS}`}>{DOCUMENT_LABELS[sale.documentType] ?? sale.documentType}</span> {sale.isConsolidated && <ConsolidatedDocumentBadge parent />} {sale.activeConsolidation && <ConsolidatedDocumentBadge reference={sale.activeConsolidation.invoiceNumber} />}</td>
+              <td className="px-3 py-3 font-mono text-xs font-semibold text-slate-800">{sale.invoiceNumber}</td>
+              <td className="px-3 py-3"><span className={`app-status-badge ${DOCUMENT_COLORS[sale.documentType] ?? DOCUMENT_COLORS.DEVIS}`}>{DOCUMENT_LABELS[sale.documentType] ?? sale.documentType}</span> {sale.isConsolidated && <ConsolidatedDocumentBadge />}</td>
               <td className="px-3 py-3 text-slate-600">{new Date(sale.createdAt).toLocaleDateString('fr-TN')}</td>
               <td className="px-3 py-3 text-center tabular-nums">{sale.itemCount}</td>
               <td className="px-3 py-3 text-right font-medium tabular-nums">{money(sale.totalTtc)}</td>
               <td className="px-3 py-3 text-right tabular-nums text-emerald-700">{money(sale.paidAmount)}</td>
               <td className="px-3 py-3 text-right tabular-nums text-red-700">{money(sale.remainingAmount)}</td>
-              <td className="px-3 py-3">{sale.activeConsolidation ? <ConsolidatedDocumentBadge reference={sale.activeConsolidation.invoiceNumber} /> : <PaymentStatusBadge status={sale.paymentStatus} />}</td>
+              <td className="px-3 py-3 text-center"><SalePaymentCell sale={sale}><PaymentStatusBadge status={sale.paymentStatus} /></SalePaymentCell></td>
               <td className="px-3 py-3"><span className={`app-status-badge ${STATUS_COLORS[sale.status] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}>{STATUS_LABELS[sale.status] ?? sale.status}</span></td>
-              <td className="px-3 py-3 text-right"><KebabMenu items={[{ label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setDetailSaleId(sale.id), hidden: !can('sales.view_details') }, { label: 'Modifier', icon: <Pencil size={14} />, onClick: () => edit(sale), hidden: !can('sales.update') }]} /></td>
-            </tr>)}
+              <td className="px-3 py-3 text-right"><KebabMenu items={[{ label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setDetailSaleId(sale.id), hidden: !can('sales.view_details') }, { label: 'Voir le regroupement', icon: <Combine size={14} />, onClick: () => setDetailSaleId(String(sale.activeConsolidation?.id)), hidden: !isConsolidationSource || !can('sales.view_details') }, { label: 'Modifier', icon: <Pencil size={14} />, onClick: () => edit(sale), hidden: isConsolidationSource || !can('sales.update') }]} /></td>
+            </tr>})}
           </tbody>
         </table>
       </div>

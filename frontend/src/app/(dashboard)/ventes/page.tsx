@@ -65,6 +65,10 @@ import { HistoryToolbar } from "@/components/stockini/shared/HistoryToolbar";
 import { BulkActionsBar } from "@/components/stockini/shared/BulkActionsBar";
 import { ConsolidateDocumentsDialog } from "@/components/stockini/sales/ConsolidateDocumentsDialog";
 import { ConsolidatedDocumentBadge } from "@/components/stockini/sales/ConsolidatedDocumentBadge";
+import {
+  isSourceOfActiveConsolidation,
+  SalePaymentCell,
+} from "@/components/stockini/sales/SaleConsolidationDisplay";
 import type {
   Customer,
   DropdownOption,
@@ -2170,7 +2174,7 @@ export default function VentesPage() {
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-slate-100 [&_td]:whitespace-nowrap [&_td]:align-middle">
                         {salesQuery.isLoading ? (
                           <tr>
                             <td
@@ -2194,13 +2198,15 @@ export default function VentesPage() {
                             const isSelected = selectedInvoiceIds.includes(
                               sale.id,
                             );
+                            const isConsolidationSource =
+                              isSourceOfActiveConsolidation(sale);
                             return (
                               <tr
                                 key={sale.id}
                                 className={cn(
                                   "transition-colors duration-100",
-                                  sale.activeConsolidation
-                                    ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
+                                  isConsolidationSource
+                                    ? "bg-slate-50/70 hover:bg-slate-100/70"
                                     : isSelected
                                     ? "bg-orange-50/70 hover:bg-orange-50"
                                     : "hover:bg-slate-50/80",
@@ -2231,20 +2237,19 @@ export default function VentesPage() {
                                         {DOC_TYPE_SHORT[sale.documentType] ??
                                           sale.documentType}
                                       </span>
-                                      {sale.transformedToId && (
+                                      {!isConsolidationSource && sale.transformedToId && (
                                         <span className="inline-flex items-center rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
                                           Transformé ›
                                         </span>
                                       )}
-                                      {sale.sourceDocumentId &&
+                                      {!isConsolidationSource && sale.sourceDocumentId &&
                                         !sale.transformedToId && (
                                           <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
                                             Issu d'une transf.
                                           </span>
                                         )}
-                                      {sale.isConsolidated && <ConsolidatedDocumentBadge parent />}
-                                      {sale.activeConsolidation && <ConsolidatedDocumentBadge reference={sale.activeConsolidation.invoiceNumber} />}
-                                      {(sale.status === "PARTIALLY_REFUNDED" ||
+                                      {sale.isConsolidated && <ConsolidatedDocumentBadge />}
+                                      {!isConsolidationSource && (sale.status === "PARTIALLY_REFUNDED" ||
                                         sale.status === "REFUNDED") && (
                                         <span
                                           className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] font-medium ${
@@ -2289,8 +2294,8 @@ export default function VentesPage() {
                                       </span>
                                     )}
                                 </td>
-                                <td className="px-4 py-2.5">
-                                  {(() => {
+                                <td className="px-4 py-2.5 text-center">
+                                  <SalePaymentCell sale={sale}>{(() => {
                                     const pd = getPaymentDisplay(
                                       sale.documentType,
                                       sale.paymentStatus,
@@ -2302,7 +2307,7 @@ export default function VentesPage() {
                                         {pd.label}
                                       </span>
                                     );
-                                  })()}
+                                  })()}</SalePaymentCell>
                                 </td>
                                 <td className="px-4 py-2.5">
                                   <span
@@ -2333,7 +2338,9 @@ export default function VentesPage() {
                                             label: "Modifier",
                                             icon: <Pencil size={14} />,
                                             onClick: () => void startEditing(sale),
-                                            hidden: !canEditSale,
+                                            hidden:
+                                              isConsolidationSource ||
+                                              !canEditSale,
                                           },
                                           {
                                             label: "Voir les détails",
@@ -2343,9 +2350,20 @@ export default function VentesPage() {
                                             hidden: !canViewDetails,
                                           },
                                           {
+                                            label: "Voir le regroupement",
+                                            icon: <Combine size={14} />,
+                                            onClick: () =>
+                                              setSelectedSaleId(
+                                                String(sale.activeConsolidation?.id),
+                                              ),
+                                            hidden:
+                                              !isConsolidationSource ||
+                                              !canViewDetails,
+                                          },
+                                          {
                                             divider: true,
                                             hidden:
-                                              !canViewDetails ||
+                                              isConsolidationSource ||
                                               !canDeleteSale,
                                           },
                                           {
@@ -2354,7 +2372,9 @@ export default function VentesPage() {
                                             onClick: () =>
                                               setDeleteTarget(sale),
                                             variant: "destructive",
-                                            hidden: !canDeleteSale,
+                                            hidden:
+                                              isConsolidationSource ||
+                                              !canDeleteSale,
                                           },
                                         ]}
                                       />
