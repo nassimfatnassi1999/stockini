@@ -193,6 +193,7 @@ export class CustomersService {
     const where: Prisma.SaleWhereInput = {
       customerId: clientId,
       deletedAt: null,
+      NOT: { isConsolidated: true, consolidationStatus: 'CANCELLED' },
       ...(query.documentType && { documentType: query.documentType }),
       ...(query.documentStatus && { status: query.documentStatus }),
       ...((query.dateFrom || query.dateTo) && {

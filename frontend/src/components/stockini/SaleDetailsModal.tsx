@@ -1,15 +1,15 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "@/lib/api";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { getPaymentDisplay, money } from "@/lib/stockini/format";
 import type { SaleDetail } from "@/lib/stockini/types";
-import { stockiniApi } from "@/lib/stockini/api";
 import { usePermissions } from "@/lib/hooks/usePermissions";
-import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { RotateCcw } from "lucide-react";
+import { DeconsolidateDialog } from "@/components/stockini/sales/DeconsolidateDialog";
 
 const SALE_STATUS_LABELS: Record<string, string> = {
   DRAFT: "Brouillon",
@@ -42,8 +42,8 @@ function fmt3(v: number | string) {
 }
 
 export function SaleDetailsModal({ saleId, onClose }: Props) {
-  const queryClient = useQueryClient();
   const { can } = usePermissions();
+  const [confirmDeconsolidation, setConfirmDeconsolidation] = useState(false);
   const {
     data: sale,
     isLoading,
@@ -52,11 +52,6 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
     queryKey: ["sale-detail", saleId],
     queryFn: () => api.get<SaleDetail>(`/sales/${saleId}`).then((r) => r.data),
     enabled: !!saleId,
-  });
-  const cancelConsolidation = useMutation({
-    mutationFn: () => stockiniApi.cancelSalesConsolidation(saleId),
-    onSuccess: () => { toast.success('Regroupement annulé'); void queryClient.invalidateQueries(); onClose(); },
-    onError: (error: unknown) => toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Annulation impossible'),
   });
 
   return (
@@ -150,7 +145,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
             ) : null}
 
             {sale.isConsolidated && sale.consolidationStatus === 'ACTIVE' && can('sales.consolidation.cancel') && (
-              <div><Button variant="outline" size="sm" disabled={cancelConsolidation.isPending} onClick={() => cancelConsolidation.mutate()}><RotateCcw size={14} /> Annuler le regroupement</Button></div>
+              <div><Button variant="outline" size="sm" onClick={() => setConfirmDeconsolidation(true)}><RotateCcw size={14} /> Annuler le regroupement</Button></div>
             )}
 
             <hr className="border-border/50" />
@@ -256,6 +251,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
           </>
         )}
       </div>
+      {confirmDeconsolidation && sale && <DeconsolidateDialog sale={sale} onClose={() => setConfirmDeconsolidation(false)} onSuccess={onClose} />}
     </SlideOver>
   );
 }

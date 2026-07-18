@@ -17,6 +17,7 @@ import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
+  CancelConsolidationDto,
   CreateSaleDto,
   CreateConsolidationDto,
   SalePaginationDto,
@@ -68,8 +69,12 @@ export class SalesController {
 
   @RequirePermissions('sales.consolidation.cancel')
   @Post('consolidations/:id/cancel')
-  cancelConsolidation(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
-    return this.salesService.cancelConsolidation(id, user);
+  cancelConsolidation(
+    @Param('id') id: string,
+    @Body() dto: CancelConsolidationDto | undefined,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.salesService.cancelConsolidation(id, dto?.reason, user);
   }
 
   @RequirePermissions('sales.view_details')

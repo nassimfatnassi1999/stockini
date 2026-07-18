@@ -236,6 +236,9 @@ export interface SaleDetail {
     active: boolean;
   }>;
   consolidationMemberships?: Array<{ consolidatedSale: Sale }>;
+  payments?: Payment[];
+  creditNotes?: CreditNote[];
+  generatedDocuments?: GeneratedDocument[];
 }
 
 export type PurchaseDocumentType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR';

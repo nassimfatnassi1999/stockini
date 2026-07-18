@@ -14,6 +14,7 @@ import type { CustomerSaleHistoryItem, SalesQueryParams } from '@/lib/stockini/t
 import { PaymentStatusBadge } from './PaymentStatusBadge';
 import { ConsolidateDocumentsDialog } from './ConsolidateDocumentsDialog';
 import { ConsolidatedDocumentBadge } from './ConsolidatedDocumentBadge';
+import { DeconsolidateDialog } from './DeconsolidateDialog';
 import { isSourceOfActiveConsolidation, SalePaymentCell } from './SaleConsolidationDisplay';
 import { toast } from '@/lib/toast';
 import type { Sale } from '@/lib/stockini/types';
@@ -81,6 +82,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
   const [detailSaleId, setDetailSaleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<CustomerSaleHistoryItem[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deconsolidationTarget, setDeconsolidationTarget] = useState<CustomerSaleHistoryItem | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setSearch(inputSearch.trim()); setPage(1); }, 300);
@@ -139,7 +141,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
           <h2 className="text-base font-semibold text-text-primary">Historique des ventes</h2>
           <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">{pagination?.total ?? 0}</span>
         </div>
-        {selected.length > 0 && <div className="flex items-center gap-2 rounded-xl border bg-white px-2 py-1.5 text-xs shadow-sm"><span>{selected.length} sélectionné{selected.length > 1 ? 's' : ''}</span>{selected.length >= 2 && can('sales.consolidate') && <Button size="sm" onClick={openConsolidation}><Combine size={14} /> Regrouper</Button>}<button onClick={() => setSelected([])} aria-label="Annuler la sélection"><X size={14} /></button></div>}
+        {selected.length > 0 && <div className="flex items-center gap-2 rounded-xl border bg-white px-2 py-1.5 text-xs shadow-sm"><span>{selected.length} sélectionné{selected.length > 1 ? 's' : ''}</span>{selected.length === 1 && selected[0].isConsolidated && selected[0].consolidationStatus === 'ACTIVE' && can('sales.consolidation.cancel') ? <Button size="sm" variant="outline" onClick={() => setDeconsolidationTarget(selected[0])}><RotateCcw size={14} /> Déconsolider</Button> : selected.length >= 2 && can('sales.consolidate') ? <Button size="sm" onClick={openConsolidation}><Combine size={14} /> Regrouper</Button> : null}<button onClick={() => setSelected([])} aria-label="Annuler la sélection"><X size={14} /></button></div>}
       </div>
 
       <div className="grid gap-3 border-b border-border/60 bg-slate-50/50 p-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -193,7 +195,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
               <td className="px-3 py-3 text-right tabular-nums text-red-700">{money(sale.remainingAmount)}</td>
               <td className="px-3 py-3 text-center"><SalePaymentCell sale={sale}><PaymentStatusBadge status={sale.paymentStatus} /></SalePaymentCell></td>
               <td className="px-3 py-3"><span className={`app-status-badge ${STATUS_COLORS[sale.status] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}>{STATUS_LABELS[sale.status] ?? sale.status}</span></td>
-              <td className="px-3 py-3 text-right"><KebabMenu items={[{ label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setDetailSaleId(sale.id), hidden: !can('sales.view_details') }, { label: 'Voir le regroupement', icon: <Combine size={14} />, onClick: () => setDetailSaleId(String(sale.activeConsolidation?.id)), hidden: !isConsolidationSource || !can('sales.view_details') }, { label: 'Modifier', icon: <Pencil size={14} />, onClick: () => edit(sale), hidden: isConsolidationSource || !can('sales.update') }]} /></td>
+              <td className="px-3 py-3 text-right"><KebabMenu items={[{ label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setDetailSaleId(sale.id), hidden: !can('sales.view_details') }, { label: 'Voir le regroupement', icon: <Combine size={14} />, onClick: () => setDetailSaleId(String(sale.activeConsolidation?.id)), hidden: !isConsolidationSource || !can('sales.view_details') }, { label: 'Annuler le regroupement', icon: <RotateCcw size={14} />, onClick: () => setDeconsolidationTarget(sale), hidden: !sale.isConsolidated || sale.consolidationStatus !== 'ACTIVE' || !can('sales.consolidation.cancel') }, { label: 'Modifier', icon: <Pencil size={14} />, onClick: () => edit(sale), hidden: isConsolidationSource || sale.isConsolidated || !can('sales.update') }]} /></td>
             </tr>})}
           </tbody>
         </table>
@@ -205,6 +207,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
       </div>
       {detailSaleId && <SaleDetailsModal saleId={detailSaleId} onClose={() => setDetailSaleId(null)} />}
       {dialogOpen && <ConsolidateDocumentsDialog sales={selected.map((sale) => ({ ...sale, customer: { id: customerId, name: 'Client' } } as unknown as Sale))} onClose={() => setDialogOpen(false)} loading={consolidation.isPending} onConfirm={(value) => consolidation.mutate(value)} />}
+      {deconsolidationTarget && <DeconsolidateDialog sale={{ id: deconsolidationTarget.id, invoiceNumber: deconsolidationTarget.invoiceNumber, total: deconsolidationTarget.totalTtc, stampDuty: 0, totalFinal: deconsolidationTarget.totalTtc }} onClose={() => setDeconsolidationTarget(null)} onSuccess={() => { setSelected([]); setDetailSaleId(null); }} />}
     </section>
   );
 }

@@ -65,6 +65,7 @@ import { HistoryToolbar } from "@/components/stockini/shared/HistoryToolbar";
 import { BulkActionsBar } from "@/components/stockini/shared/BulkActionsBar";
 import { ConsolidateDocumentsDialog } from "@/components/stockini/sales/ConsolidateDocumentsDialog";
 import { ConsolidatedDocumentBadge } from "@/components/stockini/sales/ConsolidatedDocumentBadge";
+import { DeconsolidateDialog } from "@/components/stockini/sales/DeconsolidateDialog";
 import {
   isSourceOfActiveConsolidation,
   SalePaymentCell,
@@ -86,6 +87,7 @@ const PERMISSION_VIEW_DETAILS = "sales.view_details";
 const PERMISSION_DELETE_SALE = "sales.delete";
 const PERMISSION_UPDATE_SALE = "sales.update";
 const PERMISSION_CONSOLIDATE = "sales.consolidate";
+const PERMISSION_CANCEL_CONSOLIDATION = "sales.consolidation.cancel";
 
 function round3(v: number) {
   return Math.round(v * 1000) / 1000;
@@ -732,6 +734,7 @@ export default function VentesPage() {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
   const [selectedInvoiceSales, setSelectedInvoiceSales] = useState<Sale[]>([]);
   const [consolidationDialogOpen, setConsolidationDialogOpen] = useState(false);
+  const [deconsolidationTarget, setDeconsolidationTarget] = useState<Sale | null>(null);
 
   // Document generation panel (opened by Download button only)
   const [isDocMenuOpen, setIsDocMenuOpen] = useState(false);
@@ -753,6 +756,7 @@ export default function VentesPage() {
   const canDeleteSale = can(PERMISSION_DELETE_SALE);
   const canEditSale = can(PERMISSION_UPDATE_SALE);
   const canConsolidate = can(PERMISSION_CONSOLIDATE);
+  const canCancelConsolidation = can(PERMISSION_CANCEL_CONSOLIDATION);
 
   const customersQuery = useQuery<Customer[]>({
     queryKey: ["customers"],
@@ -2025,7 +2029,7 @@ export default function VentesPage() {
                 <div className="px-3 flex items-center gap-2">
                   {activeHistoryTab === "ventes" && (
                     <>
-                      <button
+                      {!(selectedInvoiceSales.length === 1 && selectedInvoiceSales[0].isConsolidated && selectedInvoiceSales[0].consolidationStatus === "ACTIVE") && <button
                         type="button"
                         onClick={handleDownloadClick}
                         disabled={selectedInvoiceIds.length === 0}
@@ -2039,7 +2043,7 @@ export default function VentesPage() {
                       >
                         <Download size={12} />
                         Générer
-                      </button>
+                      </button>}
                       {selectedInvoiceIds.length > 0 && (
                         <BulkActionsBar
                           count={selectedInvoiceIds.length}
@@ -2047,6 +2051,17 @@ export default function VentesPage() {
                           emailLoading={emailPreviewLoading}
                           onClear={() => { setSelectedInvoiceIds([]); setSelectedInvoiceSales([]); }}
                           transformButton={(() => {
+                            if (
+                              selectedInvoiceSales.length === 1 &&
+                              selectedInvoiceSales[0].isConsolidated &&
+                              selectedInvoiceSales[0].consolidationStatus === "ACTIVE"
+                            ) {
+                              return canCancelConsolidation ? (
+                                <button type="button" onClick={() => setDeconsolidationTarget(selectedInvoiceSales[0])} className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 text-[12px] font-medium text-amber-800 hover:bg-amber-100">
+                                  <RotateCcw size={12} /> Déconsolider
+                                </button>
+                              ) : null;
+                            }
                             if (selectedInvoiceIds.length >= 2 && canConsolidate) {
                               return (
                                 <button type="button" onClick={openConsolidation} className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2.5 text-[12px] font-medium text-violet-700 hover:bg-violet-100">
@@ -2340,6 +2355,7 @@ export default function VentesPage() {
                                             onClick: () => void startEditing(sale),
                                             hidden:
                                               isConsolidationSource ||
+                                              sale.isConsolidated ||
                                               !canEditSale,
                                           },
                                           {
@@ -2361,9 +2377,19 @@ export default function VentesPage() {
                                               !canViewDetails,
                                           },
                                           {
+                                            label: "Annuler le regroupement",
+                                            icon: <RotateCcw size={14} />,
+                                            onClick: () => setDeconsolidationTarget(sale),
+                                            hidden:
+                                              !sale.isConsolidated ||
+                                              sale.consolidationStatus !== "ACTIVE" ||
+                                              !canCancelConsolidation,
+                                          },
+                                          {
                                             divider: true,
                                             hidden:
                                               isConsolidationSource ||
+                                              sale.isConsolidated ||
                                               !canDeleteSale,
                                           },
                                           {
@@ -2550,6 +2576,18 @@ export default function VentesPage() {
                 onClose={() => setConsolidationDialogOpen(false)}
                 loading={consolidationMutation.isPending}
                 onConfirm={(value) => consolidationMutation.mutate(value)}
+              />
+            )}
+
+            {deconsolidationTarget && (
+              <DeconsolidateDialog
+                sale={deconsolidationTarget}
+                onClose={() => setDeconsolidationTarget(null)}
+                onSuccess={() => {
+                  setSelectedInvoiceIds([]);
+                  setSelectedInvoiceSales([]);
+                  setSelectedSaleId(null);
+                }}
               />
             )}
 

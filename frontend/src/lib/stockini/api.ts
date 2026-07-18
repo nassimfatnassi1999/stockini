@@ -214,8 +214,8 @@ export const stockiniApi = {
     api.get<SaleDetail>(`/sales/consolidations/${id}`).then((r) => r.data),
   saleConsolidation: (id: string) =>
     api.get<Sale | null>(`/sales/${id}/consolidation`).then((r) => r.data),
-  cancelSalesConsolidation: (id: string) =>
-    api.post<Sale>(`/sales/consolidations/${id}/cancel`).then((r) => r.data),
+  cancelSalesConsolidation: (id: string, reason?: string) =>
+    api.post<Sale & { restoredSourceIds?: string[] }>(`/sales/consolidations/${id}/cancel`, { reason }).then((r) => r.data),
   purchases: (params?: PurchasesQueryParams) =>
     api
       .get<

@@ -84,6 +84,9 @@ export class DocumentsService {
         },
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
+      if (sale.isConsolidated && sale.consolidationStatus === 'CANCELLED') {
+        throw new BadRequestException('Impossible de générer un document pour un regroupement annulé');
+      }
       const existing = await this.prisma.generatedDocument.findFirst({
         where: {
           invoiceId,

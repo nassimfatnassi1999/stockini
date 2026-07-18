@@ -180,6 +180,12 @@ export class CreateConsolidationDto {
   note?: string;
 }
 
+export class CancelConsolidationDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
 export class UpdateSaleDto {
   @IsOptional()
   @IsEnum(SaleStatus)

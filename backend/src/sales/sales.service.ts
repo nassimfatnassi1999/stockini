@@ -240,6 +240,8 @@ export class SalesService {
         customer: true,
         items: { include: { product: true } },
         payments: { where: { deletedAt: null } },
+        creditNotes: { where: { statut: { not: 'CANCELLED' } } },
+        generatedDocuments: { where: { deletedAt: null } },
         consolidationSources: {
           orderBy: { displayOrder: 'asc' },
           include: {
@@ -263,29 +265,113 @@ export class SalesService {
     return membership?.consolidatedSale ?? null;
   }
 
-  async cancelConsolidation(id: string, user?: AuthUser) {
-    return this.prisma.$transaction(async (tx) => {
-      const parent = await tx.sale.findFirstOrThrow({
-        where: { id, isConsolidated: true, consolidationStatus: ConsolidationStatus.ACTIVE },
-        include: { payments: { where: { deletedAt: null } }, creditNotes: { where: { statut: { not: 'CANCELLED' } } }, consolidationSources: { where: { active: true } } },
-      });
-      if (parent.payments.length || parent.creditNotes.length) {
-        throw new BadRequestException('Annulation impossible : le regroupement possède un paiement ou un avoir ultérieur');
-      }
-      const now = new Date();
-      await tx.saleConsolidationSource.updateMany({ where: { consolidatedSaleId: id, active: true }, data: { active: false, cancelledAt: now } });
-      const cancelled = await tx.sale.update({
-        where: { id },
-        data: { status: SaleStatus.CANCELLED, consolidationStatus: ConsolidationStatus.CANCELLED, consolidationCancelledAt: now },
-      });
+  async cancelConsolidation(id: string, reason?: string, user?: AuthUser) {
+    if (!this.hasPermission(user, 'sales.consolidation.cancel')) {
+      throw new ForbiddenException("Vous n'avez pas la permission d'annuler un regroupement");
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id = ${id} FOR UPDATE`);
+        const parent = await tx.sale.findFirstOrThrow({
+          where: { id, isConsolidated: true, consolidationStatus: ConsolidationStatus.ACTIVE },
+          include: {
+            payments: { where: { deletedAt: null } },
+            creditNotes: { where: { statut: { not: 'CANCELLED' } } },
+            generatedDocuments: { where: { deletedAt: null } },
+            consolidationSources: {
+              where: { active: true },
+              orderBy: { displayOrder: 'asc' },
+              include: {
+                sourceSale: {
+                  include: {
+                    payments: { where: { deletedAt: null, type: PaymentType.CUSTOMER_PAYMENT } },
+                    creditNotes: { where: { statut: { not: 'CANCELLED' } } },
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (parent.payments.length) {
+          throw new BadRequestException('Impossible d’annuler le regroupement : un ou plusieurs paiements ont été enregistrés sur le document consolidé. Annulez ou réaffectez ces paiements avant de continuer.');
+        }
+        if (parent.creditNotes.length) {
+          throw new BadRequestException('Impossible d’annuler le regroupement : un avoir actif est lié au document consolidé.');
+        }
+        if (parent.generatedDocuments.some((document) => document.status === 'SENT')) {
+          throw new BadRequestException('Impossible d’annuler le regroupement : un document fiscal finalisé a déjà été envoyé.');
+        }
+        if (!parent.consolidationSources.length) {
+          throw new BadRequestException('Impossible d’annuler le regroupement : aucun document source actif n’a été trouvé.');
+        }
+
+        const sourceIds = parent.consolidationSources.map((link) => link.sourceSaleId);
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id IN (${Prisma.join(sourceIds)}) FOR UPDATE`);
+        for (const link of parent.consolidationSources) {
+          const source = link.sourceSale;
+          const paid = source.payments.reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
+          const credits = source.creditNotes.reduce((sum, credit) => sum.plus(credit.montantRembourse), new Prisma.Decimal(0));
+          const netAfterCredits = Prisma.Decimal.max(source.total.plus(source.stampDuty).minus(credits), 0);
+          const remaining = Prisma.Decimal.max(netAfterCredits.minus(paid), 0);
+          await tx.sale.update({
+            where: { id: source.id },
+            data: {
+              paidAmount: paid,
+              totalRefunded: credits,
+              remainingAmount: remaining,
+              paymentStatus: PAYMENT_ACCEPTING_TYPES.has(source.documentType)
+                ? this.paymentStatus(Number(netAfterCredits), Number(paid))
+                : null,
+            },
+          });
+        }
+
+        const now = new Date();
+        await tx.saleConsolidationSource.updateMany({
+          where: { consolidatedSaleId: id, active: true },
+          data: { active: false, cancelledAt: now },
+        });
+        const cancelled = await tx.sale.update({
+          where: { id },
+          data: {
+            status: SaleStatus.CANCELLED,
+            consolidationStatus: ConsolidationStatus.CANCELLED,
+            consolidationCancelledAt: now,
+          },
+        });
+        await this.auditLogs.audit({
+          action: 'SALE_CONSOLIDATION_CANCELLED',
+          entity: 'Sale',
+          entityId: id,
+          userId: user?.id,
+          userName: user?.email,
+          oldValue: {
+            status: ConsolidationStatus.ACTIVE,
+            total: Number(parent.total.plus(parent.stampDuty)),
+            paidAmount: Number(parent.paidAmount),
+            remainingAmount: Number(parent.remainingAmount),
+          },
+          newValue: { status: ConsolidationStatus.CANCELLED },
+          metadata: {
+            reason: reason?.trim() || null,
+            sourceIds,
+            sourceReferences: parent.consolidationSources.map((source) => source.sourceReference),
+            result: 'sources_restored',
+          },
+        }, tx);
+        return { ...cancelled, restoredSourceIds: sourceIds };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
       await this.auditLogs.audit({
-        action: 'sale.consolidation.cancelled', entity: 'Sale', entityId: id,
-        userId: user?.id, userName: user?.email,
-        oldValue: { status: ConsolidationStatus.ACTIVE }, newValue: { status: ConsolidationStatus.CANCELLED },
-        metadata: { sourceReferences: parent.consolidationSources.map((source) => source.sourceReference) },
-      }, tx);
-      return cancelled;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        action: 'SALE_CONSOLIDATION_CANCELLATION_BLOCKED',
+        entity: 'Sale',
+        entityId: id,
+        userId: user?.id,
+        userName: user?.email,
+        metadata: { reason: error instanceof Error ? error.message : String(error) },
+      }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async getNextReference(
@@ -849,6 +935,10 @@ export class SalesService {
 
     const where: Prisma.SaleWhereInput = {
       deletedAt: null,
+      NOT: {
+        isConsolidated: true,
+        consolidationStatus: ConsolidationStatus.CANCELLED,
+      },
       // Ces filtres sont ignorés quand payableOnly est actif pour éviter des
       // contradictions (ex: documentType=DEVIS AND payableOnly=true → 0 résultat).
       // Le paymentStatus est géré dans la payableCondition quand payableOnly=true.
