@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Eye, Pencil, RotateCcw, Search } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Combine, Eye, Pencil, RotateCcw, Search, X } from 'lucide-react';
 import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,10 @@ import { money } from '@/lib/stockini/format';
 import { stockiniApi } from '@/lib/stockini/api';
 import type { CustomerSaleHistoryItem, SalesQueryParams } from '@/lib/stockini/types';
 import { PaymentStatusBadge } from './PaymentStatusBadge';
+import { ConsolidateDocumentsDialog } from './ConsolidateDocumentsDialog';
+import { ConsolidatedDocumentBadge } from './ConsolidatedDocumentBadge';
+import { toast } from '@/lib/toast';
+import type { Sale } from '@/lib/stockini/types';
 
 const DOCUMENT_LABELS: Record<string, string> = {
   DEVIS: 'Devis', BON_COMMANDE: 'BC', BON_LIVRAISON: 'BL', FACTURE: 'Facture', AVOIR: 'Avoir',
@@ -60,6 +64,7 @@ function periodDates(period: Period, customFrom: string, customTo: string) {
 
 export function CustomerSalesHistory({ customerId }: { customerId: string }) {
   const { can } = usePermissions();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [inputSearch, setInputSearch] = useState('');
@@ -73,6 +78,8 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
   const [sortBy, setSortBy] = useState('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [detailSaleId, setDetailSaleId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<CustomerSaleHistoryItem[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setSearch(inputSearch.trim()); setPage(1); }, 300);
@@ -91,6 +98,19 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
     placeholderData: (previous) => previous,
     enabled: can('sales.view'),
   });
+  const consolidation = useMutation({
+    mutationFn: (value: { targetType: 'BON_LIVRAISON' | 'FACTURE'; date: string; note: string }) => stockiniApi.createSalesConsolidation({ sourceIds: selected.map((sale) => String(sale.id)), ...value }),
+    onSuccess: (sale) => { toast.success(`Regroupement ${sale.invoiceNumber} créé`); setSelected([]); setDialogOpen(false); void queryClient.invalidateQueries({ queryKey: ['customer-sales', customerId] }); },
+    onError: (error: unknown) => toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Impossible de regrouper les documents'),
+  });
+  const toggle = (sale: CustomerSaleHistoryItem) => setSelected((current) => current.some((item) => item.id === sale.id) ? current.filter((item) => item.id !== sale.id) : [...current, sale]);
+  const openConsolidation = () => {
+    const type = selected[0]?.documentType;
+    if (selected.length < 2) return;
+    if (!['BON_LIVRAISON', 'FACTURE'].includes(type) || selected.some((sale) => sale.documentType !== type)) return toast.error('Sélectionnez uniquement des BL ou uniquement des factures');
+    if (selected.some((sale) => sale.status === 'CANCELLED' || sale.activeConsolidation || sale.isConsolidated)) return toast.error('La sélection contient un document incompatible');
+    setDialogOpen(true);
+  };
 
   const reset = () => {
     setInputSearch(''); setSearch(''); setDocumentType(''); setDocumentStatus('');
@@ -118,6 +138,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
           <h2 className="text-base font-semibold text-text-primary">Historique des ventes</h2>
           <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">{pagination?.total ?? 0}</span>
         </div>
+        {selected.length > 0 && <div className="flex items-center gap-2 rounded-xl border bg-white px-2 py-1.5 text-xs shadow-sm"><span>{selected.length} sélectionné{selected.length > 1 ? 's' : ''}</span>{selected.length >= 2 && can('sales.consolidate') && <Button size="sm" onClick={openConsolidation}><Combine size={14} /> Regrouper</Button>}<button onClick={() => setSelected([])} aria-label="Annuler la sélection"><X size={14} /></button></div>}
       </div>
 
       <div className="grid gap-3 border-b border-border/60 bg-slate-50/50 p-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -147,6 +168,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
       <div className="overflow-x-auto">
         <table className="min-w-[1180px] w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>
+            <th className="w-10 px-3 py-3"><span className="sr-only">Sélection</span></th>
             <Head label="Référence" onClick={() => sort('reference')} /><Head label="Type" onClick={() => sort('documentType')} />
             <Head label="Date" onClick={() => sort('date')} /><th className="px-3 py-3 text-center">Articles</th>
             <Head label="Total TTC" right onClick={() => sort('totalTtc')} /><Head label="Payé" right onClick={() => sort('paidAmount')} />
@@ -157,15 +179,16 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
             {query.isLoading ? Array.from({ length: limit }).map((_, index) => <tr key={index}>{Array.from({ length: 10 }).map((__, cell) => <td key={cell} className="px-3 py-3"><div className="h-4 animate-pulse rounded bg-slate-100" /></td>)}</tr>) :
             query.isError ? <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-red-600">Impossible de charger l’historique des ventes.</td></tr> :
             !query.data?.data.length ? <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-text-muted">Aucune vente enregistrée pour ce client</td></tr> :
-            query.data.data.map((sale) => <tr key={sale.id} className="hover:bg-slate-50/70">
+            query.data.data.map((sale) => <tr key={sale.id} className={sale.activeConsolidation ? 'bg-slate-100 text-slate-400' : 'hover:bg-slate-50/70'}>
+              <td className="px-3 py-3 text-center"><input type="checkbox" checked={selected.some((item) => item.id === sale.id)} disabled={Boolean(sale.activeConsolidation)} onChange={() => toggle(sale)} aria-label={`Sélectionner ${sale.invoiceNumber}`} /></td>
               <td className="px-3 py-3 font-mono text-xs font-semibold">{sale.invoiceNumber}</td>
-              <td className="px-3 py-3"><span className={`app-status-badge ${DOCUMENT_COLORS[sale.documentType] ?? DOCUMENT_COLORS.DEVIS}`}>{DOCUMENT_LABELS[sale.documentType] ?? sale.documentType}</span></td>
+              <td className="px-3 py-3"><span className={`app-status-badge ${DOCUMENT_COLORS[sale.documentType] ?? DOCUMENT_COLORS.DEVIS}`}>{DOCUMENT_LABELS[sale.documentType] ?? sale.documentType}</span> {sale.isConsolidated && <ConsolidatedDocumentBadge parent />} {sale.activeConsolidation && <ConsolidatedDocumentBadge reference={sale.activeConsolidation.invoiceNumber} />}</td>
               <td className="px-3 py-3 text-slate-600">{new Date(sale.createdAt).toLocaleDateString('fr-TN')}</td>
               <td className="px-3 py-3 text-center tabular-nums">{sale.itemCount}</td>
               <td className="px-3 py-3 text-right font-medium tabular-nums">{money(sale.totalTtc)}</td>
               <td className="px-3 py-3 text-right tabular-nums text-emerald-700">{money(sale.paidAmount)}</td>
               <td className="px-3 py-3 text-right tabular-nums text-red-700">{money(sale.remainingAmount)}</td>
-              <td className="px-3 py-3"><PaymentStatusBadge status={sale.paymentStatus} /></td>
+              <td className="px-3 py-3">{sale.activeConsolidation ? <ConsolidatedDocumentBadge reference={sale.activeConsolidation.invoiceNumber} /> : <PaymentStatusBadge status={sale.paymentStatus} />}</td>
               <td className="px-3 py-3"><span className={`app-status-badge ${STATUS_COLORS[sale.status] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}>{STATUS_LABELS[sale.status] ?? sale.status}</span></td>
               <td className="px-3 py-3 text-right"><KebabMenu items={[{ label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setDetailSaleId(sale.id), hidden: !can('sales.view_details') }, { label: 'Modifier', icon: <Pencil size={14} />, onClick: () => edit(sale), hidden: !can('sales.update') }]} /></td>
             </tr>)}
@@ -178,6 +201,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
         <div className="flex items-center gap-2"><span>Page {pagination?.page ?? 1} sur {Math.max(1, pagination?.totalPages ?? 1)}</span><Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={14} /></Button><Button size="sm" variant="outline" disabled={page >= (pagination?.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></Button></div>
       </div>
       {detailSaleId && <SaleDetailsModal saleId={detailSaleId} onClose={() => setDetailSaleId(null)} />}
+      {dialogOpen && <ConsolidateDocumentsDialog sales={selected.map((sale) => ({ ...sale, customer: { id: customerId, name: 'Client' } } as unknown as Sale))} onClose={() => setDialogOpen(false)} loading={consolidation.isPending} onConfirm={(value) => consolidation.mutate(value)} />}
     </section>
   );
 }

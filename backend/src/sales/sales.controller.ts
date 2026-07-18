@@ -18,6 +18,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreateSaleDto,
+  CreateConsolidationDto,
   SalePaginationDto,
   TransformDocumentDto,
   UpdateSaleDto,
@@ -51,6 +52,30 @@ export class SalesController {
       );
     }
     return this.salesService.getNextReference(documentType as DocumentType);
+  }
+
+  @RequirePermissions('sales.consolidate')
+  @Post('consolidations')
+  createConsolidation(@Body() dto: CreateConsolidationDto, @CurrentUser() user?: AuthUser) {
+    return this.salesService.createConsolidation(dto, user);
+  }
+
+  @RequirePermissions('sales.view_details')
+  @Get('consolidations/:id')
+  getConsolidation(@Param('id') id: string) {
+    return this.salesService.getConsolidation(id);
+  }
+
+  @RequirePermissions('sales.consolidation.cancel')
+  @Post('consolidations/:id/cancel')
+  cancelConsolidation(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.salesService.cancelConsolidation(id, user);
+  }
+
+  @RequirePermissions('sales.view_details')
+  @Get(':id/consolidation')
+  getSaleConsolidation(@Param('id') id: string) {
+    return this.salesService.getSaleConsolidation(id);
   }
 
   @RequirePermissions('sales.view_details')

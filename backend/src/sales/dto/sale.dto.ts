@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayMinSize,
   IsBoolean,
   IsDateString,
   IsEmail,
@@ -159,6 +160,24 @@ export class TransformDocumentDto {
       'targetType doit être : DEVIS, BON_COMMANDE, BON_LIVRAISON, FACTURE ou AVOIR',
   })
   targetType!: DocumentType;
+}
+
+export class CreateConsolidationDto {
+  @IsArray()
+  @ArrayMinSize(2)
+  @IsString({ each: true })
+  sourceIds!: string[];
+
+  @IsEnum(DocumentType)
+  targetType!: DocumentType;
+
+  @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 export class UpdateSaleDto {

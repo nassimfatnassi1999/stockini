@@ -34,6 +34,7 @@ export function isRevenueRecognizedDocument(
 export function revenueRecognizedSaleWhere(): Prisma.SaleWhereInput {
   return {
     deletedAt: null,
+    consolidationMemberships: { none: { active: true } },
     status: { in: REVENUE_RECOGNIZED_STATUSES },
     OR: [
       { documentType: DocumentType.FACTURE },

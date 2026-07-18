@@ -41,6 +41,7 @@ export class CustomersService {
         customerId: clientId,
         deletedAt: null,
         status: { not: 'CANCELLED' },
+        consolidationMemberships: { none: { active: true } },
         OR: [
           { documentType: 'FACTURE' },
           { documentType: 'BON_LIVRAISON', transformedToId: null },
@@ -72,6 +73,7 @@ export class CustomersService {
         deletedAt: null,
         status: { not: 'CANCELLED' },
         customerId: { not: null },
+        consolidationMemberships: { none: { active: true } },
         OR: [
           { documentType: 'FACTURE' },
           { documentType: 'BON_LIVRAISON', transformedToId: null },
@@ -114,6 +116,7 @@ export class CustomersService {
         deletedAt: null,
         status: { not: 'CANCELLED' },
         customerId: { in: customers.map((c) => c.id) },
+        consolidationMemberships: { none: { active: true } },
         OR: [
           { documentType: 'FACTURE' },
           { documentType: 'BON_LIVRAISON', transformedToId: null },
@@ -214,6 +217,9 @@ export class CustomersService {
     };
     const orderBy = (query.sortBy && sortFields[query.sortBy]) || { createdAt: sortOrder };
 
+    const financialWhere: Prisma.SaleWhereInput = {
+      AND: [where, { consolidationMemberships: { none: { active: true } } }],
+    };
     const [sales, total, totals, validPayments, unpaidCount] = await Promise.all([
       this.prisma.sale.findMany({
         where,
@@ -230,29 +236,39 @@ export class CustomersService {
           tax: true,
           total: true,
           stampDuty: true,
+          paidAmount: true,
+          remainingAmount: true,
+          totalRefunded: true,
           items: { select: { id: true } },
           payments: {
             where: { deletedAt: null, type: PaymentType.CUSTOMER_PAYMENT },
             select: { amount: true },
           },
+          isConsolidated: true,
+          consolidationStatus: true,
+          consolidationMemberships: { where: { active: true }, select: { consolidatedSale: { select: { id: true, invoiceNumber: true } } } },
+          _count: { select: { consolidationSources: { where: { active: true } } } },
         },
       }),
       this.prisma.sale.count({ where }),
-      this.prisma.sale.aggregate({ where, _sum: { total: true, stampDuty: true } }),
+      this.prisma.sale.aggregate({ where: financialWhere, _sum: { total: true, stampDuty: true } }),
       this.prisma.payment.aggregate({
         where: {
           deletedAt: null,
           type: PaymentType.CUSTOMER_PAYMENT,
-          sale: { is: where },
+          OR: [
+            { sale: { is: financialWhere } },
+            { sale: { consolidationMemberships: { some: { active: true, consolidatedSale: { is: financialWhere } } } } },
+          ],
         },
         _sum: { amount: true },
       }),
-      this.prisma.sale.count({ where: { AND: [where, { remainingAmount: { gt: 0.001 } }] } }),
+      this.prisma.sale.count({ where: { AND: [financialWhere, { remainingAmount: { gt: 0.001 } }] } }),
     ]);
 
-    const data = sales.map(({ payments, items, ...sale }) => {
+    const data = sales.map(({ payments, items, consolidationMemberships, _count, ...sale }) => {
       const totalPayable = new Prisma.Decimal(sale.total).plus(sale.stampDuty ?? 0);
-      const paid = payments.reduce(
+      const paid = sale.isConsolidated ? new Prisma.Decimal(sale.paidAmount) : payments.reduce(
         (sum, payment) => sum.plus(payment.amount),
         new Prisma.Decimal(0),
       );
@@ -264,6 +280,8 @@ export class CustomersService {
         paidAmount: amounts.paidAmount,
         remainingAmount: amounts.remainingAmount,
         paymentStatus: amounts.paymentStatus,
+        activeConsolidation: consolidationMemberships?.[0]?.consolidatedSale ?? null,
+        sourceDocumentsCount: _count?.consolidationSources ?? 0,
       };
     });
 

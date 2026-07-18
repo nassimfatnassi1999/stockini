@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightLeft,
+  Combine,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -62,6 +63,8 @@ import { stockiniApi } from "@/lib/stockini/api";
 import { cn } from "@/lib/utils";
 import { HistoryToolbar } from "@/components/stockini/shared/HistoryToolbar";
 import { BulkActionsBar } from "@/components/stockini/shared/BulkActionsBar";
+import { ConsolidateDocumentsDialog } from "@/components/stockini/sales/ConsolidateDocumentsDialog";
+import { ConsolidatedDocumentBadge } from "@/components/stockini/sales/ConsolidatedDocumentBadge";
 import type {
   Customer,
   DropdownOption,
@@ -78,6 +81,7 @@ const PERMISSION_EDIT_UNIT_PRICE_HT = "sales.line.edit_unit_price_ht";
 const PERMISSION_VIEW_DETAILS = "sales.view_details";
 const PERMISSION_DELETE_SALE = "sales.delete";
 const PERMISSION_UPDATE_SALE = "sales.update";
+const PERMISSION_CONSOLIDATE = "sales.consolidate";
 
 function round3(v: number) {
   return Math.round(v * 1000) / 1000;
@@ -722,6 +726,8 @@ export default function VentesPage() {
 
   // Multi-selection for invoice history
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [selectedInvoiceSales, setSelectedInvoiceSales] = useState<Sale[]>([]);
+  const [consolidationDialogOpen, setConsolidationDialogOpen] = useState(false);
 
   // Document generation panel (opened by Download button only)
   const [isDocMenuOpen, setIsDocMenuOpen] = useState(false);
@@ -742,6 +748,7 @@ export default function VentesPage() {
   const canViewDetails = can(PERMISSION_VIEW_DETAILS);
   const canDeleteSale = can(PERMISSION_DELETE_SALE);
   const canEditSale = can(PERMISSION_UPDATE_SALE);
+  const canConsolidate = can(PERMISSION_CONSOLIDATE);
 
   const customersQuery = useQuery<Customer[]>({
     queryKey: ["customers"],
@@ -962,6 +969,20 @@ export default function VentesPage() {
   const salesList: Sale[] = Array.isArray(salesQuery.data?.data)
     ? salesQuery.data.data
     : [];
+
+  const consolidationMutation = useMutation({
+    mutationFn: (value: { targetType: "BON_LIVRAISON" | "FACTURE"; date: string; note: string }) =>
+      stockiniApi.createSalesConsolidation({ sourceIds: selectedInvoiceIds, ...value }),
+    onSuccess: (sale) => {
+      toast.success(`Regroupement ${sale.invoiceNumber} créé`);
+      setSelectedInvoiceIds([]);
+      setSelectedInvoiceSales([]);
+      setConsolidationDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["stockini-sales"] });
+    },
+    onError: (error: unknown) =>
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Impossible de regrouper les documents"),
+  });
 
   const docsCountQuery = useQuery({
     queryKey: ["generated-documents"],
@@ -1303,7 +1324,8 @@ export default function VentesPage() {
   });
 
   // ── Checkbox toggle: only updates selection, never opens panels ──────────
-  const toggleInvoiceSelection = (saleId: string) => {
+  const toggleInvoiceSelection = (sale: Sale) => {
+    const saleId = sale.id;
     setSelectedInvoiceIds((prev) => {
       const next = prev.includes(saleId)
         ? prev.filter((id) => id !== saleId)
@@ -1317,6 +1339,31 @@ export default function VentesPage() {
 
       return next;
     });
+    setSelectedInvoiceSales((prev) =>
+      prev.some((item) => item.id === saleId)
+        ? prev.filter((item) => item.id !== saleId)
+        : [...prev, sale],
+    );
+  };
+
+  const openConsolidation = () => {
+    const selected = selectedInvoiceSales;
+    if (selected.length < 2) return;
+    const clientId = selected[0].customer?.id;
+    if (!clientId || selected.some((sale) => sale.customer?.id !== clientId)) {
+      toast.error("Tous les documents doivent appartenir au même client");
+      return;
+    }
+    const type = selected[0].documentType;
+    if (!["BON_LIVRAISON", "FACTURE"].includes(type) || selected.some((sale) => sale.documentType !== type)) {
+      toast.error("Sélectionnez uniquement des BL ou uniquement des factures");
+      return;
+    }
+    if (selected.some((sale) => sale.status === "CANCELLED" || sale.activeConsolidation || sale.isConsolidated)) {
+      toast.error("Un document annulé, consolidé ou déjà regroupé est présent dans la sélection");
+      return;
+    }
+    setConsolidationDialogOpen(true);
   };
 
   // Builds email preview state without opening the toast
@@ -1994,8 +2041,15 @@ export default function VentesPage() {
                           count={selectedInvoiceIds.length}
                           onEmail={handleEmailClick}
                           emailLoading={emailPreviewLoading}
-                          onClear={() => setSelectedInvoiceIds([])}
+                          onClear={() => { setSelectedInvoiceIds([]); setSelectedInvoiceSales([]); }}
                           transformButton={(() => {
+                            if (selectedInvoiceIds.length >= 2 && canConsolidate) {
+                              return (
+                                <button type="button" onClick={openConsolidation} className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2.5 text-[12px] font-medium text-violet-700 hover:bg-violet-100">
+                                  <Combine size={12} /> Regrouper · {money(selectedInvoiceSales.reduce((sum, sale) => sum + Number(sale.totalFinal ?? Number(sale.total) + Number(sale.stampDuty)), 0))}
+                                </button>
+                              );
+                            }
                             if (selectedInvoiceIds.length !== 1) return null;
                             const sel = salesList.find(
                               (s) => s.id === selectedInvoiceIds[0],
@@ -2145,7 +2199,9 @@ export default function VentesPage() {
                                 key={sale.id}
                                 className={cn(
                                   "transition-colors duration-100",
-                                  isSelected
+                                  sale.activeConsolidation
+                                    ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
+                                    : isSelected
                                     ? "bg-orange-50/70 hover:bg-orange-50"
                                     : "hover:bg-slate-50/80",
                                 )}
@@ -2154,9 +2210,10 @@ export default function VentesPage() {
                                 <td className="px-3 py-2.5 text-center">
                                   <input
                                     type="checkbox"
+                                    disabled={Boolean(sale.activeConsolidation)}
                                     checked={isSelected}
                                     onChange={() =>
-                                      toggleInvoiceSelection(sale.id)
+                                      toggleInvoiceSelection(sale)
                                     }
                                     className="h-3.5 w-3.5 cursor-pointer rounded border-slate-300 accent-orange-500"
                                     aria-label={`Sélectionner la vente ${sale.invoiceNumber}`}
@@ -2185,6 +2242,8 @@ export default function VentesPage() {
                                             Issu d'une transf.
                                           </span>
                                         )}
+                                      {sale.isConsolidated && <ConsolidatedDocumentBadge parent />}
+                                      {sale.activeConsolidation && <ConsolidatedDocumentBadge reference={sale.activeConsolidation.invoiceNumber} />}
                                       {(sale.status === "PARTIALLY_REFUNDED" ||
                                         sale.status === "REFUNDED") && (
                                         <span
@@ -2462,6 +2521,15 @@ export default function VentesPage() {
               <SaleDetailsModal
                 saleId={selectedSaleId}
                 onClose={() => setSelectedSaleId(null)}
+              />
+            )}
+
+            {consolidationDialogOpen && (
+              <ConsolidateDocumentsDialog
+                sales={selectedInvoiceSales}
+                onClose={() => setConsolidationDialogOpen(false)}
+                loading={consolidationMutation.isPending}
+                onConfirm={(value) => consolidationMutation.mutate(value)}
               />
             )}
 

@@ -1,10 +1,15 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { SlideOver } from "@/components/ui/SlideOver";
 import { getPaymentDisplay, money } from "@/lib/stockini/format";
 import type { SaleDetail } from "@/lib/stockini/types";
+import { stockiniApi } from "@/lib/stockini/api";
+import { usePermissions } from "@/lib/hooks/usePermissions";
+import { toast } from "@/lib/toast";
+import { Button } from "@/components/ui/button";
+import { RotateCcw } from "lucide-react";
 
 const SALE_STATUS_LABELS: Record<string, string> = {
   DRAFT: "Brouillon",
@@ -37,6 +42,8 @@ function fmt3(v: number | string) {
 }
 
 export function SaleDetailsModal({ saleId, onClose }: Props) {
+  const queryClient = useQueryClient();
+  const { can } = usePermissions();
   const {
     data: sale,
     isLoading,
@@ -45,6 +52,11 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
     queryKey: ["sale-detail", saleId],
     queryFn: () => api.get<SaleDetail>(`/sales/${saleId}`).then((r) => r.data),
     enabled: !!saleId,
+  });
+  const cancelConsolidation = useMutation({
+    mutationFn: () => stockiniApi.cancelSalesConsolidation(saleId),
+    onSuccess: () => { toast.success('Regroupement annulé'); void queryClient.invalidateQueries(); onClose(); },
+    onError: (error: unknown) => toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Annulation impossible'),
   });
 
   return (
@@ -112,14 +124,14 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                   </div>
                 );
               })()}
-              {sale.documentType === "FACTURE" && (
+              {["FACTURE", "BON_LIVRAISON"].includes(sale.documentType) && (
                 <InfoField
                   label="Montant payé"
                   value={money(sale.paidAmount)}
                   mono
                 />
               )}
-              {sale.documentType === "FACTURE" &&
+              {["FACTURE", "BON_LIVRAISON"].includes(sale.documentType) &&
                 Number(sale.remainingAmount) > 0 && (
                   <InfoField
                     label="Reste à payer"
@@ -129,6 +141,17 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                   />
                 )}
             </div>
+
+            {sale.isConsolidated && sale.consolidationSources?.length ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Documents regroupés ({sale.consolidationSources.length})</p>
+                <div className="mt-2 flex flex-wrap gap-2">{sale.consolidationSources.map((source) => <span key={source.id} className="rounded border bg-white px-2 py-1 font-mono text-xs">{source.sourceReference}</span>)}</div>
+              </div>
+            ) : null}
+
+            {sale.isConsolidated && sale.consolidationStatus === 'ACTIVE' && can('sales.consolidation.cancel') && (
+              <div><Button variant="outline" size="sm" disabled={cancelConsolidation.isPending} onClick={() => cancelConsolidation.mutate()}><RotateCcw size={14} /> Annuler le regroupement</Button></div>
+            )}
 
             <hr className="border-border/50" />
 
@@ -178,6 +201,7 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                           </td>
                           <td className="px-3 py-2.5 font-medium text-text-primary">
                             {item.designation ?? item.product?.name ?? "—"}
+                            {item.sourceReference && <span className="mt-0.5 block font-mono text-[10px] font-normal text-slate-400">Source : {item.sourceReference}</span>}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {item.quantity}

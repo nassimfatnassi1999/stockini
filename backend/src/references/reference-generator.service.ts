@@ -78,6 +78,29 @@ export class ReferenceGeneratorService {
     throw new Error(`Impossible d'allouer un numéro unique pour ${documentType}`);
   }
 
+  async generateConsolidatedSalesDocumentNumber(
+    documentType: 'BON_LIVRAISON' | 'FACTURE',
+    clientName: string | null | undefined,
+    documentDate: Date,
+    client: ReferenceClient = this.prisma,
+  ): Promise<string> {
+    const prefix = documentType === 'FACTURE' ? 'FACG' : 'BLG';
+    const datePart = this.formatCompactDate(documentDate);
+    const clientPart = this.sanitizeClientName(clientName);
+    const counterPrefix = `SALE-CONSOLIDATION:${prefix}:${datePart}`;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const counter = await client.referenceCounter.upsert({
+        where: { prefix_year: { prefix: counterPrefix, year: 0 } },
+        update: { sequence: { increment: 1 } },
+        create: { prefix: counterPrefix, year: 0, sequence: 1 },
+      });
+      const reference = `${prefix}-${clientPart}-${datePart}-${String(counter.sequence).padStart(3, '0')}`;
+      const existing = await client.sale.findUnique({ where: { invoiceNumber: reference }, select: { id: true } });
+      if (!existing) return reference;
+    }
+    throw new Error('Impossible d\'allouer une référence de regroupement unique');
+  }
+
   async peekNextSalesDocumentNumber(
     documentType: SalesDocumentType,
     clientName: string | null | undefined,

@@ -80,6 +80,7 @@ export class DocumentsService {
           customer: true,
           items: { include: { product: true } },
           seller: { select: { fullName: true } },
+          consolidationSources: { where: { active: true }, orderBy: { displayOrder: 'asc' } },
         },
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
@@ -121,6 +122,9 @@ export class DocumentsService {
           tax: Number(sale.tax),
           total: Number(sale.total),
           timbreFiscal: Number(sale.stampDuty),
+          paidAmount: Number(sale.paidAmount),
+          remainingAmount: Number(sale.remainingAmount),
+          sourceReferences: (sale.consolidationSources ?? []).map((source) => source.sourceReference),
           customerName: clientName,
           isCounterClient: isComptoir,
           customerAddress: sale.counterClientAddress ?? sale.customer?.address ?? null,
@@ -137,6 +141,7 @@ export class DocumentsService {
             discountPercent: Number(item.discountPercent ?? 0),
             tvaPercent: Number(item.tvaPercent ?? item.product?.tva ?? 0),
             total: Number(item.total),
+            sourceReference: item.sourceReference,
           })),
         },
         dto.documentType,
@@ -207,6 +212,22 @@ export class DocumentsService {
       }
 
       results.push(doc);
+      if (sale.isConsolidated) {
+        await this.prisma.auditLog.create({
+          data: {
+            action: 'sale.consolidation.pdf_generated',
+            entity: 'Sale',
+            entityId: sale.id,
+            userId: user?.id ?? null,
+            userName: user?.email ?? null,
+            metadata: {
+              reference: sale.invoiceNumber,
+              documentId: doc.id,
+              sourceReferences: (sale.consolidationSources ?? []).map((source) => source.sourceReference),
+            },
+          },
+        });
+      }
       this.logger.log(`Generated ${documentNumber} stored at ${objectKey}`);
     }
 

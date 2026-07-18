@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   CaisseMovementType,
+  ConsolidationStatus,
   CustomerOrigin,
   DocumentType,
   PaymentStatus,
@@ -37,6 +38,7 @@ import {
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import {
   CreateSaleDto,
+  CreateConsolidationDto,
   SalePaginationDto,
   UpdateSaleDto,
 } from './dto/sale.dto';
@@ -91,6 +93,200 @@ export class SalesService {
     private readonly customersService: CustomersService,
     private readonly auditLogs: AuditLogsService,
   ) {}
+
+  async createConsolidation(dto: CreateConsolidationDto, user?: AuthUser) {
+    const sourceIds = [...new Set(dto.sourceIds)];
+    if (sourceIds.length < 2) {
+      throw new BadRequestException('Sélectionnez au moins deux documents distincts');
+    }
+    if (dto.targetType !== DocumentType.BON_LIVRAISON && dto.targetType !== DocumentType.FACTURE) {
+      throw new BadRequestException('Le document consolidé doit être un bon de livraison ou une facture');
+    }
+    const documentDate = dto.date ? new Date(dto.date) : new Date();
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id IN (${Prisma.join(sourceIds)}) FOR UPDATE`);
+      const sources = await tx.sale.findMany({
+        where: { id: { in: sourceIds } },
+        include: {
+          customer: true,
+          items: true,
+          payments: { where: { deletedAt: null, type: PaymentType.CUSTOMER_PAYMENT } },
+          creditNotes: { where: { statut: { not: 'CANCELLED' } } },
+          consolidationMemberships: { where: { active: true }, select: { consolidatedSaleId: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (sources.length !== sourceIds.length) throw new BadRequestException('Un ou plusieurs documents sont introuvables');
+      const first = sources[0];
+      if (!first.customerId || sources.some((sale) => sale.customerId !== first.customerId)) {
+        throw new BadRequestException('Tous les documents doivent appartenir au même client enregistré');
+      }
+      if (sources.some((sale) => sale.deletedAt || sale.status === SaleStatus.CANCELLED)) {
+        throw new BadRequestException('Un document supprimé ou annulé ne peut pas être regroupé');
+      }
+      if (sources.some((sale) => sale.isConsolidated || sale.consolidationMemberships.length > 0)) {
+        throw new BadRequestException('Un document sélectionné appartient déjà à un regroupement actif');
+      }
+      const sourceType = first.documentType;
+      if (sources.some((sale) => sale.documentType !== sourceType)) {
+        throw new BadRequestException('Les bons de livraison et les factures ne peuvent pas être mélangés');
+      }
+      const compatible = sourceType === dto.targetType ||
+        (sourceType === DocumentType.BON_LIVRAISON && dto.targetType === DocumentType.FACTURE);
+      if (!compatible || (sourceType !== DocumentType.BON_LIVRAISON && sourceType !== DocumentType.FACTURE)) {
+        throw new BadRequestException('Types de documents incompatibles avec le regroupement demandé');
+      }
+
+      const sum = (values: Array<Prisma.Decimal | number>): Prisma.Decimal =>
+        values.reduce<Prisma.Decimal>((total, value) => total.plus(value), new Prisma.Decimal(0));
+      const subtotal = sum(sources.map((sale) => sale.subtotal));
+      const discount = sum(sources.map((sale) => sale.discount));
+      const tax = sum(sources.map((sale) => sale.tax));
+      const total = sum(sources.map((sale) => sale.total));
+      // Règle Stockini: conserver la somme exacte des timbres historiques.
+      const stampDuty = sum(sources.map((sale) => sale.stampDuty));
+      const historicalPaid = sum(sources.flatMap((sale) => sale.payments.map((payment) => payment.amount)));
+      const credits = sum(sources.flatMap((sale) => sale.creditNotes.map((credit) => credit.montantRembourse)));
+      const net = total.plus(stampDuty);
+      const remainingAmount = Prisma.Decimal.max(net.minus(historicalPaid).minus(credits), 0);
+      const invoiceNumber = await this.references.generateConsolidatedSalesDocumentNumber(
+        dto.targetType as 'BON_LIVRAISON' | 'FACTURE', first.customer?.name, documentDate, tx,
+      );
+      const parent = await tx.sale.create({
+        data: {
+          invoiceNumber,
+          customerId: first.customerId,
+          clientType: first.clientType,
+          createdAt: documentDate,
+          sellerId: user?.id,
+          subtotal,
+          discount,
+          tax,
+          total,
+          stampDuty,
+          paidAmount: historicalPaid,
+          remainingAmount,
+          totalRefunded: credits,
+          paymentStatus: this.paymentStatus(Number(net.minus(credits)), Number(historicalPaid)),
+          status: SaleStatus.COMPLETED,
+          documentType: dto.targetType,
+          stockImpactDone: false,
+          lastSalePriceImpactDone: false,
+          isConsolidated: true,
+          consolidationStatus: ConsolidationStatus.ACTIVE,
+          consolidationNote: dto.note?.trim() || null,
+          consolidatedAt: new Date(),
+          items: {
+            create: sources.flatMap((sale) => sale.items.map((item) => ({
+              productId: item.productId,
+              designation: item.designation,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discountPercent: item.discountPercent,
+              marginPercent: item.marginPercent,
+              tvaPercent: item.tvaPercent,
+              finalUnitPrice: item.finalUnitPrice,
+              total: item.total,
+              unitPurchaseCostHt: item.unitPurchaseCostHt,
+              purchaseCostEstimated: item.purchaseCostEstimated,
+              calculationVersion: item.calculationVersion,
+              sourceSaleId: sale.id,
+              sourceSaleItemId: item.id,
+              sourceReference: sale.invoiceNumber,
+            }))),
+          },
+          consolidationSources: {
+            create: sources.map((sale, index) => ({
+              sourceSaleId: sale.id,
+              sourceReference: sale.invoiceNumber,
+              sourceType: sale.documentType,
+              sourceTotal: sale.total.plus(sale.stampDuty),
+              displayOrder: index,
+            })),
+          },
+        },
+        include: { customer: true, items: { include: { product: true } }, consolidationSources: true },
+      });
+      await this.auditLogs.audit({
+        action: 'sale.consolidation.created', entity: 'Sale', entityId: parent.id,
+        userId: user?.id, userName: user?.email,
+        newValue: { reference: parent.invoiceNumber, total: Number(net), paid: Number(historicalPaid), remaining: Number(remainingAmount) },
+        metadata: { sourceIds, sourceReferences: sources.map((sale) => sale.invoiceNumber), targetType: dto.targetType, credits: Number(credits) },
+      }, tx);
+      return parent;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      await this.auditLogs.audit({
+        action: 'sale.consolidation.blocked',
+        entity: 'Sale',
+        userId: user?.id,
+        userName: user?.email,
+        metadata: {
+          sourceIds,
+          targetType: dto.targetType,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async getConsolidation(id: string) {
+    return this.prisma.sale.findFirstOrThrow({
+      where: { id, isConsolidated: true, deletedAt: null },
+      include: {
+        customer: true,
+        items: { include: { product: true } },
+        payments: { where: { deletedAt: null } },
+        consolidationSources: {
+          orderBy: { displayOrder: 'asc' },
+          include: {
+            sourceSale: {
+              include: {
+                payments: { where: { deletedAt: null } },
+                creditNotes: { where: { statut: { not: 'CANCELLED' } } },
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async getSaleConsolidation(id: string) {
+    const membership = await this.prisma.saleConsolidationSource.findFirst({
+      where: { sourceSaleId: id, active: true },
+      include: { consolidatedSale: { include: { customer: true } } },
+    });
+    return membership?.consolidatedSale ?? null;
+  }
+
+  async cancelConsolidation(id: string, user?: AuthUser) {
+    return this.prisma.$transaction(async (tx) => {
+      const parent = await tx.sale.findFirstOrThrow({
+        where: { id, isConsolidated: true, consolidationStatus: ConsolidationStatus.ACTIVE },
+        include: { payments: { where: { deletedAt: null } }, creditNotes: { where: { statut: { not: 'CANCELLED' } } }, consolidationSources: { where: { active: true } } },
+      });
+      if (parent.payments.length || parent.creditNotes.length) {
+        throw new BadRequestException('Annulation impossible : le regroupement possède un paiement ou un avoir ultérieur');
+      }
+      const now = new Date();
+      await tx.saleConsolidationSource.updateMany({ where: { consolidatedSaleId: id, active: true }, data: { active: false, cancelledAt: now } });
+      const cancelled = await tx.sale.update({
+        where: { id },
+        data: { status: SaleStatus.CANCELLED, consolidationStatus: ConsolidationStatus.CANCELLED, consolidationCancelledAt: now },
+      });
+      await this.auditLogs.audit({
+        action: 'sale.consolidation.cancelled', entity: 'Sale', entityId: id,
+        userId: user?.id, userName: user?.email,
+        oldValue: { status: ConsolidationStatus.ACTIVE }, newValue: { status: ConsolidationStatus.CANCELLED },
+        metadata: { sourceReferences: parent.consolidationSources.map((source) => source.sourceReference) },
+      }, tx);
+      return cancelled;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
 
   async getNextReference(
     documentType: DocumentType,
@@ -638,6 +834,7 @@ export class SalesService {
       const payableCondition: Prisma.SaleWhereInput = {
         status: { not: SaleStatus.CANCELLED },
         remainingAmount: { gt: 0 },
+        consolidationMemberships: { none: { active: true } },
         OR: [
           { documentType: DocumentType.FACTURE },
           { documentType: DocumentType.BON_LIVRAISON, transformedToId: null },
@@ -699,7 +896,8 @@ export class SalesService {
           customer: true,
           items: true,
           payments: true,
-          _count: { select: { creditNotes: true } },
+          consolidationMemberships: { where: { active: true }, select: { consolidatedSale: { select: { id: true, invoiceNumber: true } } } },
+          _count: { select: { creditNotes: true, consolidationSources: { where: { active: true } } } },
         },
         orderBy,
         skip,
@@ -712,6 +910,8 @@ export class SalesService {
     const enriched = data.map(({ _count, ...sale }) => ({
       ...sale,
       creditNotesCount: _count.creditNotes,
+      sourceDocumentsCount: _count.consolidationSources,
+      activeConsolidation: sale.consolidationMemberships[0]?.consolidatedSale ?? null,
     }));
 
     return {
@@ -735,6 +935,8 @@ export class SalesService {
         customer: true,
         items: { include: { product: true } },
         payments: true,
+        consolidationSources: { orderBy: { displayOrder: 'asc' }, include: { sourceSale: true } },
+        consolidationMemberships: { where: { active: true }, include: { consolidatedSale: true } },
       },
     });
   }

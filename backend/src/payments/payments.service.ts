@@ -108,7 +108,7 @@ export class PaymentsService {
       const payment = await tx.payment.findFirstOrThrow({
         where: { id, deletedAt: null },
         include: {
-          sale: { select: { id: true, total: true, stampDuty: true, invoiceNumber: true } },
+          sale: { select: { id: true, total: true, stampDuty: true, totalRefunded: true, isConsolidated: true, invoiceNumber: true } },
           purchase: { select: { id: true, total: true, stampDuty: true, orderNumber: true } },
         },
       });
@@ -148,8 +148,16 @@ export class PaymentsService {
           where: { saleId: payment.saleId, deletedAt: null },
           _sum: { amount: true },
         });
-        const newPaid = Number(agg._sum.amount ?? 0);
-        const saleTotal = commercialTotalFinal(payment.sale.total, payment.sale.stampDuty);
+        let historicalPaid = new Prisma.Decimal(0);
+        if (payment.sale.isConsolidated) {
+          const sourcePayments = await tx.payment.aggregate({
+            where: { deletedAt: null, sale: { consolidationMemberships: { some: { consolidatedSaleId: payment.saleId!, active: true } } } },
+            _sum: { amount: true },
+          });
+          historicalPaid = new Prisma.Decimal(sourcePayments._sum.amount ?? 0);
+        }
+        const newPaid = historicalPaid.plus(agg._sum.amount ?? 0).toNumber();
+        const saleTotal = commercialTotalFinal(payment.sale.total, payment.sale.stampDuty) - Number(payment.sale.totalRefunded ?? 0);
         await tx.sale.update({
           where: { id: payment.saleId },
           data: {
@@ -228,7 +236,12 @@ export class PaymentsService {
 
       const sale = await tx.sale.findFirstOrThrow({
         where: { id: saleId, deletedAt: null },
+        include: { consolidationMemberships: { where: { active: true }, select: { consolidatedSale: { select: { invoiceNumber: true } } } } },
       });
+
+      if ((sale.consolidationMemberships ?? []).length) {
+        throw new BadRequestException(`Ce document est inclus dans ${sale.consolidationMemberships[0].consolidatedSale.invoiceNumber}. Le paiement doit être enregistré sur le regroupement.`);
+      }
 
       if (
         sale.documentType === DocumentType.DEVIS ||
@@ -253,12 +266,10 @@ export class PaymentsService {
 
       const newPaidAmount = Number(sale.paidAmount) + dto.amount;
       const saleTotalFinal = commercialTotalFinal(sale.total, sale.stampDuty);
-      const newRemainingAmount = Math.max(
-        saleTotalFinal - newPaidAmount,
-        0,
-      );
+      const netAfterCredits = Math.max(saleTotalFinal - Number(sale.totalRefunded ?? 0), 0);
+      const newRemainingAmount = Math.max(netAfterCredits - newPaidAmount, 0);
       const newStatus = this.computePaymentStatus(
-        saleTotalFinal,
+        netAfterCredits,
         newPaidAmount,
       );
 

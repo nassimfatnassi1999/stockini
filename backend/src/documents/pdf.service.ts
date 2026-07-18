@@ -14,6 +14,7 @@ export interface PdfSaleItem {
   discountPercent?: number;
   tvaPercent?: number;
   total: number;
+  sourceReference?: string | null;
 }
 
 export interface PdfSaleData {
@@ -34,6 +35,9 @@ export interface PdfSaleData {
   representant?: string | null;
   supplierReference?: string | null;
   items: PdfSaleItem[];
+  paidAmount?: number;
+  remainingAmount?: number;
+  sourceReferences?: string[];
 }
 
 export interface PdfAvoirItem {
@@ -670,7 +674,7 @@ export class PdfService {
 
         const cells = [
           String(idx + 1),
-          item.name,
+          item.sourceReference ? `${item.name} · ${item.sourceReference}` : item.name,
           String(item.quantity),
           fmt3(item.unitPrice),
           fmt3(netHt),
@@ -709,6 +713,8 @@ export class PdfService {
         summaryRows.push({ label: 'TIMBRE FISCAL', value: `${fmt3(sale.timbreFiscal!)} DT` });
       }
       const totalFinal = sale.total + (sale.timbreFiscal ?? 0);
+      if (sale.paidAmount != null) summaryRows.push({ label: 'DÉJÀ PAYÉ', value: `${fmt3(sale.paidAmount)} DT` });
+      if (sale.remainingAmount != null) summaryRows.push({ label: 'RESTE À PAYER', value: `${fmt3(sale.remainingAmount)} DT`, bold: true });
       summaryRows.push({ label: 'TOTAL À PAYER', value: `${fmt3(totalFinal)} DT`, highlight: true });
 
       const totH = summaryRows.length * 17 + 4;
@@ -721,6 +727,12 @@ export class PdfService {
 
       const afterTotals = drawTotals(doc, y, summaryRows, pageW);
       y = afterTotals + 14;
+
+      if (sale.sourceReferences?.length && y + 22 < contentBottom(doc)) {
+        doc.fontSize(6.5).fillColor(MSP_GRAY).font('Helvetica')
+          .text(`Documents regroupés : ${sale.sourceReferences.join(', ')}`, MARGIN, y, { width: pageW - MARGIN * 2 });
+        y += 18;
+      }
 
       // ── Montant en lettres ─────────────────────────────────────────────────
       if (y + 14 < contentBottom(doc)) {

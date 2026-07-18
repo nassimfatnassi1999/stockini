@@ -39,6 +39,8 @@ export const PERMISSIONS = {
   SALES_PRINT: 'sales.print',
   SALES_CANCEL: 'sales.cancel',
   SALES_VIEW_HISTORY: 'sales.view_history',
+  SALES_CONSOLIDATE: 'sales.consolidate',
+  SALES_CONSOLIDATION_CANCEL: 'sales.consolidation.cancel',
 
   // ── Achats ────────────────────────────────────────────────────────────────────
   PURCHASES_VIEW: 'purchases.view',
@@ -214,6 +216,8 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'sales.print', module: 'sales', action: 'print', label: 'Imprimer', description: 'Imprimer un document de vente' },
   { code: 'sales.cancel', module: 'sales', action: 'cancel', label: 'Annuler', description: 'Annuler une vente' },
   { code: 'sales.view_history', module: 'sales', action: 'view_history', label: 'Voir historique', description: "Voir l'historique des documents d'une vente" },
+  { code: 'sales.consolidate', module: 'sales', action: 'consolidate', label: 'Regrouper', description: 'Regrouper plusieurs bons de livraison ou factures' },
+  { code: 'sales.consolidation.cancel', module: 'sales', action: 'consolidation.cancel', label: 'Annuler regroupement', description: 'Annuler un regroupement sans opération financière ultérieure' },
 
   // ── Achats ────────────────────────────────────────────────────────────────────
   { code: 'purchases.view', module: 'purchases', action: 'view', label: 'Consulter', description: 'Consulter les achats' },

@@ -208,6 +208,14 @@ export const stockiniApi = {
     api
       .post<Sale>(`/sales/${id}/transform`, { targetType })
       .then((r) => r.data),
+  createSalesConsolidation: (data: { sourceIds: string[]; targetType: 'BON_LIVRAISON' | 'FACTURE'; date: string; note?: string }) =>
+    api.post<Sale>('/sales/consolidations', data).then((r) => r.data),
+  salesConsolidation: (id: string) =>
+    api.get<SaleDetail>(`/sales/consolidations/${id}`).then((r) => r.data),
+  saleConsolidation: (id: string) =>
+    api.get<Sale | null>(`/sales/${id}/consolidation`).then((r) => r.data),
+  cancelSalesConsolidation: (id: string) =>
+    api.post<Sale>(`/sales/consolidations/${id}/cancel`).then((r) => r.data),
   purchases: (params?: PurchasesQueryParams) =>
     api
       .get<

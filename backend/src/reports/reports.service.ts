@@ -429,7 +429,22 @@ export class ReportsService {
       type: PaymentType.CUSTOMER_PAYMENT,
       cashImpactDone: true,
       deletedAt: null,
-      ...(hasSaleFilter && { sale: this.saleFilter(query) }),
+      ...(hasSaleFilter && {
+        OR: [
+          { sale: this.saleFilter(query) },
+          { sale: { consolidationMemberships: { some: { active: true, consolidatedSale: { is: this.saleFilter(query) } } } } },
+        ],
+      }),
+    };
+  }
+
+  private consolidatedCreditSaleFilter(query: ReportOverviewQueryDto): Prisma.CreditNoteWhereInput {
+    const saleFilter = this.saleFilter(query);
+    return {
+      OR: [
+        { sale: saleFilter },
+        { sale: { consolidationMemberships: { some: { active: true, consolidatedSale: { is: saleFilter } } } } },
+      ],
     };
   }
 
@@ -471,7 +486,7 @@ export class ReportsService {
         where: {
           dateAvoir: range,
           statut: { not: 'CANCELLED' },
-          sale: this.saleFilter(query),
+          ...this.consolidatedCreditSaleFilter(query),
         },
         select: {
           subtotal: true,
@@ -1109,7 +1124,7 @@ export class ReportsService {
         where: {
           dateAvoir: fullRange,
           statut: { not: 'CANCELLED' },
-          sale: this.saleFilter(query),
+          ...this.consolidatedCreditSaleFilter(query),
         },
         select: {
           dateAvoir: true,
@@ -1325,6 +1340,7 @@ export class ReportsService {
   async topSellingProducts(limit = 10) {
     const grouped = await this.prisma.saleItem.groupBy({
       by: ['productId'],
+      where: { sale: revenueRecognizedSaleWhere() },
       _sum: { quantity: true, total: true },
       orderBy: { _sum: { quantity: 'desc' } },
       take: limit,
@@ -1342,7 +1358,7 @@ export class ReportsService {
 
   salesSummary() {
     return this.prisma.sale.aggregate({
-      where: { status: SaleStatus.COMPLETED },
+      where: revenueRecognizedSaleWhere(),
       _sum: {
         subtotal: true,
         discount: true,

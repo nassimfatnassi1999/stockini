@@ -160,6 +160,11 @@ export interface Sale {
   items?: Array<{ id: Id; quantity: number }>;
   deletedAt?: string | null;
   deletedBy?: string | null;
+  isConsolidated?: boolean;
+  consolidationStatus?: "ACTIVE" | "CANCELLED" | null;
+  consolidationNote?: string | null;
+  sourceDocumentsCount?: number;
+  activeConsolidation?: { id: Id; invoiceNumber: string } | null;
 }
 
 export interface SaleItemDetail {
@@ -176,6 +181,9 @@ export interface SaleItemDetail {
   purchaseCostEstimated?: boolean;
   calculationVersion?: number;
   total: number | string;
+  sourceSaleId?: Id | null;
+  sourceSaleItemId?: Id | null;
+  sourceReference?: string | null;
   product?: {
     id: Id;
     reference: string;
@@ -216,6 +224,18 @@ export interface SaleDetail {
   counterClientTaxId?: string | null;
   counterClientNote?: string | null;
   items: SaleItemDetail[];
+  isConsolidated?: boolean;
+  consolidationStatus?: "ACTIVE" | "CANCELLED" | null;
+  consolidationNote?: string | null;
+  consolidationSources?: Array<{
+    id: Id;
+    sourceSaleId: Id;
+    sourceReference: string;
+    sourceType: SalesDocumentType;
+    sourceTotal: number | string;
+    active: boolean;
+  }>;
+  consolidationMemberships?: Array<{ consolidatedSale: Sale }>;
 }
 
 export type PurchaseDocumentType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR';
@@ -881,6 +901,10 @@ export interface CustomerSaleHistoryItem {
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
+  isConsolidated?: boolean;
+  consolidationStatus?: "ACTIVE" | "CANCELLED" | null;
+  sourceDocumentsCount?: number;
+  activeConsolidation?: { id: Id; invoiceNumber: string } | null;
 }
 
 export interface CustomerSalesHistoryResponse {
