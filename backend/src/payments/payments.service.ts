@@ -16,6 +16,7 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { SettingsService } from '../settings/settings.service';
 import { ClearPaymentHistoryDto, PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
 import { commercialTotalFinal } from '../common/utils/commercial-document';
+import { calculatePaymentAmounts } from '../common/utils/payment-status';
 
 @Injectable()
 export class PaymentsService {
@@ -504,8 +505,6 @@ export class PaymentsService {
     total: number,
     paidAmount: number,
   ): PaymentStatus {
-    if (paidAmount <= 0) return PaymentStatus.UNPAID;
-    if (paidAmount >= total) return PaymentStatus.PAID;
-    return PaymentStatus.PARTIAL;
+    return calculatePaymentAmounts(total, paidAmount).paymentStatus;
   }
 }

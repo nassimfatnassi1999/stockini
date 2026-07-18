@@ -1,9 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { CustomerOrigin, Prisma } from '@prisma/client';
+import { CustomerOrigin, PaymentStatus, PaymentType, Prisma } from '@prisma/client';
+import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
 import { CreateCustomerDto, LockCustomerDto, UpdateCustomerDto, UpdateDebtSettingsDto } from './dto/customer.dto';
+import { CustomerSalesQueryDto } from './dto/customer-sales-query.dto';
 
 @Injectable()
 export class CustomersService {
@@ -153,6 +155,131 @@ export class CustomersService {
     });
     const debt = await this.getClientDebt(id);
     return { ...customer, ...debt };
+  }
+
+  async findSales(clientId: string, query: CustomerSalesQueryDto) {
+    await this.prisma.customer.findFirstOrThrow({
+      where: { id: clientId, deletedAt: null },
+      select: { id: true },
+    });
+
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(50, Math.max(1, query.limit ?? 10));
+    const and: Prisma.SaleWhereInput[] = [];
+
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      and.push({
+        OR: [
+          { invoiceNumber: { contains: search, mode: 'insensitive' } },
+          { items: { some: { designation: { contains: search, mode: 'insensitive' } } } },
+          { items: { some: { product: { name: { contains: search, mode: 'insensitive' } } } } },
+          { items: { some: { product: { reference: { contains: search, mode: 'insensitive' } } } } },
+        ],
+      });
+    }
+
+    if (query.paymentStatus === PaymentStatus.PAID) {
+      and.push({ remainingAmount: { lte: 0.001 } });
+    } else if (query.paymentStatus === PaymentStatus.PARTIAL) {
+      and.push({ paidAmount: { gt: 0 }, remainingAmount: { gt: 0.001 } });
+    } else if (query.paymentStatus === PaymentStatus.UNPAID) {
+      and.push({ paidAmount: { lte: 0 }, remainingAmount: { gt: 0.001 } });
+    }
+
+    const where: Prisma.SaleWhereInput = {
+      customerId: clientId,
+      deletedAt: null,
+      ...(query.documentType && { documentType: query.documentType }),
+      ...(query.documentStatus && { status: query.documentStatus }),
+      ...((query.dateFrom || query.dateTo) && {
+        createdAt: {
+          ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
+          ...(query.dateTo && { lte: new Date(query.dateTo) }),
+        },
+      }),
+      ...(and.length && { AND: and }),
+    };
+
+    const sortOrder = query.sortOrder ?? 'desc';
+    const sortFields: Record<string, Prisma.SaleOrderByWithRelationInput> = {
+      reference: { invoiceNumber: sortOrder },
+      documentType: { documentType: sortOrder },
+      date: { createdAt: sortOrder },
+      totalTtc: { total: sortOrder },
+      paidAmount: { paidAmount: sortOrder },
+      remainingAmount: { remainingAmount: sortOrder },
+      paymentStatus: { paymentStatus: sortOrder },
+      documentStatus: { status: sortOrder },
+    };
+    const orderBy = (query.sortBy && sortFields[query.sortBy]) || { createdAt: sortOrder };
+
+    const [sales, total, totals, validPayments, unpaidCount] = await Promise.all([
+      this.prisma.sale.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          invoiceNumber: true,
+          documentType: true,
+          status: true,
+          createdAt: true,
+          subtotal: true,
+          tax: true,
+          total: true,
+          stampDuty: true,
+          items: { select: { id: true } },
+          payments: {
+            where: { deletedAt: null, type: PaymentType.CUSTOMER_PAYMENT },
+            select: { amount: true },
+          },
+        },
+      }),
+      this.prisma.sale.count({ where }),
+      this.prisma.sale.aggregate({ where, _sum: { total: true, stampDuty: true } }),
+      this.prisma.payment.aggregate({
+        where: {
+          deletedAt: null,
+          type: PaymentType.CUSTOMER_PAYMENT,
+          sale: { is: where },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.sale.count({ where: { AND: [where, { remainingAmount: { gt: 0.001 } }] } }),
+    ]);
+
+    const data = sales.map(({ payments, items, ...sale }) => {
+      const totalPayable = new Prisma.Decimal(sale.total).plus(sale.stampDuty ?? 0);
+      const paid = payments.reduce(
+        (sum, payment) => sum.plus(payment.amount),
+        new Prisma.Decimal(0),
+      );
+      const amounts = calculatePaymentAmounts(totalPayable, paid);
+      return {
+        ...sale,
+        itemCount: items.length,
+        totalTtc: new Prisma.Decimal(sale.total),
+        paidAmount: amounts.paidAmount,
+        remainingAmount: amounts.remainingAmount,
+        paymentStatus: amounts.paymentStatus,
+      };
+    });
+
+    const totalTtc = new Prisma.Decimal(totals._sum.total ?? 0);
+    const totalStampDuty = new Prisma.Decimal(totals._sum.stampDuty ?? 0);
+    const totalPaid = new Prisma.Decimal(validPayments._sum.amount ?? 0);
+    const totalRemaining = Prisma.Decimal.max(
+      totalTtc.plus(totalStampDuty).minus(totalPaid),
+      new Prisma.Decimal(0),
+    );
+
+    return {
+      data,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      summary: { totalTtc, totalPaid, totalRemaining, unpaidCount },
+    };
   }
 
   async update(id: string, dto: UpdateCustomerDto) {

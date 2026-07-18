@@ -16,6 +16,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto, LockCustomerDto, UpdateCustomerDto, UpdateDebtSettingsDto } from './dto/customer.dto';
+import { CustomerSalesQueryDto } from './dto/customer-sales-query.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('customers')
@@ -41,6 +42,12 @@ export class CustomersController {
       type ?? 'INDIVIDUAL',
     );
     return { reference };
+  }
+
+  @RequirePermissions('sales.view')
+  @Get(':id/sales')
+  findSales(@Param('id') id: string, @Query() query: CustomerSalesQueryDto) {
+    return this.customersService.findSales(id, query);
   }
 
   @RequirePermissions('clients.view')

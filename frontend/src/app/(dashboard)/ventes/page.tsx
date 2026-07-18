@@ -710,6 +710,8 @@ export default function VentesPage() {
   const [originalDocumentNumber, setOriginalDocumentNumber] = useState<string | null>(null);
   const [editingPaidAmount, setEditingPaidAmount] = useState(0);
   const creationDraftRef = useRef<VenteDraft | null>(null);
+  const editReturnToRef = useRef<string | null>(null);
+  const urlEditHandledRef = useRef(false);
   const isEditMode = editingSaleId !== null;
 
   useEffect(() => {
@@ -861,12 +863,15 @@ export default function VentesPage() {
 
   const cancelEdit = useCallback(() => {
     const draft = creationDraftRef.current;
+    const returnTo = editReturnToRef.current;
     setEditingSaleId(null);
     setOriginalDocumentNumber(null);
     setEditingPaidAmount(0);
     creationDraftRef.current = null;
+    editReturnToRef.current = null;
     if (draft) restoreDraft(draft);
-  }, [restoreDraft]);
+    if (returnTo) router.push(returnTo);
+  }, [restoreDraft, router]);
 
   const startEditing = useCallback(async (sale: Sale) => {
     try {
@@ -884,7 +889,9 @@ export default function VentesPage() {
           designation: item.designation ?? item.product?.name ?? "",
           quantity: Number(item.quantity),
           puHt: Number(item.unitPrice),
-          purchasePriceHt: Number(item.product?.purchasePrice ?? 0),
+          purchasePriceHt: Number(
+            item.unitPurchaseCostHt ?? item.product?.purchasePrice ?? 0,
+          ),
           defaultMarginPercent: Number(item.marginPercent ?? 40),
           remisePercent: Number(item.discountPercent ?? 0),
           tvaPercent: Number(item.tvaPercent ?? 0),
@@ -906,11 +913,31 @@ export default function VentesPage() {
       setEditingSaleId(detail.id);
       setOriginalDocumentNumber(detail.invoiceNumber);
       window.scrollTo({ top: 0, behavior: "smooth" });
+      return true;
     } catch (error: unknown) {
       const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(message ?? (error instanceof Error ? error.message : "Impossible de charger le document"));
+      return false;
     }
   }, [draftData, editingSaleId]);
+
+  useEffect(() => {
+    if (urlEditHandledRef.current || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') !== 'edit') return;
+    urlEditHandledRef.current = true;
+    const saleId = params.get('saleId');
+    if (!saleId) {
+      toast.error('Identifiant de vente manquant.');
+      window.history.replaceState(null, '', '/ventes');
+      return;
+    }
+    const returnTo = params.get('returnTo');
+    editReturnToRef.current = returnTo?.startsWith('/clients/') ? returnTo : null;
+    void startEditing({ id: saleId } as Sale).then((loaded) => {
+      if (loaded) window.history.replaceState(null, '', '/ventes');
+    });
+  }, [startEditing]);
 
   const salesQueryParams: SalesQueryParams = {
     page: salesPage,
@@ -1527,7 +1554,7 @@ export default function VentesPage() {
             {isEditMode && originalDocumentNumber && (
               <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
                 <span className="inline-flex items-center gap-2 font-medium">
-                  <Pencil size={14} /> Modification de {originalDocumentNumber}
+                  <Pencil size={14} /> Modification de la vente {originalDocumentNumber}
                 </span>
                 <Button type="button" variant="outline" size="sm" onClick={cancelEdit}>
                   Annuler modification

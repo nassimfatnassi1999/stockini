@@ -870,6 +870,37 @@ export interface SalesQueryParams {
   sortOrder?: "asc" | "desc";
 }
 
+export interface CustomerSaleHistoryItem {
+  id: Id;
+  invoiceNumber: string;
+  documentType: SalesDocumentType;
+  status: string;
+  createdAt: string;
+  itemCount: number;
+  totalTtc: number | string;
+  paidAmount: number | string;
+  remainingAmount: number | string;
+  paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
+}
+
+export interface CustomerSalesHistoryResponse {
+  data: CustomerSaleHistoryItem[];
+  pagination: CustomerSalesPagination;
+  summary: {
+    totalTtc: number | string;
+    totalPaid: number | string;
+    totalRemaining: number | string;
+    unpaidCount: number;
+  };
+}
+
+export interface CustomerSalesPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface PurchasesQueryParams {
   page?: number;
   limit?: number;

@@ -164,6 +164,15 @@ export const stockiniApi = {
   customers: () => api.get<Customer[]>("/customers").then((r) => r.data),
   customer: (id: string) =>
     api.get<Customer>(`/customers/${id}`).then((r) => r.data),
+  customerSales: (
+    id: string,
+    params?: import('./types').SalesQueryParams & { documentStatus?: string },
+  ) =>
+    api
+      .get<import('./types').CustomerSalesHistoryResponse>(`/customers/${id}/sales`, {
+        params: cleanPaginationParams(params),
+      })
+      .then((r) => r.data),
   updateCustomer: (id: string, data: Partial<Customer>) =>
     api.patch<Customer>(`/customers/${id}`, data).then((r) => r.data),
   suppliers: () => api.get<Supplier[]>("/suppliers").then((r) => r.data),

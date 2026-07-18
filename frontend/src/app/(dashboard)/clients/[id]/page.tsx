@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClientDetails } from '@/components/stockini/ClientDetails';
+import { CustomerSalesHistory } from '@/components/stockini/sales/CustomerSalesHistory';
 import { Button } from '@/components/ui/button';
 import { useBreadcrumbLabels } from '@/components/shared/breadcrumb-context';
 import { stockiniApi } from '@/lib/stockini/api';
@@ -87,6 +88,7 @@ function ClientDetailsRoute() {
         }}
         saving={updateMutation.isPending}
       />
+      <CustomerSalesHistory customerId={id} />
     </div>
   );
 }

@@ -153,3 +153,57 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
     expect(result.debtAmount).toBe(0);
   });
 });
+
+describe('CustomersService.findSales', () => {
+  it('isole le client, ignore les paiements supprimés et retourne pagination + résumé', async () => {
+    const prisma = {
+      customer: { findFirstOrThrow: jest.fn().mockResolvedValue({ id: 'client-1' }) },
+      sale: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'sale-1', invoiceNumber: 'FAC-001', documentType: 'FACTURE', status: 'COMPLETED',
+          createdAt: new Date('2026-07-18'), subtotal: new Prisma.Decimal(80), tax: new Prisma.Decimal(20),
+          total: new Prisma.Decimal(100), stampDuty: new Prisma.Decimal(1), items: [{ id: 'item-1' }],
+          payments: [{ amount: new Prisma.Decimal(40) }],
+        }]),
+        count: jest.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(1),
+        aggregate: jest.fn().mockResolvedValue({
+          _sum: { total: new Prisma.Decimal(100), stampDuty: new Prisma.Decimal(1) },
+        }),
+      },
+      payment: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal(40) } }),
+      },
+    } as any;
+    const service = new CustomersService(prisma, {} as any, {} as any);
+
+    const result = await service.findSales('client-1', { page: 1, limit: 10 });
+
+    expect(prisma.sale.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ customerId: 'client-1', deletedAt: null }),
+      skip: 0,
+      take: 10,
+    }));
+    expect(prisma.payment.aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ deletedAt: null }),
+    }));
+    expect(result.data[0]).toEqual(expect.objectContaining({
+      id: 'sale-1', itemCount: 1, paymentStatus: 'PARTIAL',
+    }));
+    expect(result.data[0].paidAmount.toNumber()).toBe(40);
+    expect(result.data[0].remainingAmount.toNumber()).toBe(61);
+    expect(result.pagination).toEqual({ page: 1, limit: 10, total: 1, totalPages: 1 });
+    expect(result.summary.totalRemaining.toNumber()).toBe(61);
+  });
+
+  it('refuse implicitement un client absent avant de lire ses ventes', async () => {
+    const missing = new Error('not found');
+    const prisma = {
+      customer: { findFirstOrThrow: jest.fn().mockRejectedValue(missing) },
+      sale: { findMany: jest.fn() },
+    } as any;
+    const service = new CustomersService(prisma, {} as any, {} as any);
+
+    await expect(service.findSales('missing', {})).rejects.toBe(missing);
+    expect(prisma.sale.findMany).not.toHaveBeenCalled();
+  });
+});

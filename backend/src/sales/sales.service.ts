@@ -34,6 +34,7 @@ import {
   commercialTotalFinal,
   DEFAULT_STAMP_DUTY,
 } from '../common/utils/commercial-document';
+import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import {
   CreateSaleDto,
   SalePaginationDto,
@@ -1607,9 +1608,7 @@ export class SalesService {
   }
 
   private paymentStatus(total: number, paidAmount: number) {
-    if (paidAmount <= 0) return PaymentStatus.UNPAID;
-    if (paidAmount < total) return PaymentStatus.PARTIAL;
-    return PaymentStatus.PAID;
+    return calculatePaymentAmounts(total, paidAmount).paymentStatus;
   }
 
   private salePriceHt(product: {
