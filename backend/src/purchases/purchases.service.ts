@@ -24,6 +24,12 @@ import {
 } from '../common/utils/purchase-calculations';
 import { PdfService } from '../documents/pdf.service';
 import {
+  getPurchasePaymentSummary,
+  serializePaymentSummary,
+  VALID_SUPPLIER_PAYMENT_WHERE,
+} from '../common/services/purchase-payment-state';
+import { calculatePaymentAmounts } from '../common/utils/payment-status';
+import {
   CreatePurchaseDto,
   PayablePurchaseQueryDto,
   PurchasePaginationDto,
@@ -162,7 +168,6 @@ export class PurchasesService {
     const where: Prisma.PurchaseWhereInput = {
       deletedAt: null,
       ...(query?.status && { status: query.status }),
-      ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
       ...(query?.supplierId && { supplierId: query.supplierId }),
       ...((query?.dateFrom || query?.dateTo) && {
         createdAt: {
@@ -205,18 +210,56 @@ export class PurchasesService {
     const orderBy: Prisma.PurchaseOrderByWithRelationInput = (query?.sortBy &&
       allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
 
-    const [data, total] = await Promise.all([
-      this.prisma.purchase.findMany({
-        where,
-        include: { supplier: true, items: true, payments: true },
-        orderBy,
-        skip,
-        take: limit,
-      }),
-      this.prisma.purchase.count({ where }),
-    ]);
+    const dynamicFinancialQuery =
+      !!query?.paymentStatus ||
+      ['paidAmount', 'remainingAmount', 'paymentStatus'].includes(
+        query?.sortBy ?? '',
+      );
+    const rows = await this.prisma.purchase.findMany({
+      where,
+      include: {
+        supplier: true,
+        items: true,
+        payments: { where: VALID_SUPPLIER_PAYMENT_WHERE },
+      },
+      orderBy: dynamicFinancialQuery ? { createdAt: 'desc' } : orderBy,
+      ...(dynamicFinancialQuery ? {} : { skip, take: limit }),
+    });
+    let data = rows.map((purchase) => this.withPaymentState(purchase));
+    if (query?.paymentStatus) {
+      data = data.filter(
+        (purchase) => purchase.paymentStatus === query.paymentStatus,
+      );
+    }
+    if (dynamicFinancialQuery && query?.sortBy) {
+      const direction = sortOrder === 'asc' ? 1 : -1;
+      const field = query.sortBy as
+        | 'paidAmount'
+        | 'remainingAmount'
+        | 'paymentStatus';
+      data.sort((left, right) => {
+        if (field === 'paymentStatus') {
+          return (
+            left.paymentStatus.localeCompare(right.paymentStatus) * direction
+          );
+        }
+        return (
+          new Prisma.Decimal(left[field]).comparedTo(right[field]) * direction
+        );
+      });
+    }
+    const total = dynamicFinancialQuery
+      ? data.length
+      : await this.prisma.purchase.count({ where });
+    if (dynamicFinancialQuery) data = data.slice(skip, skip + limit);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   /**
@@ -227,10 +270,8 @@ export class PurchasesService {
     const where: Prisma.PurchaseWhereInput = {
       deletedAt: null,
       status: { not: PurchaseStatus.CANCELLED },
-      remainingAmount: { gt: 0 },
       // Règle métier : un BC ne crée pas de dette — exclure explicitement
       documentType: { not: PurchaseDocumentType.BON_COMMANDE },
-      ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
       ...(query?.supplierId && { supplierId: query.supplierId }),
       ...(query?.search && {
         OR: [
@@ -245,34 +286,42 @@ export class PurchasesService {
       }),
     };
 
-    const [data, aggregate] = await Promise.all([
-      this.prisma.purchase.findMany({
-        where,
-        include: { supplier: true, payments: { where: { deletedAt: null } } },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.purchase.aggregate({
-        where,
-        _sum: { remainingAmount: true },
-      }),
-    ]);
-
-    const totalRemaining = (
-      aggregate._sum.remainingAmount ?? new Prisma.Decimal(0)
-    ).toFixed(3);
+    const purchases = await this.prisma.purchase.findMany({
+      where,
+      include: {
+        supplier: true,
+        payments: { where: VALID_SUPPLIER_PAYMENT_WHERE },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const data = purchases
+      .map((purchase) => this.withPaymentState(purchase))
+      .filter(
+        (purchase) =>
+          new Prisma.Decimal(purchase.remainingAmount).gt(0) &&
+          (!query?.paymentStatus ||
+            purchase.paymentStatus === query.paymentStatus),
+      );
+    const totalRemaining = data
+      .reduce(
+        (sum, purchase) => sum.plus(purchase.remainingAmount),
+        new Prisma.Decimal(0),
+      )
+      .toFixed(3);
 
     return { data, count: data.length, totalRemaining };
   }
 
-  findOne(id: string) {
-    return this.prisma.purchase.findFirstOrThrow({
+  async findOne(id: string) {
+    const purchase = await this.prisma.purchase.findFirstOrThrow({
       where: { id, deletedAt: null },
       include: {
         supplier: true,
         items: { include: { product: true } },
-        payments: true,
+        payments: { where: VALID_SUPPLIER_PAYMENT_WHERE },
       },
     });
+    return this.withPaymentState(purchase);
   }
 
   async generatePdf(id: string): Promise<{ buffer: Buffer; fileName: string }> {
@@ -680,7 +729,11 @@ export class PurchasesService {
         const tax = nextTotals.tax;
         const total = nextTotals.total;
         const totalFinal = nextTotals.totalFinal;
-        const paidAmount = Number(previous.paidAmount);
+        const currentPaymentState = await getPurchasePaymentSummary(
+          tx,
+          previous,
+        );
+        const paidAmount = currentPaymentState.paidAmount.toNumber();
         if (
           dto.paidAmount !== undefined &&
           Math.abs(dto.paidAmount - paidAmount) > 0.001
@@ -740,8 +793,12 @@ export class PurchasesService {
             tax,
             total,
             stampDuty,
-            remainingAmount: Math.max(totalFinal - paidAmount, 0),
-            paymentStatus: this.paymentStatus(totalFinal, paidAmount),
+            ...serializePaymentSummary(
+              calculatePaymentAmounts(
+                totalFinal,
+                currentPaymentState.paidAmount,
+              ),
+            ),
             status: nextStatus,
             isEdited: true,
             editedAt: new Date(),
@@ -1001,6 +1058,28 @@ export class PurchasesService {
     if (paidAmount <= 0) return PaymentStatus.UNPAID;
     if (paidAmount < total) return PaymentStatus.PARTIAL;
     return PaymentStatus.PAID;
+  }
+
+  private withPaymentState<
+    T extends {
+      total: Prisma.Decimal;
+      stampDuty: Prisma.Decimal;
+      payments: Array<{ amount: Prisma.Decimal }>;
+    },
+  >(purchase: T) {
+    const paid = (purchase.payments ?? []).reduce(
+      (sum, payment) => sum.plus(payment.amount),
+      new Prisma.Decimal(0),
+    );
+    return {
+      ...purchase,
+      ...serializePaymentSummary(
+        calculatePaymentAmounts(
+          commercialTotalFinal(purchase.total, purchase.stampDuty),
+          paid,
+        ),
+      ),
+    };
   }
 
   private optionalReference(value: string | null | undefined): string | null {

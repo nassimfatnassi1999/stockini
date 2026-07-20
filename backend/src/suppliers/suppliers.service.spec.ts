@@ -1,37 +1,42 @@
-import { Prisma, PurchaseStatus } from '@prisma/client';
+import { Prisma, PurchaseDocumentType, PurchaseStatus } from '@prisma/client';
 import { SuppliersService } from './suppliers.service';
 
 /**
  * Test de l'enrichissement « Notre dette » par fournisseur :
- * dette = SUM(remainingAmount) des achats non totalement payés, hors annulés.
+ * dette = SUM(total TTC - paiements fournisseurs actifs), hors annulés/BC.
  */
 describe('SuppliersService.findAll debt aggregation', () => {
   function buildService(
     suppliers: Array<{ id: string; name: string }>,
-    grouped: Array<{ supplierId: string; remaining: number }>,
+    purchases: Array<{ supplierId: string; total: number; paid: number[] }>,
   ) {
     const findMany = jest.fn().mockResolvedValue(suppliers);
-    const groupBy = jest.fn().mockResolvedValue(
-      grouped.map((g) => ({
-        supplierId: g.supplierId,
-        _sum: { remainingAmount: new Prisma.Decimal(g.remaining) },
+    const purchaseFindMany = jest.fn().mockResolvedValue(
+      purchases.map((purchase, index) => ({
+        id: `p${index}`,
+        supplierId: purchase.supplierId,
+        total: new Prisma.Decimal(purchase.total),
+        stampDuty: new Prisma.Decimal(0),
+        payments: purchase.paid.map((amount) => ({
+          amount: new Prisma.Decimal(amount),
+        })),
       })),
     );
     const prisma = {
       supplier: { findMany },
-      purchase: { groupBy },
+      purchase: { findMany: purchaseFindMany },
     } as any;
     const service = new SuppliersService(prisma, {} as any);
-    return { service, groupBy };
+    return { service, purchaseFindMany };
   }
 
   it('attache la dette à chaque fournisseur et 0.000 si aucune dette', async () => {
-    const { service, groupBy } = buildService(
+    const { service, purchaseFindMany } = buildService(
       [
         { id: 's1', name: 'Alpha' },
         { id: 's2', name: 'Beta' },
       ],
-      [{ supplierId: 's1', remaining: 80.5 }],
+      [{ supplierId: 's1', total: 100.5, paid: [20] }],
     );
 
     const result = await service.findAll();
@@ -40,9 +45,11 @@ describe('SuppliersService.findAll debt aggregation', () => {
     expect(result[1].totalDebt).toBe('0.000');
 
     // l'agrégation exclut les achats annulés et ne garde que reste à payer > 0
-    const where = groupBy.mock.calls[0][0].where;
+    const where = purchaseFindMany.mock.calls[0][0].where;
     expect(where.status).toEqual({ not: PurchaseStatus.CANCELLED });
-    expect(where.remainingAmount).toEqual({ gt: 0 });
+    expect(where.documentType).toEqual({
+      not: PurchaseDocumentType.BON_COMMANDE,
+    });
     expect(where.deletedAt).toBeNull();
   });
 });

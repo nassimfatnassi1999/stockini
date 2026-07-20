@@ -1029,6 +1029,8 @@ export default function AchatsPage() {
           onClose={() => setPayTarget(null)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['stockini-purchases'] });
+            queryClient.invalidateQueries({ queryKey: ['stockini-payable-purchases'] });
+            queryClient.invalidateQueries({ queryKey: ['stockini-suppliers'] });
             queryClient.invalidateQueries({ queryKey: ['stockini-caisse'] });
             queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
             setPayTarget(null);
@@ -1138,8 +1140,10 @@ function PayPurchaseModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const remaining = Number(purchase.remainingAmount ?? purchase.totalFinal) - Number(purchase.paidAmount ?? 0);
-  const resteAPayer = Math.max(remaining, 0);
+  const resteAPayer = Math.max(
+    Number(purchase.remainingAmount ?? purchase.totalFinal),
+    0,
+  );
 
   const [montant, setMontant] = useState(String(resteAPayer.toFixed(3)));
   const [method, setMethod] = useState('CASH');

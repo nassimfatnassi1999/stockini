@@ -14,9 +14,20 @@ import { CustomersService } from '../customers/customers.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
-import { ClearPaymentHistoryDto, PaymentQueryDto, PayPurchaseDto, PaySaleDto } from './dto/payment.dto';
+import {
+  ClearPaymentHistoryDto,
+  PaymentQueryDto,
+  PayPurchaseDto,
+  PaySaleDto,
+} from './dto/payment.dto';
 import { commercialTotalFinal } from '../common/utils/commercial-document';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
+import {
+  getPurchasePaymentSummary,
+  getSupplierDebtMap,
+  serializePaymentSummary,
+  syncPurchasePaymentState,
+} from '../common/services/purchase-payment-state';
 
 @Injectable()
 export class PaymentsService {
@@ -42,9 +53,17 @@ export class PaymentsService {
       andConditions.push({
         OR: [
           { reference: { contains: query.search, mode: 'insensitive' } },
-          { sale: { invoiceNumber: { contains: query.search, mode: 'insensitive' } } },
-          { customer: { name: { contains: query.search, mode: 'insensitive' } } },
-          { supplier: { name: { contains: query.search, mode: 'insensitive' } } },
+          {
+            sale: {
+              invoiceNumber: { contains: query.search, mode: 'insensitive' },
+            },
+          },
+          {
+            customer: { name: { contains: query.search, mode: 'insensitive' } },
+          },
+          {
+            supplier: { name: { contains: query.search, mode: 'insensitive' } },
+          },
         ],
       });
     }
@@ -66,7 +85,10 @@ export class PaymentsService {
     };
 
     const sortOrder = query?.sortOrder ?? 'desc';
-    const allowedSortFields: Record<string, Prisma.PaymentOrderByWithRelationInput> = {
+    const allowedSortFields: Record<
+      string,
+      Prisma.PaymentOrderByWithRelationInput
+    > = {
       createdAt: { createdAt: sortOrder },
       date: { createdAt: sortOrder },
       totalTtc: { sale: { total: sortOrder } },
@@ -78,8 +100,8 @@ export class PaymentsService {
       reference: { reference: sortOrder },
       status: { sale: { paymentStatus: sortOrder } },
     };
-    const orderBy: Prisma.PaymentOrderByWithRelationInput =
-      (query?.sortBy && allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
+    const orderBy: Prisma.PaymentOrderByWithRelationInput = (query?.sortBy &&
+      allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
 
     const [data, total] = await Promise.all([
       this.prisma.payment.findMany({
@@ -108,8 +130,24 @@ export class PaymentsService {
       const payment = await tx.payment.findFirstOrThrow({
         where: { id, deletedAt: null },
         include: {
-          sale: { select: { id: true, total: true, stampDuty: true, totalRefunded: true, isConsolidated: true, invoiceNumber: true } },
-          purchase: { select: { id: true, total: true, stampDuty: true, orderNumber: true } },
+          sale: {
+            select: {
+              id: true,
+              total: true,
+              stampDuty: true,
+              totalRefunded: true,
+              isConsolidated: true,
+              invoiceNumber: true,
+            },
+          },
+          purchase: {
+            select: {
+              id: true,
+              total: true,
+              stampDuty: true,
+              orderNumber: true,
+            },
+          },
         },
       });
 
@@ -151,13 +189,22 @@ export class PaymentsService {
         let historicalPaid = new Prisma.Decimal(0);
         if (payment.sale.isConsolidated) {
           const sourcePayments = await tx.payment.aggregate({
-            where: { deletedAt: null, sale: { consolidationMemberships: { some: { consolidatedSaleId: payment.saleId!, active: true } } } },
+            where: {
+              deletedAt: null,
+              sale: {
+                consolidationMemberships: {
+                  some: { consolidatedSaleId: payment.saleId!, active: true },
+                },
+              },
+            },
             _sum: { amount: true },
           });
           historicalPaid = new Prisma.Decimal(sourcePayments._sum.amount ?? 0);
         }
         const newPaid = historicalPaid.plus(agg._sum.amount ?? 0).toNumber();
-        const saleTotal = commercialTotalFinal(payment.sale.total, payment.sale.stampDuty) - Number(payment.sale.totalRefunded ?? 0);
+        const saleTotal =
+          commercialTotalFinal(payment.sale.total, payment.sale.stampDuty) -
+          Number(payment.sale.totalRefunded ?? 0);
         await tx.sale.update({
           where: { id: payment.saleId },
           data: {
@@ -170,48 +217,44 @@ export class PaymentsService {
 
       // Recalculate purchase totals
       if (payment.purchaseId && payment.purchase) {
-        const agg = await tx.payment.aggregate({
-          where: { purchaseId: payment.purchaseId, deletedAt: null },
-          _sum: { amount: true },
-        });
-        const newPaid = Number(agg._sum.amount ?? 0);
-        const purchaseTotal = commercialTotalFinal(payment.purchase.total, payment.purchase.stampDuty);
-        await tx.purchase.update({
-          where: { id: payment.purchaseId },
-          data: {
-            paidAmount: newPaid,
-            remainingAmount: Math.max(purchaseTotal - newPaid, 0),
-            paymentStatus: this.computePaymentStatus(purchaseTotal, newPaid),
-          },
+        await syncPurchasePaymentState(tx, {
+          ...payment.purchase,
+          supplierId: payment.supplierId!,
         });
       }
 
-      await this.auditLogs.audit({
-        action: 'payment.deleted',
-        entity: 'Payment',
-        entityId: payment.id,
-        userId,
-        oldValue: {
-          id: payment.id,
-          reference: payment.reference,
-          amount: Number(payment.amount),
-          method: payment.method,
-          type: payment.type,
-          deletedAt: null,
+      await this.auditLogs.audit(
+        {
+          action: 'payment.deleted',
+          entity: 'Payment',
+          entityId: payment.id,
+          userId,
+          oldValue: {
+            id: payment.id,
+            reference: payment.reference,
+            amount: Number(payment.amount),
+            method: payment.method,
+            type: payment.type,
+            deletedAt: null,
+          },
+          newValue: {
+            deletedAt: new Date().toISOString(),
+            deletedBy: userId ?? null,
+          },
+          metadata: {
+            paymentId: payment.id,
+            reference: payment.reference,
+            amount: Number(payment.amount),
+            method: payment.method,
+            type: payment.type,
+            saleId: payment.saleId ?? null,
+            invoiceNumber: payment.sale?.invoiceNumber ?? null,
+            purchaseId: payment.purchaseId ?? null,
+            orderNumber: payment.purchase?.orderNumber ?? null,
+          },
         },
-        newValue: { deletedAt: new Date().toISOString(), deletedBy: userId ?? null },
-        metadata: {
-          paymentId: payment.id,
-          reference: payment.reference,
-          amount: Number(payment.amount),
-          method: payment.method,
-          type: payment.type,
-          saleId: payment.saleId ?? null,
-          invoiceNumber: payment.sale?.invoiceNumber ?? null,
-          purchaseId: payment.purchaseId ?? null,
-          orderNumber: payment.purchase?.orderNumber ?? null,
-        },
-      }, tx);
+        tx,
+      );
 
       this.logger.log(`Payment ${id} soft-deleted by ${userId ?? 'unknown'}`);
       return { id, customerId: payment.customerId };
@@ -219,7 +262,9 @@ export class PaymentsService {
 
     // Recalcule verrouillage après suppression paiement (la dette peut réapparaître)
     if (result.customerId) {
-      await this.customersService.recalculateClientLockStatus(result.customerId);
+      await this.customersService.recalculateClientLockStatus(
+        result.customerId,
+      );
     }
 
     return { id: result.id };
@@ -236,11 +281,18 @@ export class PaymentsService {
 
       const sale = await tx.sale.findFirstOrThrow({
         where: { id: saleId, deletedAt: null },
-        include: { consolidationMemberships: { where: { active: true }, select: { consolidatedSale: { select: { invoiceNumber: true } } } } },
+        include: {
+          consolidationMemberships: {
+            where: { active: true },
+            select: { consolidatedSale: { select: { invoiceNumber: true } } },
+          },
+        },
       });
 
       if ((sale.consolidationMemberships ?? []).length) {
-        throw new BadRequestException(`Ce document est inclus dans ${sale.consolidationMemberships[0].consolidatedSale.invoiceNumber}. Le paiement doit être enregistré sur le regroupement.`);
+        throw new BadRequestException(
+          `Ce document est inclus dans ${sale.consolidationMemberships[0].consolidatedSale.invoiceNumber}. Le paiement doit être enregistré sur le regroupement.`,
+        );
       }
 
       if (
@@ -266,7 +318,10 @@ export class PaymentsService {
 
       const newPaidAmount = Number(sale.paidAmount) + dto.amount;
       const saleTotalFinal = commercialTotalFinal(sale.total, sale.stampDuty);
-      const netAfterCredits = Math.max(saleTotalFinal - Number(sale.totalRefunded ?? 0), 0);
+      const netAfterCredits = Math.max(
+        saleTotalFinal - Number(sale.totalRefunded ?? 0),
+        0,
+      );
       const newRemainingAmount = Math.max(netAfterCredits - newPaidAmount, 0);
       const newStatus = this.computePaymentStatus(
         netAfterCredits,
@@ -306,35 +361,40 @@ export class PaymentsService {
         paymentMethod: dto.method as string,
       });
 
-      await this.auditLogs.audit({
-        action: 'payment.sale_payment',
-        entity: 'Payment',
-        entityId: payment.id,
-        userId,
-        newValue: {
-          id: payment.id,
-          reference: payRef,
-          amount: dto.amount,
-          method: dto.method,
-          type: PaymentType.CUSTOMER_PAYMENT,
+      await this.auditLogs.audit(
+        {
+          action: 'payment.sale_payment',
+          entity: 'Payment',
+          entityId: payment.id,
+          userId,
+          newValue: {
+            id: payment.id,
+            reference: payRef,
+            amount: dto.amount,
+            method: dto.method,
+            type: PaymentType.CUSTOMER_PAYMENT,
+          },
+          metadata: {
+            paymentId: payment.id,
+            reference: payRef,
+            amount: dto.amount,
+            method: dto.method,
+            saleId,
+            invoiceNumber: payment.sale?.invoiceNumber ?? null,
+            customerId: payment.customerId ?? null,
+          },
         },
-        metadata: {
-          paymentId: payment.id,
-          reference: payRef,
-          amount: dto.amount,
-          method: dto.method,
-          saleId,
-          invoiceNumber: payment.sale?.invoiceNumber ?? null,
-          customerId: payment.customerId ?? null,
-        },
-      }, tx);
+        tx,
+      );
 
       return payment;
     });
 
     // Recalcule verrouillage après paiement (la dette peut être soldée)
     if (result.customerId) {
-      await this.customersService.recalculateClientLockStatus(result.customerId);
+      await this.customersService.recalculateClientLockStatus(
+        result.customerId,
+      );
     }
 
     return result;
@@ -359,24 +419,25 @@ export class PaymentsService {
         );
       }
 
-      const remaining = Number(purchase.remainingAmount);
+      // Ne jamais faire confiance au cache paidAmount/remainingAmount : il peut
+      // être ancien. Les paiements actifs liés sont recalculés sous transaction.
+      const beforePayment = await getPurchasePaymentSummary(tx, purchase);
+      const remaining = beforePayment.remainingAmount;
+      const requestedAmount = new Prisma.Decimal(dto.amount).toDecimalPlaces(
+        3,
+        Prisma.Decimal.ROUND_HALF_UP,
+      );
+      if (requestedAmount.lte(0)) {
+        throw new BadRequestException(
+          'Le montant doit être au minimum de 0,001 DT',
+        );
+      }
 
-      if (dto.amount > remaining + 0.001) {
+      if (requestedAmount.gt(remaining)) {
         throw new BadRequestException(
           `Le montant ne peut pas dépasser le reste à payer (${remaining.toFixed(3)} DT)`,
         );
       }
-
-      const newPaidAmount = Number(purchase.paidAmount) + dto.amount;
-      const purchaseTotalFinal = commercialTotalFinal(purchase.total, purchase.stampDuty);
-      const newRemainingAmount = Math.max(
-        purchaseTotalFinal - newPaidAmount,
-        0,
-      );
-      const newStatus = this.computePaymentStatus(
-        purchaseTotalFinal,
-        newPaidAmount,
-      );
 
       const payRef = await this.references.generate('EXP', 'payment', tx);
       const payment = await tx.payment.create({
@@ -384,7 +445,7 @@ export class PaymentsService {
           reference: payRef,
           type: PaymentType.SUPPLIER_PAYMENT,
           method: dto.method,
-          amount: dto.amount,
+          amount: requestedAmount,
           cashImpactDone: true,
           purchaseId,
           supplierId: purchase.supplierId,
@@ -393,56 +454,60 @@ export class PaymentsService {
         include: { purchase: { include: { supplier: true } }, supplier: true },
       });
 
-      await tx.purchase.update({
-        where: { id: purchaseId },
-        data: {
-          paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount,
-          paymentStatus: newStatus,
-        },
-      });
+      const summary = await syncPurchasePaymentState(tx, purchase);
 
       await this.caisseService.recordMovement(tx, {
         type: CaisseMovementType.DECAISSEMENT_ACHAT,
-        montant: -dto.amount,
+        montant: -requestedAmount.toNumber(),
         motif: `Paiement fournisseur ${payment.purchase?.supplier?.name ?? purchaseId}`,
         referenceDoc: payRef,
         userId,
         paymentMethod: dto.method as string,
       });
 
-      await this.auditLogs.audit({
-        action: 'payment.purchase_payment',
-        entity: 'Payment',
-        entityId: payment.id,
-        userId,
-        newValue: {
-          id: payment.id,
-          reference: payRef,
-          amount: dto.amount,
-          method: dto.method,
-          type: PaymentType.SUPPLIER_PAYMENT,
+      await this.auditLogs.audit(
+        {
+          action: 'payment.purchase_payment',
+          entity: 'Payment',
+          entityId: payment.id,
+          userId,
+          newValue: {
+            id: payment.id,
+            reference: payRef,
+            amount: requestedAmount.toNumber(),
+            method: dto.method,
+            type: PaymentType.SUPPLIER_PAYMENT,
+          },
+          metadata: {
+            paymentId: payment.id,
+            reference: payRef,
+            amount: requestedAmount.toNumber(),
+            method: dto.method,
+            purchaseId,
+            orderNumber: payment.purchase?.orderNumber ?? null,
+            supplierId: purchase.supplierId,
+            supplierName: payment.purchase?.supplier?.name ?? null,
+            ...serializePaymentSummary(summary),
+          },
         },
-        metadata: {
-          paymentId: payment.id,
-          reference: payRef,
-          amount: dto.amount,
-          method: dto.method,
-          purchaseId,
-          orderNumber: payment.purchase?.orderNumber ?? null,
-          supplierId: purchase.supplierId,
-          supplierName: payment.purchase?.supplier?.name ?? null,
-          paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount,
-          paymentStatus: newStatus,
-        },
-      }, tx);
+        tx,
+      );
 
-      return payment;
+      const supplierDebts = await getSupplierDebtMap(tx, [purchase.supplierId]);
+      return {
+        ...payment,
+        ...serializePaymentSummary(summary),
+        supplierDebt: (
+          supplierDebts.get(purchase.supplierId) ?? new Prisma.Decimal(0)
+        ).toFixed(3),
+      };
     });
   }
 
-  async clearCustomerPaymentsHistory(dto: ClearPaymentHistoryDto, userId: string) {
+  async clearCustomerPaymentsHistory(
+    dto: ClearPaymentHistoryDto,
+    userId: string,
+  ) {
     const where: Prisma.PaymentWhereInput = {
       deletedAt: null,
       clearedAt: null,
@@ -469,15 +534,24 @@ export class PaymentsService {
         module: 'customer_payments',
         userId,
         count,
-        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, customerId: dto.customerId } as Prisma.InputJsonValue,
+        filtersJson: {
+          dateFrom: dto.dateFrom,
+          dateTo: dto.dateTo,
+          customerId: dto.customerId,
+        } as Prisma.InputJsonValue,
       },
     });
 
-    this.logger.log(`Customer payment history cleared by ${userId}: ${count} records`);
+    this.logger.log(
+      `Customer payment history cleared by ${userId}: ${count} records`,
+    );
     return { count };
   }
 
-  async clearSupplierPaymentsHistory(dto: ClearPaymentHistoryDto, userId: string) {
+  async clearSupplierPaymentsHistory(
+    dto: ClearPaymentHistoryDto,
+    userId: string,
+  ) {
     const where: Prisma.PaymentWhereInput = {
       deletedAt: null,
       clearedAt: null,
@@ -504,11 +578,17 @@ export class PaymentsService {
         module: 'supplier_payments',
         userId,
         count,
-        filtersJson: { dateFrom: dto.dateFrom, dateTo: dto.dateTo, supplierId: dto.supplierId } as Prisma.InputJsonValue,
+        filtersJson: {
+          dateFrom: dto.dateFrom,
+          dateTo: dto.dateTo,
+          supplierId: dto.supplierId,
+        } as Prisma.InputJsonValue,
       },
     });
 
-    this.logger.log(`Supplier payment history cleared by ${userId}: ${count} records`);
+    this.logger.log(
+      `Supplier payment history cleared by ${userId}: ${count} records`,
+    );
     return { count };
   }
 

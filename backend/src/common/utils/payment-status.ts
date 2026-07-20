@@ -16,12 +16,21 @@ export function calculatePaymentAmounts(
   totalPayable: Prisma.Decimal.Value,
   validPaidAmount: Prisma.Decimal.Value,
 ): PaymentAmounts {
-  const total = new Prisma.Decimal(totalPayable ?? 0);
-  const paid = Prisma.Decimal.max(
-    new Prisma.Decimal(validPaidAmount ?? 0),
-    new Prisma.Decimal(0),
+  const roundTnd = (value: Prisma.Decimal) =>
+    value.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+  const total = roundTnd(new Prisma.Decimal(totalPayable ?? 0));
+  const paid = roundTnd(
+    Prisma.Decimal.max(
+      new Prisma.Decimal(validPaidAmount ?? 0),
+      new Prisma.Decimal(0),
+    ),
   );
-  const remaining = Prisma.Decimal.max(total.minus(paid), new Prisma.Decimal(0));
+  const calculatedRemaining = roundTnd(
+    Prisma.Decimal.max(total.minus(paid), new Prisma.Decimal(0)),
+  );
+  const remaining = calculatedRemaining.lte(PAYMENT_ROUNDING_TOLERANCE)
+    ? new Prisma.Decimal(0)
+    : calculatedRemaining;
 
   let paymentStatus: PaymentStatus;
   if (remaining.lte(PAYMENT_ROUNDING_TOLERANCE)) {

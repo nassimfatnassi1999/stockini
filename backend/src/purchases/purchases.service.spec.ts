@@ -1,5 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
-import { CaisseMovementType, PaymentStatus, Prisma, PurchaseDocumentType, PurchaseStatus } from '@prisma/client';
+import {
+  CaisseMovementType,
+  PaymentStatus,
+  Prisma,
+  PurchaseDocumentType,
+  PurchaseStatus,
+} from '@prisma/client';
 import { PurchasesService } from './purchases.service';
 
 /**
@@ -10,13 +16,22 @@ import { PurchasesService } from './purchases.service';
  */
 describe('PurchasesService.findPayable', () => {
   function buildService(
-    rows: Array<{ id: string; remainingAmount: number; paymentStatus: PurchaseStatus | string }>,
-    sumRemaining: number,
+    rows: Array<{
+      id: string;
+      remainingAmount: number;
+      paymentStatus: PurchaseStatus | string;
+    }>,
+    _sumRemaining: number,
   ) {
-    const findMany = jest.fn().mockResolvedValue(rows);
-    const aggregate = jest.fn().mockResolvedValue({
-      _sum: { remainingAmount: new Prisma.Decimal(sumRemaining) },
-    });
+    const findMany = jest.fn().mockResolvedValue(
+      rows.map((row) => ({
+        ...row,
+        total: new Prisma.Decimal(row.remainingAmount),
+        stampDuty: new Prisma.Decimal(0),
+        payments: [],
+      })),
+    );
+    const aggregate = jest.fn();
     const prisma = { purchase: { findMany, aggregate } } as any;
 
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
@@ -43,17 +58,19 @@ describe('PurchasesService.findPayable', () => {
     const result = await service.findPayable();
 
     const where = findMany.mock.calls[0][0].where;
-    expect(where.remainingAmount).toEqual({ gt: 0 });
+    expect(where.remainingAmount).toBeUndefined();
     expect(where.status).toEqual({ not: PurchaseStatus.CANCELLED });
     expect(where.deletedAt).toBeNull();
     // Règle métier: les BON_COMMANDE doivent être exclus des factures à payer
-    expect(where.documentType).toEqual({ not: PurchaseDocumentType.BON_COMMANDE });
+    expect(where.documentType).toEqual({
+      not: PurchaseDocumentType.BON_COMMANDE,
+    });
 
     expect(result.count).toBe(2);
     expect(result.totalRemaining).toBe('140.000');
   });
 
-  it('renvoie 0.000 quand il n\'y a aucune facture à payer', async () => {
+  it("renvoie 0.000 quand il n'y a aucune facture à payer", async () => {
     const { service } = buildService([], 0);
     const result = await service.findPayable();
     expect(result.count).toBe(0);
@@ -71,7 +88,7 @@ describe('PurchasesService.findPayable', () => {
 
     const where = findMany.mock.calls[0][0].where;
     expect(where.supplierId).toBe('supplier-1');
-    expect(where.paymentStatus).toBe('PARTIAL');
+    expect(where.paymentStatus).toBeUndefined();
     expect(where.OR).toBeDefined();
   });
 });
@@ -79,7 +96,14 @@ describe('PurchasesService.findPayable', () => {
 // ─── PurchasesService.cancel() ────────────────────────────────────────────────
 
 describe('PurchasesService.cancel', () => {
-  function buildCancelService(payments: Array<{ id: string; method: string; amount: number; cashImpactDone: boolean }>) {
+  function buildCancelService(
+    payments: Array<{
+      id: string;
+      method: string;
+      amount: number;
+      cashImpactDone: boolean;
+    }>,
+  ) {
     const purchase = {
       id: 'purchase-1',
       orderNumber: 'ACH-001',
@@ -93,7 +117,9 @@ describe('PurchasesService.cancel', () => {
     const tx: any = {
       purchase: {
         findUniqueOrThrow: jest.fn().mockResolvedValue(purchase),
-        update: jest.fn().mockResolvedValue({ ...purchase, status: PurchaseStatus.CANCELLED }),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...purchase, status: PurchaseStatus.CANCELLED }),
       },
       payment: {
         update: jest.fn().mockResolvedValue({}),
@@ -109,7 +135,14 @@ describe('PurchasesService.cancel', () => {
     } as any;
 
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new PurchasesService(prisma, {} as any, {} as any, {} as any, caisseService, auditLogs);
+    const service = new PurchasesService(
+      prisma,
+      {} as any,
+      {} as any,
+      {} as any,
+      caisseService,
+      auditLogs,
+    );
     return { service, tx, caisseService };
   }
 
@@ -132,7 +165,12 @@ describe('PurchasesService.cancel', () => {
 
   it('annulation BANK_TRANSFER → paymentMethod BANK_TRANSFER transmis (BANK_TREASURY)', async () => {
     const { service, caisseService } = buildCancelService([
-      { id: 'pay-1', method: 'BANK_TRANSFER', amount: 80, cashImpactDone: true },
+      {
+        id: 'pay-1',
+        method: 'BANK_TRANSFER',
+        amount: 80,
+        cashImpactDone: true,
+      },
     ]);
 
     await service.cancel('purchase-1');
@@ -173,7 +211,12 @@ describe('PurchasesService.cancel', () => {
   it('paiements multiples → un mouvement par paiement avec sa propre méthode', async () => {
     const { service, caisseService } = buildCancelService([
       { id: 'pay-1', method: 'CASH', amount: 40, cashImpactDone: true },
-      { id: 'pay-2', method: 'BANK_TRANSFER', amount: 60, cashImpactDone: true },
+      {
+        id: 'pay-2',
+        method: 'BANK_TRANSFER',
+        amount: 60,
+        cashImpactDone: true,
+      },
     ]);
 
     await service.cancel('purchase-1');
@@ -201,14 +244,25 @@ describe('PurchasesService.cancel', () => {
     const prisma = {
       $transaction: jest.fn((cb: (tx: any) => any) =>
         cb({
-          purchase: { findUniqueOrThrow: jest.fn().mockResolvedValue(purchase) },
+          purchase: {
+            findUniqueOrThrow: jest.fn().mockResolvedValue(purchase),
+          },
         } as any),
       ),
     } as any;
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new PurchasesService(prisma, {} as any, {} as any, {} as any, {} as any, auditLogs);
+    const service = new PurchasesService(
+      prisma,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      auditLogs,
+    );
 
-    await expect(service.cancel('purchase-1')).rejects.toThrow(BadRequestException);
+    await expect(service.cancel('purchase-1')).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });
 
@@ -224,7 +278,13 @@ describe('PurchasesService.transform', () => {
     status: PurchaseStatus;
     documentType: PurchaseDocumentType;
     total: number;
-    items?: Array<{ id: string; quantity: number; receivedQuantity: number; productId: string; unitCost: Prisma.Decimal }>;
+    items?: Array<{
+      id: string;
+      quantity: number;
+      receivedQuantity: number;
+      productId: string;
+      unitCost: Prisma.Decimal;
+    }>;
   }) {
     const purchaseRow = {
       id: 'purchase-1',
@@ -254,9 +314,18 @@ describe('PurchasesService.transform', () => {
       $transaction: jest.fn((cb: (tx: any) => any) => cb(tx)),
     } as any;
 
-    const stockService = { applyMovement: jest.fn().mockResolvedValue({}) } as any;
+    const stockService = {
+      applyMovement: jest.fn().mockResolvedValue({}),
+    } as any;
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new PurchasesService(prisma, stockService, {} as any, {} as any, {} as any, auditLogs);
+    const service = new PurchasesService(
+      prisma,
+      stockService,
+      {} as any,
+      {} as any,
+      {} as any,
+      auditLogs,
+    );
     return { service, tx, stockService };
   }
 
@@ -271,7 +340,9 @@ describe('PurchasesService.transform', () => {
     await service.transform('purchase-1', { targetType: 'BON_RECEPTION' });
 
     const updateCall = tx.purchase.update.mock.calls[0][0];
-    expect(updateCall.data.documentType).toBe(PurchaseDocumentType.BON_RECEPTION);
+    expect(updateCall.data.documentType).toBe(
+      PurchaseDocumentType.BON_RECEPTION,
+    );
     expect(updateCall.data.status).toBe(PurchaseStatus.RECEIVED);
     expect(updateCall.data.paymentStatus).toBe(PaymentStatus.UNPAID);
     expect(updateCall.data.paidAmount).toBe(0);
@@ -286,10 +357,14 @@ describe('PurchasesService.transform', () => {
       items: [],
     });
 
-    await service.transform('purchase-1', { targetType: 'FACTURE_FOURNISSEUR' });
+    await service.transform('purchase-1', {
+      targetType: 'FACTURE_FOURNISSEUR',
+    });
 
     const updateCall = tx.purchase.update.mock.calls[0][0];
-    expect(updateCall.data.documentType).toBe(PurchaseDocumentType.FACTURE_FOURNISSEUR);
+    expect(updateCall.data.documentType).toBe(
+      PurchaseDocumentType.FACTURE_FOURNISSEUR,
+    );
     expect(updateCall.data.status).toBe(PurchaseStatus.ORDERED);
     expect(updateCall.data.paymentStatus).toBe(PaymentStatus.UNPAID);
     expect(updateCall.data.paidAmount).toBe(0);
@@ -335,7 +410,13 @@ describe('PurchasesService.receive — activation documentType', () => {
     status: PurchaseStatus;
     documentType: PurchaseDocumentType;
     total: number;
-    items: Array<{ id: string; quantity: number; receivedQuantity: number; productId: string; unitCost: Prisma.Decimal }>;
+    items: Array<{
+      id: string;
+      quantity: number;
+      receivedQuantity: number;
+      productId: string;
+      unitCost: Prisma.Decimal;
+    }>;
   }) {
     const purchaseRow = {
       id: 'purchase-1',
@@ -372,14 +453,29 @@ describe('PurchasesService.receive — activation documentType', () => {
       $transaction: jest.fn((cb: (tx: any) => any) => cb(tx)),
     } as any;
 
-    const stockService = { applyMovement: jest.fn().mockResolvedValue({}) } as any;
+    const stockService = {
+      applyMovement: jest.fn().mockResolvedValue({}),
+    } as any;
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new PurchasesService(prisma, stockService, {} as any, {} as any, {} as any, auditLogs);
+    const service = new PurchasesService(
+      prisma,
+      stockService,
+      {} as any,
+      {} as any,
+      {} as any,
+      auditLogs,
+    );
     return { service, tx };
   }
 
   it('BC + réception complète → documentType=BON_RECEPTION, paymentStatus=UNPAID, remainingAmount=total', async () => {
-    const item = { id: 'item-1', quantity: 5, receivedQuantity: 0, productId: 'prod-1', unitCost: new Prisma.Decimal(100) };
+    const item = {
+      id: 'item-1',
+      quantity: 5,
+      receivedQuantity: 0,
+      productId: 'prod-1',
+      unitCost: new Prisma.Decimal(100),
+    };
     const { service, tx } = buildReceiveService({
       status: PurchaseStatus.ORDERED,
       documentType: PurchaseDocumentType.BON_COMMANDE,
@@ -388,20 +484,32 @@ describe('PurchasesService.receive — activation documentType', () => {
     });
 
     // findMany retourne l'item comme entièrement reçu
-    tx.purchaseItem.findMany.mockResolvedValue([{ ...item, receivedQuantity: 5 }]);
+    tx.purchaseItem.findMany.mockResolvedValue([
+      { ...item, receivedQuantity: 5 },
+    ]);
 
-    await service.receive('purchase-1', { items: [{ purchaseItemId: 'item-1', quantity: 5 }] });
+    await service.receive('purchase-1', {
+      items: [{ purchaseItemId: 'item-1', quantity: 5 }],
+    });
 
     const updateCall = tx.purchase.update.mock.calls[0][0];
-    expect(updateCall.data.documentType).toBe(PurchaseDocumentType.BON_RECEPTION);
+    expect(updateCall.data.documentType).toBe(
+      PurchaseDocumentType.BON_RECEPTION,
+    );
     expect(updateCall.data.paymentStatus).toBe(PaymentStatus.UNPAID);
     expect(updateCall.data.paidAmount).toBe(0);
     expect(Number(updateCall.data.remainingAmount)).toBe(500);
     expect(updateCall.data.status).toBe(PurchaseStatus.RECEIVED);
   });
 
-  it('BC déjà BON_RECEPTION → documentType non modifié lors d\'une réception supplémentaire', async () => {
-    const item = { id: 'item-1', quantity: 5, receivedQuantity: 3, productId: 'prod-1', unitCost: new Prisma.Decimal(100) };
+  it("BC déjà BON_RECEPTION → documentType non modifié lors d'une réception supplémentaire", async () => {
+    const item = {
+      id: 'item-1',
+      quantity: 5,
+      receivedQuantity: 3,
+      productId: 'prod-1',
+      unitCost: new Prisma.Decimal(100),
+    };
     const { service, tx } = buildReceiveService({
       status: PurchaseStatus.PARTIALLY_RECEIVED,
       documentType: PurchaseDocumentType.BON_RECEPTION,
@@ -409,9 +517,13 @@ describe('PurchasesService.receive — activation documentType', () => {
       items: [item],
     });
 
-    tx.purchaseItem.findMany.mockResolvedValue([{ ...item, receivedQuantity: 5 }]);
+    tx.purchaseItem.findMany.mockResolvedValue([
+      { ...item, receivedQuantity: 5 },
+    ]);
 
-    await service.receive('purchase-1', { items: [{ purchaseItemId: 'item-1', quantity: 2 }] });
+    await service.receive('purchase-1', {
+      items: [{ purchaseItemId: 'item-1', quantity: 2 }],
+    });
 
     const updateCall = tx.purchase.update.mock.calls[0][0];
     // Pas de modification du documentType si c'est déjà un BR
@@ -428,7 +540,9 @@ describe('PurchasesService.receive — activation documentType', () => {
     });
 
     await expect(
-      service.receive('purchase-1', { items: [{ purchaseItemId: 'item-1', quantity: 1 }] }),
+      service.receive('purchase-1', {
+        items: [{ purchaseItemId: 'item-1', quantity: 1 }],
+      }),
     ).rejects.toThrow(BadRequestException);
   });
 });

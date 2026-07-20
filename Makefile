@@ -320,16 +320,22 @@ clean-all: env-check ## Nettoyer node_modules, builds et volumes Docker
 
 prod: prod-deploy ## Alias de prod-deploy
 
+# Les images sont toujours reconstruites depuis zéro : aucune couche en cache
+# n'est réutilisée pendant le build de production. Après un déploiement réussi,
+# le cache BuildKit est nettoyé pour empêcher l'utilisation disque d'augmenter
+# continuellement.
 prod-deploy: prod-env-check ## Builder et déployer Stockini, migrer puis préparer MinIO
 	@set -e; \
 	echo -e "$(BLUE)Build et démarrage des seuls services Stockini...$(NC)"; \
-	$(COMPOSE_PROD) up -d --build; \
+	$(COMPOSE_PROD) build --no-cache; \
+	$(COMPOSE_PROD) up -d; \
 	$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=0; \
 	$(MAKE) --no-print-directory prod-migrate; \
 	$(MAKE) --no-print-directory prod-buckets; \
 	$(MAKE) --no-print-directory prod-wait; \
 	frontend_url="$$(awk -F= '/^CORS_ORIGIN=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
 	backend_url="$$(awk -F= '/^NEXT_PUBLIC_API_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
+	docker builder prune -af; \
 	echo -e "$(GREEN)Stockini production est prêt.$(NC)"; \
 	echo "Frontend : $${frontend_url:-http://IP_VPS:3010}"; \
 	echo "Backend  : $${backend_url:-http://IP_VPS:4010}"

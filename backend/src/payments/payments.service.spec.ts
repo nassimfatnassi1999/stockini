@@ -1,5 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
-import { CaisseMovementType, DocumentType, PaymentStatus, PaymentType, PurchaseDocumentType, SaleStatus } from '@prisma/client';
+import {
+  CaisseMovementType,
+  DocumentType,
+  PaymentStatus,
+  PaymentType,
+  Prisma,
+  PurchaseDocumentType,
+  SaleStatus,
+} from '@prisma/client';
 import { PaymentsService } from './payments.service';
 
 // ─── Helpers pour clearHistory ────────────────────────────────────────────────
@@ -19,7 +27,16 @@ function buildClearService(countResult = 3) {
   const settings = {} as any;
   const caisseService = {} as any;
   const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any, auditLogs);
+  const service = new PaymentsService(
+    prisma,
+    references,
+    settings,
+    caisseService,
+    {
+      recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined),
+    } as any,
+    auditLogs,
+  );
   return { service, prisma };
 }
 
@@ -33,7 +50,10 @@ describe('PaymentsService.clearCustomerPaymentsHistory', () => {
     expect(result.count).toBe(5);
     expect(prisma.payment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ type: PaymentType.CUSTOMER_PAYMENT, clearedAt: null }),
+        where: expect.objectContaining({
+          type: PaymentType.CUSTOMER_PAYMENT,
+          clearedAt: null,
+        }),
         data: expect.objectContaining({ clearedBy: 'user-1' }),
       }),
     );
@@ -49,11 +69,18 @@ describe('PaymentsService.clearCustomerPaymentsHistory', () => {
 
   it('crée un HistoryClearLog avec le bon module et userId', async () => {
     const { service, prisma } = buildClearService(2);
-    await service.clearCustomerPaymentsHistory({ dateFrom: '2026-01-01' }, 'user-admin');
+    await service.clearCustomerPaymentsHistory(
+      { dateFrom: '2026-01-01' },
+      'user-admin',
+    );
 
     expect(prisma.historyClearLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ module: 'customer_payments', userId: 'user-admin', count: 2 }),
+        data: expect.objectContaining({
+          module: 'customer_payments',
+          userId: 'user-admin',
+          count: 2,
+        }),
       }),
     );
   });
@@ -63,7 +90,9 @@ describe('PaymentsService.clearCustomerPaymentsHistory', () => {
     await service.clearCustomerPaymentsHistory({}, 'user-1');
 
     const updateCall = prisma.payment.updateMany.mock.calls[0][0];
-    expect(Object.keys(updateCall.data)).toEqual(expect.arrayContaining(['clearedAt', 'clearedBy']));
+    expect(Object.keys(updateCall.data)).toEqual(
+      expect.arrayContaining(['clearedAt', 'clearedBy']),
+    );
     expect(Object.keys(updateCall.data)).not.toContain('amount');
     expect(Object.keys(updateCall.data)).not.toContain('paidAmount');
   });
@@ -79,7 +108,10 @@ describe('PaymentsService.clearSupplierPaymentsHistory', () => {
     expect(result.count).toBe(4);
     expect(prisma.payment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ type: PaymentType.SUPPLIER_PAYMENT, clearedAt: null }),
+        where: expect.objectContaining({
+          type: PaymentType.SUPPLIER_PAYMENT,
+          clearedAt: null,
+        }),
         data: expect.objectContaining({ clearedBy: 'user-1' }),
       }),
     );
@@ -87,7 +119,10 @@ describe('PaymentsService.clearSupplierPaymentsHistory', () => {
 
   it('filtre par supplierId si fourni', async () => {
     const { service, prisma } = buildClearService(1);
-    await service.clearSupplierPaymentsHistory({ supplierId: 'sup-99' }, 'user-1');
+    await service.clearSupplierPaymentsHistory(
+      { supplierId: 'sup-99' },
+      'user-1',
+    );
 
     expect(prisma.payment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -102,7 +137,10 @@ describe('PaymentsService.clearSupplierPaymentsHistory', () => {
 
     expect(prisma.historyClearLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ module: 'supplier_payments', userId: 'user-x' }),
+        data: expect.objectContaining({
+          module: 'supplier_payments',
+          userId: 'user-x',
+        }),
       }),
     );
   });
@@ -119,7 +157,7 @@ describe('PaymentsService.paySale', () => {
       documentType?: string;
       status?: string;
     },
-    opts: { caisseThrows?: boolean } = {},
+    opts: { caisseThrows?: boolean; activePaid?: number } = {},
   ) {
     const saleRow = {
       id: 'sale-1',
@@ -166,12 +204,25 @@ describe('PaymentsService.paySale', () => {
     } as any;
 
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new PaymentsService(prisma, references, settings, caisseService, { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any, auditLogs);
+    const service = new PaymentsService(
+      prisma,
+      references,
+      settings,
+      caisseService,
+      {
+        recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined),
+      } as any,
+      auditLogs,
+    );
     return { service, tx, caisseService };
   }
 
   it('facture non payée → statut UNPAID initial, reste à payer = total', async () => {
-    const { service, tx } = buildSaleService({ total: 200, paidAmount: 0, remainingAmount: 200 });
+    const { service, tx } = buildSaleService({
+      total: 200,
+      paidAmount: 0,
+      remainingAmount: 200,
+    });
 
     await service.paySale('sale-1', { amount: 50, method: 'CASH' as any });
 
@@ -187,7 +238,11 @@ describe('PaymentsService.paySale', () => {
   });
 
   it('paiement partiel → statut PARTIAL et reste à payer réduit', async () => {
-    const { service, tx } = buildSaleService({ total: 100, paidAmount: 0, remainingAmount: 100 });
+    const { service, tx } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
 
     await service.paySale('sale-1', { amount: 40, method: 'CASH' as any });
 
@@ -204,7 +259,11 @@ describe('PaymentsService.paySale', () => {
   });
 
   it('paiement total → statut PAID et reste à payer = 0', async () => {
-    const { service, tx } = buildSaleService({ total: 100, paidAmount: 60, remainingAmount: 40 });
+    const { service, tx } = buildSaleService({
+      total: 100,
+      paidAmount: 60,
+      remainingAmount: 40,
+    });
 
     await service.paySale('sale-1', { amount: 40, method: 'CASH' as any });
 
@@ -220,9 +279,16 @@ describe('PaymentsService.paySale', () => {
   });
 
   it('crée un paiement CUSTOMER_PAYMENT lié à la vente et au client', async () => {
-    const { service, tx } = buildSaleService({ total: 100, paidAmount: 0, remainingAmount: 100 });
+    const { service, tx } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
 
-    await service.paySale('sale-1', { amount: 30, method: 'BANK_TRANSFER' as any });
+    await service.paySale('sale-1', {
+      amount: 30,
+      method: 'BANK_TRANSFER' as any,
+    });
 
     expect(tx.payment.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -255,7 +321,11 @@ describe('PaymentsService.paySale', () => {
   });
 
   it('rejette un paiement supérieur au reste à payer', async () => {
-    const { service } = buildSaleService({ total: 100, paidAmount: 80, remainingAmount: 20 });
+    const { service } = buildSaleService({
+      total: 100,
+      paidAmount: 80,
+      remainingAmount: 20,
+    });
 
     await expect(
       service.paySale('sale-1', { amount: 50, method: 'CASH' as any }),
@@ -288,7 +358,7 @@ describe('PaymentsService.paySale', () => {
     ).rejects.toThrow(/annulé/);
   });
 
-  it('rollback : propage l\'erreur si le mouvement caisse échoue', async () => {
+  it("rollback : propage l'erreur si le mouvement caisse échoue", async () => {
     const { service } = buildSaleService(
       { total: 100, paidAmount: 0, remainingAmount: 100 },
       { caisseThrows: true },
@@ -353,7 +423,10 @@ describe('PaymentsService.paySale', () => {
       remainingAmount: 100,
     });
 
-    await service.paySale('sale-1', { amount: 60, method: 'BANK_TRANSFER' as any });
+    await service.paySale('sale-1', {
+      amount: 60,
+      method: 'BANK_TRANSFER' as any,
+    });
 
     expect(caisseService.recordMovement).toHaveBeenCalledWith(
       expect.anything(),
@@ -384,23 +457,29 @@ describe('PaymentsService.payPurchase', () => {
       documentType: PurchaseDocumentType.BON_RECEPTION,
       ...purchase,
     };
+    let activePaid = new Prisma.Decimal(opts.activePaid ?? purchase.paidAmount);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tx: any = {
       purchase: {
         findFirstOrThrow: jest.fn().mockResolvedValue(purchaseRow),
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn(({ data }: { data: any }) =>
           Promise.resolve({ ...purchaseRow, ...data }),
         ),
       },
       payment: {
-        create: jest.fn(({ data }: { data: any }) =>
-          Promise.resolve({
+        aggregate: jest.fn(() =>
+          Promise.resolve({ _sum: { amount: activePaid } }),
+        ),
+        create: jest.fn(({ data }: { data: any }) => {
+          activePaid = activePaid.plus(data.amount);
+          return Promise.resolve({
             id: 'payment-1',
             ...data,
             purchase: { ...purchaseRow, supplier: { name: 'Fournisseur X' } },
-          }),
-        ),
+          });
+        }),
       },
     };
 
@@ -425,7 +504,9 @@ describe('PaymentsService.payPurchase', () => {
       references,
       settings,
       caisseService,
-      { recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined) } as any,
+      {
+        recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined),
+      } as any,
       auditLogs,
     );
     return { service, tx, caisseService };
@@ -447,8 +528,8 @@ describe('PaymentsService.payPurchase', () => {
       expect.objectContaining({
         where: { id: 'purchase-1' },
         data: {
-          paidAmount: 40,
-          remainingAmount: 60,
+          paidAmount: new Prisma.Decimal(40),
+          remainingAmount: new Prisma.Decimal(60),
           paymentStatus: PaymentStatus.PARTIAL,
         },
       }),
@@ -470,8 +551,8 @@ describe('PaymentsService.payPurchase', () => {
     expect(tx.purchase.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          paidAmount: 100,
-          remainingAmount: 0,
+          paidAmount: new Prisma.Decimal(100),
+          remainingAmount: new Prisma.Decimal(0),
           paymentStatus: PaymentStatus.PAID,
         },
       }),
@@ -517,7 +598,7 @@ describe('PaymentsService.payPurchase', () => {
           type: PaymentType.SUPPLIER_PAYMENT,
           purchaseId: 'purchase-1',
           supplierId: 'supplier-1',
-          amount: 30,
+          amount: new Prisma.Decimal(30),
         }),
       }),
     );
@@ -535,7 +616,22 @@ describe('PaymentsService.payPurchase', () => {
     ).rejects.toThrow(/reste à payer/);
   });
 
-  it('rollback : propage l\'erreur si le mouvement caisse échoue', async () => {
+  it('ignore un cache achat obsolète et utilise les paiements liés', async () => {
+    const { service, tx } = buildService(
+      { total: 295.837, paidAmount: 0, remainingAmount: 295.837 },
+      { activePaid: 295.837 },
+    );
+
+    await expect(
+      service.payPurchase('purchase-1', {
+        amount: 1,
+        method: 'CASH' as any,
+      }),
+    ).rejects.toThrow(/reste à payer \(0\.000 DT\)/);
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it("rollback : propage l'erreur si le mouvement caisse échoue", async () => {
     const { service } = buildService(
       { total: 100, paidAmount: 0, remainingAmount: 100 },
       { caisseThrows: true },
@@ -554,7 +650,10 @@ describe('PaymentsService.payPurchase', () => {
     });
 
     await expect(
-      service.payPurchase('purchase-1', { amount: 100, method: 'CREDIT' as any }),
+      service.payPurchase('purchase-1', {
+        amount: 100,
+        method: 'CREDIT' as any,
+      }),
     ).rejects.toThrow(BadRequestException);
 
     expect(caisseService.recordMovement).not.toHaveBeenCalled();
@@ -577,10 +676,19 @@ describe('PaymentsService.payPurchase', () => {
     const prisma = {
       $transaction: jest.fn((cb: (tx: any) => any) => cb(tx)),
     } as any;
-    const references = { generate: jest.fn().mockResolvedValue('EXP-001') } as any;
+    const references = {
+      generate: jest.fn().mockResolvedValue('EXP-001'),
+    } as any;
     const caisseService = { recordMovement: jest.fn() } as any;
     const auditLogs = { audit: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new PaymentsService(prisma, references, {} as any, caisseService, {} as any, auditLogs);
+    const service = new PaymentsService(
+      prisma,
+      references,
+      {} as any,
+      caisseService,
+      {} as any,
+      auditLogs,
+    );
 
     await expect(
       service.payPurchase('purchase-1', { amount: 50, method: 'CASH' as any }),
@@ -597,7 +705,10 @@ describe('PaymentsService.payPurchase', () => {
       remainingAmount: 100,
     });
 
-    await service.payPurchase('purchase-1', { amount: 50, method: 'CHECK' as any });
+    await service.payPurchase('purchase-1', {
+      amount: 50,
+      method: 'CHECK' as any,
+    });
 
     expect(caisseService.recordMovement).toHaveBeenCalledWith(
       expect.anything(),
