@@ -87,13 +87,33 @@ export class DocumentsService {
       if (sale.isConsolidated && sale.consolidationStatus === 'CANCELLED') {
         throw new BadRequestException('Impossible de générer un document pour un regroupement annulé');
       }
+      if (
+        sale.isConsolidated &&
+        sale.documentType !== DocumentType.BON_LIVRAISON &&
+        sale.documentType !== DocumentType.FACTURE
+      ) {
+        throw new BadRequestException(
+          'Le document consolidé doit être un bon de livraison ou une facture',
+        );
+      }
+      if (sale.isConsolidated && dto.documentType !== sale.documentType) {
+        throw new BadRequestException(
+          'Le type demandé ne correspond pas au document consolidé',
+        );
+      }
       const existing = await this.prisma.generatedDocument.findFirst({
         where: {
           invoiceId,
           documentType: dto.documentType,
         },
       });
-      if (existing && existing.status !== DocumentStatus.DELETED) {
+      // Consolidations must always be rebuilt from their canonical aggregate
+      // sale so a second click refreshes the complete grouped PDF.
+      if (
+        existing &&
+        existing.status !== DocumentStatus.DELETED &&
+        !sale.isConsolidated
+      ) {
         results.push(existing);
         continue;
       }

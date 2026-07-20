@@ -41,6 +41,7 @@ function createService(generatedDocument: Record<string, jest.Mock>) {
   const prisma = {
     sale: { findFirst: jest.fn().mockResolvedValue(sale) },
     generatedDocument,
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
   const settings = { findAll: jest.fn().mockResolvedValue([]) };
   const minio = {
@@ -59,6 +60,7 @@ function createService(generatedDocument: Record<string, jest.Mock>) {
       pdf as never,
       {} as never,
     ),
+    prisma,
     generatedDocument,
     pdf,
   };
@@ -142,5 +144,64 @@ describe('DocumentsService.generate', () => {
         documentType: DocumentType.DEVIS,
       },
     });
+  });
+
+  it('regenerates a consolidated PDF from its aggregate sale', async () => {
+    const consolidatedSale = {
+      ...sale,
+      id: 'grouped-1',
+      invoiceNumber: 'FACG-2026-001',
+      documentType: DocumentType.FACTURE,
+      isConsolidated: true,
+      consolidationStatus: 'ACTIVE',
+      stampDuty: 1,
+      items: [
+        { ...sale.items[0], sourceReference: 'FAC-001' },
+        { ...sale.items[0], quantity: 2, sourceReference: 'FAC-002' },
+      ],
+      consolidationSources: [
+        { sourceReference: 'FAC-001' },
+        { sourceReference: 'FAC-002' },
+      ],
+    };
+    const existing = {
+      id: 'doc-grouped-1',
+      documentNumber: 'FACG-2026-001',
+      fileName: 'FACG-2026-001.pdf',
+      minioObjectKey: 'documents/ventes/facture/2026/07/FACG-2026-001.pdf',
+      status: DocumentStatus.GENERATED,
+    };
+    const regenerated = { ...existing, generatedAt: new Date() };
+    const generatedDocument = {
+      findFirst: jest.fn().mockResolvedValue(existing),
+      create: jest.fn(),
+      update: jest.fn().mockResolvedValue(regenerated),
+    };
+    const created = createService(generatedDocument);
+    created.prisma.sale.findFirst.mockResolvedValue(consolidatedSale);
+
+    const result = await created.service.generate({
+      invoiceIds: ['grouped-1'],
+      documentType: DocumentType.FACTURE,
+    });
+
+    expect(result.documents).toEqual([regenerated]);
+    expect(generatedDocument.create).not.toHaveBeenCalled();
+    expect(generatedDocument.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: existing.id } }),
+    );
+    expect(created.pdf.generateSaleDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invoiceNumber: 'FACG-2026-001',
+        timbreFiscal: 1,
+        sourceReferences: ['FAC-001', 'FAC-002'],
+        items: [
+          expect.objectContaining({ sourceReference: 'FAC-001' }),
+          expect.objectContaining({ sourceReference: 'FAC-002', quantity: 2 }),
+        ],
+      }),
+      DocumentType.FACTURE,
+      expect.any(Object),
+    );
   });
 });
