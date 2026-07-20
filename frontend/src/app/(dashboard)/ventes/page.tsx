@@ -2031,36 +2031,6 @@ export default function VentesPage() {
                 <div className="px-3 flex items-center gap-2">
                   {activeHistoryTab === "ventes" && (
                     <>
-                      {selectionActions.showGenerate && <button
-                        type="button"
-                        onClick={() => {
-                          if (selectionActions.consolidatedDocumentType) {
-                            void handleGenerateDocument(
-                              selectionActions.consolidatedDocumentType,
-                            );
-                            return;
-                          }
-                          handleDownloadClick();
-                        }}
-                        disabled={
-                          selectedInvoiceIds.length === 0 ||
-                          docMenuGenerating !== null
-                        }
-                        className={cn(
-                          "inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium",
-                          "border border-orange-200/70 bg-orange-50 text-orange-700",
-                          "transition-all duration-150",
-                          "hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100",
-                          "disabled:cursor-not-allowed disabled:opacity-40",
-                        )}
-                      >
-                        {docMenuGenerating !== null && selectionActions.consolidatedDocumentType ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <Download size={12} />
-                        )}
-                        {selectionActions.generateLabel}
-                      </button>}
                       {selectionActions.hasAmbiguousConsolidatedSelection && (
                         <p className="max-w-64 text-right text-[11px] font-medium leading-tight text-amber-700">
                           Sélectionnez un seul document consolidé pour le générer ou le déconsolider.
@@ -2072,6 +2042,35 @@ export default function VentesPage() {
                           onEmail={handleEmailClick}
                           emailLoading={emailPreviewLoading}
                           onClear={() => { setSelectedInvoiceIds([]); setSelectedInvoiceSales([]); }}
+                          generateButton={selectionActions.showGenerate ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (selectionActions.consolidatedDocumentType) {
+                                  void handleGenerateDocument(
+                                    selectionActions.consolidatedDocumentType,
+                                  );
+                                  return;
+                                }
+                                handleDownloadClick();
+                              }}
+                              disabled={docMenuGenerating !== null}
+                              className={cn(
+                                "inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium",
+                                "border border-orange-200/70 bg-orange-50 text-orange-700",
+                                "transition-all duration-150",
+                                "hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100",
+                                "disabled:cursor-not-allowed disabled:opacity-40",
+                              )}
+                            >
+                              {docMenuGenerating !== null && selectionActions.consolidatedDocumentType ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Download size={12} />
+                              )}
+                              {selectionActions.generateLabel}
+                            </button>
+                          ) : null}
                           transformButton={(() => {
                             if (selectionActions.showDeconsolidate) {
                               return canCancelConsolidation ? (

@@ -33,6 +33,21 @@ test("a grouped delivery note keeps generation and deconsolidation actions", () 
   assert.equal(actions.showDeconsolidate, true);
 });
 
+test("runtime BL aliases remain generatable for a consolidated row", () => {
+  const actions = getSalesSelectionActions([
+    {
+      type: "BL",
+      isConsolidated: true,
+      consolidationStatus: "ACTIVE",
+    },
+  ]);
+
+  assert.equal(actions.showGenerate, true);
+  assert.equal(actions.generateLabel, "Générer le BL");
+  assert.equal(actions.consolidatedDocumentType, "BON_LIVRAISON");
+  assert.equal(actions.showDeconsolidate, true);
+});
+
 test("a grouped invoice has the invoice-specific generation action", () => {
   const actions = getSalesSelectionActions([
     sale({
@@ -59,10 +74,20 @@ test("a mixed multi-selection containing a consolidation is ambiguous", () => {
   assert.equal(actions.showDeconsolidate, false);
 });
 
-test("normal selections retain the existing generation behavior", () => {
+test("multi-selections do not expose an ambiguous generation action", () => {
   const actions = getSalesSelectionActions([sale(), sale({ id: "sale-2" })]);
+
+  assert.equal(actions.showGenerate, false);
+  assert.equal(actions.generateLabel, "Générer");
+  assert.equal(actions.hasAmbiguousConsolidatedSelection, false);
+});
+
+test("a single normal quote retains the existing generation action", () => {
+  const actions = getSalesSelectionActions([
+    sale({ documentType: "DEVIS", isConsolidated: false }),
+  ]);
 
   assert.equal(actions.showGenerate, true);
   assert.equal(actions.generateLabel, "Générer");
-  assert.equal(actions.hasAmbiguousConsolidatedSelection, false);
+  assert.equal(actions.showDeconsolidate, false);
 });

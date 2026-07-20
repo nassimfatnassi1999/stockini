@@ -9,6 +9,8 @@ interface BulkActionsBarProps {
   onEmail: () => void;
   emailLoading?: boolean;
   onClear: () => void;
+  /** Action de génération injectée avant les autres actions. */
+  generateButton?: React.ReactNode;
   /** Bouton Transformer (dropdown) injecté avant Envoyer */
   transformButton?: React.ReactNode;
 }
@@ -18,6 +20,7 @@ export function BulkActionsBar({
   onEmail,
   emailLoading,
   onClear,
+  generateButton,
   transformButton,
 }: BulkActionsBarProps) {
   return (
@@ -36,6 +39,8 @@ export function BulkActionsBar({
       </span>
 
       <div className="h-4 w-px bg-slate-200" />
+
+      {generateButton}
 
       {/* Transformer — dropdown injecté avant Envoyer */}
       {transformButton}
