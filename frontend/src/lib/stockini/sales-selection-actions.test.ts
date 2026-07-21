@@ -28,7 +28,7 @@ test("a grouped delivery note keeps generation and deconsolidation actions", () 
   ]);
 
   assert.equal(actions.showGenerate, true);
-  assert.equal(actions.generateLabel, "Générer le BL");
+  assert.equal(actions.generateLabel, "Générer");
   assert.equal(actions.consolidatedDocumentType, "BON_LIVRAISON");
   assert.equal(actions.showDeconsolidate, true);
 });
@@ -43,12 +43,12 @@ test("runtime BL aliases remain generatable for a consolidated row", () => {
   ]);
 
   assert.equal(actions.showGenerate, true);
-  assert.equal(actions.generateLabel, "Générer le BL");
+  assert.equal(actions.generateLabel, "Générer");
   assert.equal(actions.consolidatedDocumentType, "BON_LIVRAISON");
   assert.equal(actions.showDeconsolidate, true);
 });
 
-test("a grouped invoice has the invoice-specific generation action", () => {
+test("a grouped invoice has the generic generation action", () => {
   const actions = getSalesSelectionActions([
     sale({
       documentType: "FACTURE",
@@ -58,20 +58,21 @@ test("a grouped invoice has the invoice-specific generation action", () => {
   ]);
 
   assert.equal(actions.showGenerate, true);
-  assert.equal(actions.generateLabel, "Générer la facture");
+  assert.equal(actions.generateLabel, "Générer");
   assert.equal(actions.consolidatedDocumentType, "FACTURE");
   assert.equal(actions.showDeconsolidate, true);
 });
 
-test("a mixed multi-selection containing a consolidation is ambiguous", () => {
+test("a consolidation and a compatible normal sale can be reconsolidated", () => {
   const actions = getSalesSelectionActions([
-    sale({ isConsolidated: true, consolidationStatus: "ACTIVE" }),
-    sale({ id: "sale-2" }),
+    sale({ isConsolidated: true, consolidationStatus: "ACTIVE", customer: { id: "c1" } as Sale["customer"] }),
+    sale({ id: "sale-2", customer: { id: "c1" } as Sale["customer"] }),
   ]);
 
-  assert.equal(actions.hasAmbiguousConsolidatedSelection, true);
+  assert.equal(actions.hasAmbiguousConsolidatedSelection, false);
   assert.equal(actions.showGenerate, false);
   assert.equal(actions.showDeconsolidate, false);
+  assert.equal(actions.showConsolidate, true);
 });
 
 test("multi-selections do not expose an ambiguous generation action", () => {
@@ -90,4 +91,13 @@ test("a single normal quote retains the existing generation action", () => {
   assert.equal(actions.showGenerate, true);
   assert.equal(actions.generateLabel, "Générer");
   assert.equal(actions.showDeconsolidate, false);
+});
+
+test("a consolidation and a sale from another customer are incompatible", () => {
+  const actions = getSalesSelectionActions([
+    sale({ isConsolidated: true, consolidationStatus: "ACTIVE", customer: { id: "c1" } as Sale["customer"] }),
+    sale({ id: "sale-2", customer: { id: "c2" } as Sale["customer"] }),
+  ]);
+  assert.equal(actions.showConsolidate, false);
+  assert.match(actions.consolidationError ?? "", /même client/);
 });

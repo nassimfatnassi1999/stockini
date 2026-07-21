@@ -16,8 +16,11 @@ function source(id: string, paid = 0, credit = 0) {
   };
 }
 
-function build(options: { payments?: unknown[]; credits?: unknown[]; documents?: Array<{ status: string }> } = {}) {
-  const links = [source('1', 50), source('2', 0, 10)].map((sale, index) => ({
+function build(options: { payments?: unknown[]; credits?: unknown[]; documents?: Array<{ status: string }>; sourceIds?: string[] } = {}) {
+  const sourceSales = options.sourceIds
+    ? options.sourceIds.map((id) => source(id))
+    : [source('1', 50), source('2', 0, 10)];
+  const links = sourceSales.map((sale, index) => ({
     sourceSaleId: sale.id,
     sourceReference: sale.invoiceNumber,
     displayOrder: index,
@@ -92,5 +95,13 @@ describe('SalesService.cancelConsolidation', () => {
     tx.sale.update.mockRejectedValueOnce(new Error('database failure'));
     await expect(service.cancelConsolidation('parent-1', undefined, allowedUser)).rejects.toThrow('database failure');
     expect(tx.saleConsolidationSource.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('restaure uniquement toutes les sources originales après reconsolidation', async () => {
+    const { service, tx } = build({ sourceIds: ['BL1', 'BL2', 'BL3', 'BL4', 'BL5'] });
+    const result = await service.cancelConsolidation('parent-1', undefined, allowedUser);
+    expect(result.restoredSourceIds).toEqual(['BL1', 'BL2', 'BL3', 'BL4', 'BL5']);
+    expect(tx.sale.update).toHaveBeenCalledTimes(6);
+    expect(result.restoredSourceIds).not.toContain('group-1');
   });
 });

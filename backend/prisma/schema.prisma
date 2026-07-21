@@ -139,6 +139,7 @@ enum DocumentStatus {
 
 enum ConsolidationStatus {
   ACTIVE
+  REPLACED
   CANCELLED
 }
 
@@ -391,6 +392,8 @@ model Sale {
   consolidationNote        String?                   @map("consolidation_note")
   consolidatedAt           DateTime?                 @map("consolidated_at")
   consolidationCancelledAt DateTime?                 @map("consolidation_cancelled_at")
+  replacedByConsolidationId String?                   @map("replaced_by_consolidation_id")
+  replacedAt               DateTime?                  @map("replaced_at")
   consolidationSources     SaleConsolidationSource[] @relation("ConsolidatedSale")
   consolidationMemberships SaleConsolidationSource[] @relation("ConsolidationSourceSale")
 
@@ -400,6 +403,7 @@ model Sale {
   @@index([deletedAt])
   @@index([documentType, status, createdAt])
   @@index([isConsolidated, consolidationStatus])
+  @@index([replacedByConsolidationId])
 }
 
 model SaleConsolidationSource {

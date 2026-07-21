@@ -51,7 +51,7 @@ export function BulkActionsBar({
         onClick={onEmail}
         disabled={emailLoading}
         className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium',
+          'inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl px-4 text-[12px] font-medium',
           'border border-blue-200/70 bg-blue-50 text-blue-700',
           'transition-all duration-150',
           'hover:-translate-y-px hover:border-blue-300 hover:bg-blue-100',
@@ -72,7 +72,7 @@ export function BulkActionsBar({
       <button
         type="button"
         onClick={onClear}
-        className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 transition-all duration-150 hover:bg-slate-100 hover:text-slate-600"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-all duration-150 hover:bg-slate-100 hover:text-slate-600"
         aria-label="Désélectionner tout"
       >
         <X size={12} />

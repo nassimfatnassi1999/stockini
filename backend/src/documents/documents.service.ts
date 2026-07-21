@@ -84,22 +84,8 @@ export class DocumentsService {
         },
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
-      if (sale.isConsolidated && sale.consolidationStatus === 'CANCELLED') {
-        throw new BadRequestException('Impossible de générer un document pour un regroupement annulé');
-      }
-      if (
-        sale.isConsolidated &&
-        sale.documentType !== DocumentType.BON_LIVRAISON &&
-        sale.documentType !== DocumentType.FACTURE
-      ) {
-        throw new BadRequestException(
-          'Le document consolidé doit être un bon de livraison ou une facture',
-        );
-      }
-      if (sale.isConsolidated && dto.documentType !== sale.documentType) {
-        throw new BadRequestException(
-          'Le type demandé ne correspond pas au document consolidé',
-        );
+      if (sale.isConsolidated && sale.consolidationStatus !== 'ACTIVE') {
+        throw new BadRequestException('Impossible de générer un document pour un regroupement inactif');
       }
       const existing = await this.prisma.generatedDocument.findFirst({
         where: {
@@ -119,9 +105,13 @@ export class DocumentsService {
       }
 
       const companySettings = await this.getCompanySettings();
-      // The sale reference is already the canonical, globally unique business
-      // document number. Reusing it keeps the PDF and sale screens consistent.
-      const documentNumber = existing?.documentNumber ?? sale.invoiceNumber;
+      // Keep the sale reference for its native type; prefix alternate outputs
+      // so each generated type retains a globally unique document number.
+      const documentNumber = existing?.documentNumber ?? (
+        dto.documentType === sale.documentType
+          ? sale.invoiceNumber
+          : `${DOC_PREFIXES[dto.documentType]}-${sale.invoiceNumber}`
+      );
       const fileName = existing?.fileName ?? `${documentNumber}.pdf`;
       const clientId = sale.customerId ?? undefined;
       const clientName =
@@ -138,7 +128,7 @@ export class DocumentsService {
       // Snapshot fields take priority over live customer data for all client types
       const pdfBuffer = await this.pdf.generateSaleDocument(
         {
-          invoiceNumber: sale.invoiceNumber,
+          invoiceNumber: documentNumber,
           createdAt: sale.createdAt,
           subtotal: Number(sale.subtotal),
           discount: Number(sale.discount),

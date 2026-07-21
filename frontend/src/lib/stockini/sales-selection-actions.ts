@@ -1,9 +1,13 @@
 import type { Sale, SalesDocumentType } from "./types";
 
-export type SelectableSale = Pick<
+export type SelectableSale = Partial<Pick<
   Sale,
-  "isConsolidated" | "consolidationStatus"
-> & {
+  "isConsolidated" | "consolidationStatus" | "status"
+>> & {
+  id?: unknown;
+  customer?: { id?: unknown } | null;
+  customerId?: unknown;
+  activeConsolidation?: unknown;
   documentType?: unknown;
   type?: unknown;
   saleType?: unknown;
@@ -18,6 +22,8 @@ export interface SalesSelectionActions {
   hasAmbiguousConsolidatedSelection: boolean;
   showGenerate: boolean;
   showDeconsolidate: boolean;
+  showConsolidate: boolean;
+  consolidationError: string | null;
 }
 
 export function normalizeSalesDocumentType(
@@ -69,16 +75,8 @@ export function getSalesSelectionActions(
         singleSale.consolidationGroupId),
   );
   const consolidatedDocument = isSingleConsolidated ? singleSale : null;
-  const hasAmbiguousConsolidatedSelection =
-    selectedSales.length > 1 &&
-    selectedSales.some(
-      (sale) =>
-        sale.isConsolidated === true ||
-        sale.consolidationStatus === "ACTIVE" ||
-        String(sale.consolidationStatus) === "CONSOLIDATED" ||
-        (Array.isArray(sale.sourceSaleIds) && sale.sourceSaleIds.length > 0) ||
-        Boolean(sale.consolidationGroupId),
-    );
+  const consolidationError = getConsolidationCompatibilityError(selectedSales);
+  const hasAmbiguousConsolidatedSelection = false;
   const consolidatedDocumentType = consolidatedDocument
     ? singleSaleType
     : null;
@@ -89,12 +87,7 @@ export function getSalesSelectionActions(
   return {
     consolidatedDocument,
     consolidatedDocumentType,
-    generateLabel:
-      consolidatedDocumentType === "BON_LIVRAISON"
-        ? "Générer le BL"
-        : consolidatedDocumentType === "FACTURE"
-          ? "Générer la facture"
-          : "Générer",
+    generateLabel: "Générer",
     hasAmbiguousConsolidatedSelection,
     showGenerate:
       singleSale !== null &&
@@ -102,6 +95,37 @@ export function getSalesSelectionActions(
       (!consolidatedDocument || isSupportedConsolidatedType),
     showDeconsolidate:
       consolidatedDocument !== null &&
-      consolidatedDocument.consolidationStatus !== "CANCELLED",
+      consolidatedDocument.consolidationStatus === "ACTIVE",
+    showConsolidate: selectedSales.length > 1 && consolidationError === null,
+    consolidationError,
   };
+}
+
+export function getConsolidationCompatibilityError(
+  selectedSales: SelectableSale[],
+): string | null {
+  if (selectedSales.length < 2) return null;
+  if (selectedSales.some((sale) => sale.status === "CANCELLED")) {
+    return "Un document annulé ne peut pas être consolidé.";
+  }
+  if (selectedSales.some((sale) => !sale.isConsolidated && sale.activeConsolidation)) {
+    return "Un document appartient déjà à une autre consolidation active.";
+  }
+  const customerIds = selectedSales.map((sale) =>
+    String(sale.customer?.id ?? sale.customerId ?? ""),
+  );
+  if (!customerIds[0] || customerIds.some((id) => id !== customerIds[0])) {
+    return "Les documents sélectionnés doivent appartenir au même client.";
+  }
+  const types = selectedSales.map((sale) =>
+    normalizeSalesDocumentType(sale.documentType ?? sale.type ?? sale.saleType),
+  );
+  if (
+    !types[0] ||
+    !["BON_LIVRAISON", "FACTURE"].includes(types[0]) ||
+    types.some((type) => type !== types[0])
+  ) {
+    return "Les documents sélectionnés ne sont pas compatibles. Sélectionnez des documents du même client et du même type.";
+  }
+  return null;
 }

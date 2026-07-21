@@ -204,4 +204,33 @@ describe('DocumentsService.generate', () => {
       expect.any(Object),
     );
   });
+
+  it('génère un type choisi depuis une consolidation sans produire plusieurs fichiers', async () => {
+    const consolidatedSale = {
+      ...sale,
+      id: 'grouped-1',
+      invoiceNumber: 'BLG-2026-001',
+      documentType: DocumentType.BON_LIVRAISON,
+      isConsolidated: true,
+      consolidationStatus: 'ACTIVE',
+      items: [{ ...sale.items[0], sourceReference: 'BL-001' }],
+      consolidationSources: [{ sourceReference: 'BL-001' }, { sourceReference: 'BL-002' }],
+    };
+    const generatedDocument = { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(({ data }) => Promise.resolve(data)), update: jest.fn() };
+    const created = createService(generatedDocument);
+    created.prisma.sale.findFirst.mockResolvedValue(consolidatedSale);
+
+    const result = await created.service.generate({ invoiceIds: ['grouped-1'], documentType: DocumentType.FACTURE });
+
+    expect(result.documents).toHaveLength(1);
+    expect(generatedDocument.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ documentNumber: 'FACTURE-BLG-2026-001' }),
+    }));
+    expect(created.pdf.generateSaleDocument).toHaveBeenCalledTimes(1);
+    expect(created.pdf.generateSaleDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceReferences: ['BL-001', 'BL-002'] }),
+      DocumentType.FACTURE,
+      expect.any(Object),
+    );
+  });
 });

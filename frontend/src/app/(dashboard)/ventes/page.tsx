@@ -378,7 +378,7 @@ function TransformDropdownButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium border border-orange-200/70 bg-orange-50 text-orange-700 transition-all duration-150 hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100 whitespace-nowrap"
+        className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl px-4 text-[12px] font-medium border border-orange-200/70 bg-orange-50 text-orange-700 transition-all duration-150 hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100"
       >
         <ArrowRightLeft size={12} />
         Transformer
@@ -984,7 +984,8 @@ export default function VentesPage() {
     mutationFn: (value: { targetType: "BON_LIVRAISON" | "FACTURE"; date: string; note: string }) =>
       stockiniApi.createSalesConsolidation({ sourceIds: selectedInvoiceIds, ...value }),
     onSuccess: (sale) => {
-      toast.success(`Regroupement ${sale.invoiceNumber} créé`);
+      const updated = selectedInvoiceSales.some((item) => item.isConsolidated);
+      toast.success(updated ? "Consolidation mise à jour avec succès" : `Regroupement ${sale.invoiceNumber} créé`);
       setSelectedInvoiceIds([]);
       setSelectedInvoiceSales([]);
       setConsolidationDialogOpen(false);
@@ -1359,18 +1360,8 @@ export default function VentesPage() {
   const openConsolidation = () => {
     const selected = selectedInvoiceSales;
     if (selected.length < 2) return;
-    const clientId = selected[0].customer?.id;
-    if (!clientId || selected.some((sale) => sale.customer?.id !== clientId)) {
-      toast.error("Tous les documents doivent appartenir au même client");
-      return;
-    }
-    const type = selected[0].documentType;
-    if (!["BON_LIVRAISON", "FACTURE"].includes(type) || selected.some((sale) => sale.documentType !== type)) {
-      toast.error("Sélectionnez uniquement des BL ou uniquement des factures");
-      return;
-    }
-    if (selected.some((sale) => sale.status === "CANCELLED" || sale.activeConsolidation || sale.isConsolidated)) {
-      toast.error("Un document annulé, consolidé ou déjà regroupé est présent dans la sélection");
+    if (selectionActions.consolidationError) {
+      toast.error(selectionActions.consolidationError);
       return;
     }
     setConsolidationDialogOpen(true);
@@ -2031,9 +2022,9 @@ export default function VentesPage() {
                 <div className="px-3 flex items-center gap-2">
                   {activeHistoryTab === "ventes" && (
                     <>
-                      {selectionActions.hasAmbiguousConsolidatedSelection && (
+                      {selectedInvoiceIds.length > 1 && selectionActions.consolidationError && (
                         <p className="max-w-64 text-right text-[11px] font-medium leading-tight text-amber-700">
-                          Sélectionnez un seul document consolidé pour le générer ou le déconsolider.
+                          {selectionActions.consolidationError}
                         </p>
                       )}
                       {selectedInvoiceIds.length > 0 && (
@@ -2045,25 +2036,17 @@ export default function VentesPage() {
                           generateButton={selectionActions.showGenerate ? (
                             <button
                               type="button"
-                              onClick={() => {
-                                if (selectionActions.consolidatedDocumentType) {
-                                  void handleGenerateDocument(
-                                    selectionActions.consolidatedDocumentType,
-                                  );
-                                  return;
-                                }
-                                handleDownloadClick();
-                              }}
+                              onClick={handleDownloadClick}
                               disabled={docMenuGenerating !== null}
                               className={cn(
-                                "inline-flex h-7 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-medium",
+                                "inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl px-4 text-[12px] font-medium",
                                 "border border-orange-200/70 bg-orange-50 text-orange-700",
                                 "transition-all duration-150",
                                 "hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100",
                                 "disabled:cursor-not-allowed disabled:opacity-40",
                               )}
                             >
-                              {docMenuGenerating !== null && selectionActions.consolidatedDocumentType ? (
+                              {docMenuGenerating !== null ? (
                                 <Loader2 size={12} className="animate-spin" />
                               ) : (
                                 <Download size={12} />
@@ -2074,16 +2057,15 @@ export default function VentesPage() {
                           transformButton={(() => {
                             if (selectionActions.showDeconsolidate) {
                               return canCancelConsolidation ? (
-                                <button type="button" onClick={() => setDeconsolidationTarget(selectedInvoiceSales[0])} className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 text-[12px] font-medium text-amber-800 hover:bg-amber-100">
+                                <button type="button" onClick={() => setDeconsolidationTarget(selectedInvoiceSales[0])} className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-4 text-[12px] font-medium text-amber-800 hover:bg-amber-100">
                                   <RotateCcw size={12} /> Déconsolider
                                 </button>
                               ) : null;
                             }
-                            if (selectionActions.hasAmbiguousConsolidatedSelection) return null;
                             if (selectedInvoiceIds.length >= 2 && canConsolidate) {
                               return (
-                                <button type="button" onClick={openConsolidation} className="inline-flex h-7 items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2.5 text-[12px] font-medium text-violet-700 hover:bg-violet-100">
-                                  <Combine size={12} /> Regrouper · {money(selectedInvoiceSales.reduce((sum, sale) => sum + Number(sale.totalFinal ?? Number(sale.total) + Number(sale.stampDuty)), 0))}
+                                <button type="button" onClick={openConsolidation} disabled={!selectionActions.showConsolidate} title={selectionActions.consolidationError ?? undefined} className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border border-violet-200 bg-violet-50 px-4 text-[12px] font-medium text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-40">
+                                  <Combine size={12} /> Consolider · {money(selectedInvoiceSales.reduce((sum, sale) => sum + Number(sale.totalFinal ?? Number(sale.total) + Number(sale.stampDuty)), 0))}
                                 </button>
                               );
                             }

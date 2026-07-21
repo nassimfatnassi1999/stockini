@@ -52,6 +52,42 @@ function build(sources: ReturnType<typeof source>[]) {
   return { service, tx, created, audit };
 }
 
+function buildReconsolidation(selected: any[], originals: ReturnType<typeof source>[]) {
+  const created: { data?: any } = {};
+  const tx: any = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    sale: {
+      findMany: jest.fn()
+        .mockResolvedValueOnce(selected)
+        .mockResolvedValueOnce(originals),
+      create: jest.fn(({ data }: { data: any }) => {
+        created.data = data;
+        return Promise.resolve({ id: 'parent-2', ...data, customer: originals[0]?.customer, items: data.items.create, consolidationSources: data.consolidationSources.create });
+      }),
+      updateMany: jest.fn().mockResolvedValue({ count: selected.filter((sale) => sale.isConsolidated).length }),
+    },
+    saleConsolidationSource: { updateMany: jest.fn().mockResolvedValue({ count: originals.length }) },
+  };
+  const prisma: any = { $transaction: jest.fn((callback: any) => callback(tx)) };
+  const references = { generateConsolidatedSalesDocumentNumber: jest.fn().mockResolvedValue('BLG-CLIENTTEST-21072026-002') };
+  const audit = { audit: jest.fn().mockResolvedValue(undefined) };
+  const service = new SalesService(prisma, {} as any, references as any, {} as any, {} as any, {} as any, audit as any);
+  return { service, tx, created, prisma };
+}
+
+function consolidation(id: string, sourceIds: string[]) {
+  return {
+    id,
+    invoiceNumber: `BLG-${id}`,
+    isConsolidated: true,
+    consolidationStatus: 'ACTIVE',
+    payments: [],
+    creditNotes: [],
+    generatedDocuments: [],
+    consolidationSources: sourceIds.map((sourceSaleId) => ({ sourceSaleId })),
+  };
+}
+
 describe('SalesService consolidations', () => {
   it('regroupe deux BL avec un seul timbre fiscal de 1 DT', async () => {
     const { service, created } = build([source('1'), source('2')]);
@@ -119,5 +155,46 @@ describe('SalesService consolidations', () => {
     await expect(mixed.service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.FACTURE })).rejects.toThrow(/mélangés/);
     const grouped = build([source('1'), source('2', { consolidationMemberships: [{ consolidatedSaleId: 'other' }] })]);
     await expect(grouped.service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.BON_LIVRAISON })).rejects.toThrow(/déjà/);
+  });
+
+  it('aplatit une BLG avec un nouveau BL et remplace l’ancienne consolidation', async () => {
+    const originals = [
+      source('1', { consolidationMemberships: [{ consolidatedSaleId: 'group-1' }] }),
+      source('2', { consolidationMemberships: [{ consolidatedSaleId: 'group-1' }] }),
+      source('3'),
+    ];
+    const { service, tx, created } = buildReconsolidation(
+      [consolidation('group-1', ['1', '2']), source('3')],
+      originals,
+    );
+    await service.createConsolidation({ sourceIds: ['group-1', '3'], targetType: DocumentType.BON_LIVRAISON });
+
+    expect(created.data.consolidationSources.create.map((link: any) => link.sourceSaleId)).toEqual(['1', '2', '3']);
+    expect(created.data.consolidationSources.create).not.toEqual(expect.arrayContaining([expect.objectContaining({ sourceSaleId: 'group-1' })]));
+    expect(tx.saleConsolidationSource.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { consolidatedSaleId: { in: ['group-1'] }, active: true } }));
+    expect(tx.sale.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ consolidationStatus: 'REPLACED', replacedByConsolidationId: 'parent-2' }),
+    }));
+  });
+
+  it('aplatit deux consolidations et supprime les doublons de sources', async () => {
+    const originals = ['1', '2', '3', '4'].map((id) => source(id, {
+      consolidationMemberships: [{ consolidatedSaleId: Number(id) < 3 ? 'group-1' : 'group-2' }],
+    }));
+    const { service, created } = buildReconsolidation(
+      [consolidation('group-1', ['1', '2']), consolidation('group-2', ['2', '3', '4'])],
+      originals,
+    );
+    await service.createConsolidation({ sourceIds: ['group-1', 'group-2'], targetType: DocumentType.BON_LIVRAISON });
+    expect(created.data.consolidationSources.create.map((link: any) => link.sourceSaleId)).toEqual(['1', '2', '3', '4']);
+  });
+
+  it('laisse l’ancienne consolidation intacte si la création échoue', async () => {
+    const originals = [source('1', { consolidationMemberships: [{ consolidatedSaleId: 'group-1' }] }), source('2')];
+    const { service, tx } = buildReconsolidation([consolidation('group-1', ['1']), source('2')], originals);
+    tx.sale.create.mockRejectedValueOnce(new Error('database failure'));
+    await expect(service.createConsolidation({ sourceIds: ['group-1', '2'], targetType: DocumentType.BON_LIVRAISON })).rejects.toThrow('database failure');
+    expect(tx.saleConsolidationSource.updateMany).not.toHaveBeenCalled();
+    expect(tx.sale.updateMany).not.toHaveBeenCalled();
   });
 });

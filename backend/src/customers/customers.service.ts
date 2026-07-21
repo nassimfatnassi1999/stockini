@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { CustomerOrigin, PaymentStatus, PaymentType, Prisma } from '@prisma/client';
+import { ConsolidationStatus, CustomerOrigin, PaymentStatus, PaymentType, Prisma } from '@prisma/client';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
@@ -193,7 +193,10 @@ export class CustomersService {
     const where: Prisma.SaleWhereInput = {
       customerId: clientId,
       deletedAt: null,
-      NOT: { isConsolidated: true, consolidationStatus: 'CANCELLED' },
+      NOT: {
+        isConsolidated: true,
+        consolidationStatus: { in: [ConsolidationStatus.CANCELLED, ConsolidationStatus.REPLACED] },
+      },
       ...(query.documentType && { documentType: query.documentType }),
       ...(query.documentStatus && { status: query.documentStatus }),
       ...((query.dateFrom || query.dateTo) && {

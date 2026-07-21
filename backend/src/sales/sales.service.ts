@@ -95,8 +95,8 @@ export class SalesService {
   ) {}
 
   async createConsolidation(dto: CreateConsolidationDto, user?: AuthUser) {
-    const sourceIds = [...new Set(dto.sourceIds)];
-    if (sourceIds.length < 2) {
+    const selectedIds = [...new Set(dto.sourceIds)];
+    if (selectedIds.length < 2) {
       throw new BadRequestException('Sélectionnez au moins deux documents distincts');
     }
     if (dto.targetType !== DocumentType.BON_LIVRAISON && dto.targetType !== DocumentType.FACTURE) {
@@ -106,6 +106,47 @@ export class SalesService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id IN (${Prisma.join(selectedIds)}) FOR UPDATE`);
+      const selectedSales = await tx.sale.findMany({
+        where: { id: { in: selectedIds } },
+        include: {
+          payments: { where: { deletedAt: null } },
+          creditNotes: { where: { statut: { not: 'CANCELLED' } } },
+          generatedDocuments: { where: { deletedAt: null, status: 'SENT' } },
+          consolidationSources: {
+            where: { active: true },
+            orderBy: { displayOrder: 'asc' },
+            select: { sourceSaleId: true },
+          },
+        },
+      });
+      if (selectedSales.length !== selectedIds.length) {
+        throw new BadRequestException('Un ou plusieurs documents sont introuvables');
+      }
+
+      const sourceIdSet = new Set<string>();
+      const oldConsolidationIds: string[] = [];
+      for (const sale of selectedSales) {
+        if (sale.isConsolidated) {
+          if (sale.consolidationStatus !== ConsolidationStatus.ACTIVE) {
+            throw new BadRequestException('Une ancienne consolidation remplacée ou annulée ne peut pas être regroupée');
+          }
+          if (!sale.consolidationSources.length) {
+            throw new BadRequestException('La consolidation sélectionnée ne contient aucune source active');
+          }
+          if (sale.payments.length || sale.creditNotes.length || sale.generatedDocuments.length) {
+            throw new BadRequestException('Impossible de remplacer cette consolidation : elle contient une opération financière ou un document finalisé');
+          }
+          oldConsolidationIds.push(sale.id);
+          sale.consolidationSources.forEach((link) => sourceIdSet.add(link.sourceSaleId));
+        } else {
+          sourceIdSet.add(sale.id);
+        }
+      }
+      const sourceIds = [...sourceIdSet];
+      if (sourceIds.length < 2) {
+        throw new BadRequestException('Sélectionnez au moins deux documents sources distincts');
+      }
       await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id IN (${Prisma.join(sourceIds)}) FOR UPDATE`);
       const sources = await tx.sale.findMany({
         where: { id: { in: sourceIds } },
@@ -118,7 +159,7 @@ export class SalesService {
         },
         orderBy: { createdAt: 'asc' },
       });
-      if (sources.length !== sourceIds.length) throw new BadRequestException('Un ou plusieurs documents sont introuvables');
+      if (sources.length !== sourceIds.length) throw new BadRequestException('Une ou plusieurs sources originales sont introuvables');
       const first = sources[0];
       if (!first.customerId || sources.some((sale) => sale.customerId !== first.customerId)) {
         throw new BadRequestException('Tous les documents doivent appartenir au même client enregistré');
@@ -126,8 +167,13 @@ export class SalesService {
       if (sources.some((sale) => sale.deletedAt || sale.status === SaleStatus.CANCELLED)) {
         throw new BadRequestException('Un document supprimé ou annulé ne peut pas être regroupé');
       }
-      if (sources.some((sale) => sale.isConsolidated || sale.consolidationMemberships.length > 0)) {
-        throw new BadRequestException('Un document sélectionné appartient déjà à un regroupement actif');
+      if (sources.some((sale) => sale.isConsolidated)) {
+        throw new BadRequestException('Une consolidation ne peut pas être stockée comme source d’une autre consolidation');
+      }
+      if (sources.some((sale) => sale.consolidationMemberships.some(
+        (membership) => !oldConsolidationIds.includes(membership.consolidatedSaleId),
+      ))) {
+        throw new BadRequestException('Un document sélectionné appartient déjà à un autre regroupement actif');
       }
       const sourceType = first.documentType;
       if (sources.some((sale) => sale.documentType !== sourceType)) {
@@ -210,11 +256,27 @@ export class SalesService {
         },
         include: { customer: true, items: { include: { product: true } }, consolidationSources: true },
       });
+      if (oldConsolidationIds.length) {
+        const replacedAt = new Date();
+        await tx.saleConsolidationSource.updateMany({
+          where: { consolidatedSaleId: { in: oldConsolidationIds }, active: true },
+          data: { active: false, cancelledAt: replacedAt },
+        });
+        await tx.sale.updateMany({
+          where: { id: { in: oldConsolidationIds } },
+          data: {
+            status: SaleStatus.CANCELLED,
+            consolidationStatus: ConsolidationStatus.REPLACED,
+            replacedByConsolidationId: parent.id,
+            replacedAt,
+          },
+        });
+      }
       await this.auditLogs.audit({
         action: 'sale.consolidation.created', entity: 'Sale', entityId: parent.id,
         userId: user?.id, userName: user?.email,
         newValue: { reference: parent.invoiceNumber, total: Number(net), paid: Number(historicalPaid), remaining: Number(remainingAmount) },
-        metadata: { sourceIds, sourceReferences: sources.map((sale) => sale.invoiceNumber), targetType: dto.targetType, credits: Number(credits) },
+        metadata: { selectedIds, sourceIds, replacedConsolidationIds: oldConsolidationIds, sourceReferences: sources.map((sale) => sale.invoiceNumber), targetType: dto.targetType, credits: Number(credits) },
       }, tx);
       return parent;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -225,7 +287,7 @@ export class SalesService {
         userId: user?.id,
         userName: user?.email,
         metadata: {
-          sourceIds,
+          sourceIds: selectedIds,
           targetType: dto.targetType,
           reason: error instanceof Error ? error.message : String(error),
         },
@@ -938,7 +1000,7 @@ export class SalesService {
       deletedAt: null,
       NOT: {
         isConsolidated: true,
-        consolidationStatus: ConsolidationStatus.CANCELLED,
+        consolidationStatus: { in: [ConsolidationStatus.CANCELLED, ConsolidationStatus.REPLACED] },
       },
       // Ces filtres sont ignorés quand payableOnly est actif pour éviter des
       // contradictions (ex: documentType=DEVIS AND payableOnly=true → 0 résultat).

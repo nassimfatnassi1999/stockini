@@ -161,7 +161,7 @@ export interface Sale {
   deletedAt?: string | null;
   deletedBy?: string | null;
   isConsolidated?: boolean;
-  consolidationStatus?: "ACTIVE" | "CANCELLED" | null;
+  consolidationStatus?: "ACTIVE" | "REPLACED" | "CANCELLED" | null;
   consolidationNote?: string | null;
   sourceDocumentsCount?: number;
   activeConsolidation?: { id: Id; invoiceNumber: string } | null;
@@ -225,7 +225,7 @@ export interface SaleDetail {
   counterClientNote?: string | null;
   items: SaleItemDetail[];
   isConsolidated?: boolean;
-  consolidationStatus?: "ACTIVE" | "CANCELLED" | null;
+  consolidationStatus?: "ACTIVE" | "REPLACED" | "CANCELLED" | null;
   consolidationNote?: string | null;
   consolidationSources?: Array<{
     id: Id;
@@ -905,7 +905,7 @@ export interface CustomerSaleHistoryItem {
   remainingAmount: number | string;
   paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
   isConsolidated?: boolean;
-  consolidationStatus?: "ACTIVE" | "CANCELLED" | null;
+  consolidationStatus?: "ACTIVE" | "REPLACED" | "CANCELLED" | null;
   sourceDocumentsCount?: number;
   activeConsolidation?: { id: Id; invoiceNumber: string } | null;
 }
