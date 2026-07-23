@@ -40,6 +40,7 @@ export type CaisseMovementType =
   | "DEPOT_MANUEL"
   | "RETRAIT_MANUEL"
   | "ANNULATION_VENTE"
+  | "REFUND_OUT"
   | "ANNULATION_ACHAT"
   | "ANNULATION_DEPENSE"
   | "CASH_RESET";
@@ -610,6 +611,9 @@ export type CreditNoteStatus = "CREATED" | "REFUNDED" | "CANCELLED";
 
 export interface ReturnableItem {
   saleItemId: Id;
+  sourceSaleId: Id;
+  sourceSaleItemId: Id;
+  sourceReference: string;
   productId: Id;
   product: { id: Id; reference: string; name: string } | null;
   quantiteSold: number;
@@ -625,6 +629,12 @@ export interface ReturnableItemsResponse {
   saleId: Id;
   invoiceNumber: string;
   customer: { id: Id; name: string } | null;
+  documentType: SalesDocumentType;
+  isConsolidated: boolean;
+  documentLabel: string;
+  paidAmount: number;
+  effectivePaid: number;
+  effectiveTotal: number;
   items: ReturnableItem[];
 }
 
@@ -632,6 +642,9 @@ export interface CreditNoteItem {
   id: Id;
   creditNoteId: Id;
   saleItemId?: Id | null;
+  originalSaleId?: Id | null;
+  originalSaleItemId?: Id | null;
+  sourceReference?: string | null;
   productId: Id;
   designation: string;
   quantiteRetournee: number;
@@ -647,6 +660,7 @@ export interface CreditNote {
   id: Id;
   numero: string;
   saleId: Id;
+  originalDocumentId?: Id | null;
   customerId?: Id | null;
   dateAvoir: string;
   subtotal: number | string;
@@ -658,6 +672,9 @@ export interface CreditNote {
   stampDuty: number | string;
   totalFinal: number | string;
   montantRembourse: number | string;
+  debtReductionAmount?: number | string;
+  customerCreditAmount?: number | string;
+  refundMethod?: string;
   motif?: string | null;
   statut: CreditNoteStatus;
   createdById?: Id | null;

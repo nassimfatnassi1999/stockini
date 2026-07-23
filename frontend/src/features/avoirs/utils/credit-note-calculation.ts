@@ -18,6 +18,7 @@ export interface CreditNotePayload {
   customerId?: string;
   motif?: string;
   refundMethod: RefundMethod;
+  refundStampDuty?: boolean;
   items: CreditNoteLineInput[];
 }
 

@@ -72,7 +72,12 @@ export class CreateCreditNoteDto {
   @IsOptional()
   refundMethod?: RefundMethod;
 
-  /** Restaurer le stock globalement (priorité sur restock par ligne si false). Défaut: true. */
+  /** Rembourser le timbre unique, uniquement lorsque toutes les quantités sont retournées. */
+  @IsBoolean()
+  @IsOptional()
+  refundStampDuty?: boolean;
+
+  /** Restaurer le stock globalement. Défaut: true. */
   @IsBoolean()
   @IsOptional()
   restock?: boolean;

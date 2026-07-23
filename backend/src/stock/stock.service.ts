@@ -294,6 +294,11 @@ export class StockService {
       quantity: number;
       reason?: string;
       userId?: string;
+      sourceType?: string;
+      sourceId?: string;
+      creditNoteId?: string;
+      originalSaleId?: string;
+      originalSaleItemId?: string;
     },
   ) {
     const product = await client.product.findUniqueOrThrow({
@@ -314,6 +319,11 @@ export class StockService {
         previousQuantity: product.quantity,
         newQuantity,
         reason: input.reason,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        creditNoteId: input.creditNoteId,
+        originalSaleId: input.originalSaleId,
+        originalSaleItemId: input.originalSaleItemId,
         reference: await this.references.generate(
           this.prefixForMovement(input.type),
           'stockMovement',

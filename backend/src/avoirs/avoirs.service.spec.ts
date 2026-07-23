@@ -1,98 +1,147 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   CaisseMovementType,
-  CreditNoteStatus,
   DocumentType,
   PaymentMethod,
+  PaymentStatus,
   PaymentType,
+  SaleCreditStatus,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
 import { AvoirsService } from './avoirs.service';
-import { calculateCreditNoteTotals } from '../credit-notes/utils/credit-note-calculation.util';
 
-describe('AvoirsService', () => {
-  const product = {
-    id: 'product-1',
-    reference: 'P-001',
-    name: 'Produit test',
+describe('AvoirsService - avoirs traçables', () => {
+  const productA = {
+    id: 'product-a',
+    reference: 'A',
+    name: 'Produit A',
     tva: 19,
   };
-  const saleItem = {
-    id: 'sale-item-1',
-    productId: product.id,
-    quantity: 5,
-    unitPrice: 100,
-    product,
+  const productB = {
+    id: 'product-b',
+    reference: 'B',
+    name: 'Produit B',
+    tva: 19,
   };
-  const sale = {
+
+  const item = (
+    id: string,
+    saleId: string,
+    product = productA,
+    quantity = 5,
+    unitPrice = 20,
+  ) => ({
+    id,
+    saleId,
+    productId: product.id,
+    designation: product.name,
+    quantity,
+    unitPrice,
+    finalUnitPrice: unitPrice,
+    total: quantity * unitPrice,
+    discountPercent: 0,
+    marginPercent: null,
+    tvaPercent: 19,
+    product,
+  });
+
+  const normalSale = (overrides: Record<string, unknown> = {}) => ({
     id: 'sale-1',
     invoiceNumber: 'FAC-001',
     customerId: 'customer-1',
-    total: 595, // 5 * 100 * 1.19
+    customer: { name: 'Client' },
+    clientType: 'PERSISTENT',
+    subtotal: 100,
+    tax: 19,
+    total: 119,
+    stampDuty: 1,
+    paidAmount: 120,
+    remainingAmount: 0,
+    creditedAmount: 0,
+    creditedQuantity: 0,
+    totalInitialTtc: null,
+    totalCurrentTtc: null,
+    effectiveTotal: null,
     status: SaleStatus.COMPLETED,
     documentType: DocumentType.FACTURE,
     stockImpactDone: true,
-    items: [saleItem],
-  };
+    isConsolidated: false,
+    consolidationStatus: null,
+    consolidationSources: [],
+    items: [item('item-1', 'sale-1')],
+    ...overrides,
+  });
 
-  function buildService(alreadyReturnedQty = 0, alreadyReturnedTotal = 0) {
+  function harness(options?: {
+    sale?: ReturnType<typeof normalSale>;
+    returned?: Array<{
+      originalSaleItemId?: string | null;
+      saleItemId?: string | null;
+      quantiteRetournee: number;
+    }>;
+    settled?: number;
+    stockFailure?: Error;
+    cashFailure?: Error;
+  }) {
+    const sale = options?.sale ?? normalSale();
     const references = {
-      generateSalesDocumentNumber: jest
-        .fn()
-        .mockResolvedValue('AV-Client-01072026-001'),
+      generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-001'),
       generate: jest.fn().mockResolvedValue('AV-PAY-001'),
     };
-    const stockService = { applyMovement: jest.fn().mockResolvedValue({}) };
-    const caisseService = { recordMovement: jest.fn().mockResolvedValue({}) };
-
+    const stockService = {
+      applyMovement: options?.stockFailure
+        ? jest.fn().mockRejectedValue(options.stockFailure)
+        : jest.fn().mockResolvedValue({ id: 'stock-movement' }),
+    };
+    const caisseService = {
+      recordMovement: options?.cashFailure
+        ? jest.fn().mockRejectedValue(options.cashFailure)
+        : jest.fn().mockResolvedValue({ id: 'cash-movement' }),
+    };
     const tx: any = {
       $queryRaw: jest.fn().mockResolvedValue([]),
       sale: {
         findFirst: jest.fn().mockResolvedValue(sale),
-        findUniqueOrThrow: jest.fn().mockResolvedValue(sale),
         update: jest.fn().mockResolvedValue({}),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(sale),
       },
       creditNoteItem: {
-        groupBy: jest.fn().mockResolvedValue(
-          alreadyReturnedQty > 0
-            ? [
-                {
-                  saleItemId: saleItem.id,
-                  _sum: { quantiteRetournee: alreadyReturnedQty },
-                },
-              ]
-            : [],
-        ),
+        findMany: jest.fn().mockResolvedValue(options?.returned ?? []),
+        groupBy: jest.fn().mockResolvedValue([]),
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _sum: { totalTtc: 0, quantiteRetournee: 0 } }),
       },
       creditNote: {
         create: jest.fn(({ data }) =>
-          Promise.resolve({ id: 'avoir-1', ...data }),
+          Promise.resolve({ id: 'credit-1', ...data }),
         ),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'credit-1' }),
         aggregate: jest
           .fn()
-          .mockResolvedValue({ _sum: { total: alreadyReturnedTotal } }),
-        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'avoir-1' }),
+          .mockResolvedValue({ _sum: { total: 0, stampDuty: 0 } }),
       },
       payment: {
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _sum: { amount: options?.settled ?? 0 } }),
         create: jest.fn(({ data }) =>
-          Promise.resolve({
-            id: 'payment-1',
-            reference: data.reference,
-            ...data,
-          }),
+          Promise.resolve({ id: 'payment-1', ...data }),
         ),
       },
       customer: { update: jest.fn().mockResolvedValue({}) },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
-
     const prisma = {
-      $transaction: jest.fn((callback: (tx: any) => Promise<any>) => callback(tx)),
+      $transaction: jest.fn((callback: (client: any) => Promise<unknown>) =>
+        callback(tx),
+      ),
       sale: { findFirst: jest.fn() },
-      creditNoteItem: { groupBy: jest.fn() },
+      creditNoteItem: { findMany: jest.fn() },
+      payment: { aggregate: jest.fn() },
       creditNote: { findMany: jest.fn(), findUnique: jest.fn() },
     };
-
     const service = new AvoirsService(
       prisma as any,
       stockService as any,
@@ -102,805 +151,286 @@ describe('AvoirsService', () => {
       {} as any,
       caisseService as any,
     );
-
     return { service, tx, stockService, caisseService };
   }
 
-  // ── Unit calculation ─────────────────────────────────────────────────────────
+  const createOne = (
+    service: AvoirsService,
+    refundMethod:
+      | 'CASH'
+      | 'BANK_TRANSFER'
+      | 'CUSTOMER_CREDIT'
+      | 'NONE' = 'CASH',
+    extra: Record<string, unknown> = {},
+  ) =>
+    service.create({
+      saleId: 'sale-1',
+      refundMethod,
+      items: [
+        {
+          saleItemId: 'item-1',
+          productId: productA.id,
+          quantiteRetournee: 1,
+        },
+      ],
+      ...extra,
+    });
 
-  it('calculates TVA totals centrally with mixed rates', () => {
-    expect(
-      calculateCreditNoteTotals([
-        { quantity: 2, unitPriceHt: 100, tvaRate: 19 },
-        { quantity: 1, unitPriceHt: 50, tvaRate: 7 },
-      ]),
-    ).toEqual({ totalHt: 250, totalTva: 41.5, totalTtc: 291.5 });
+  it('crée un avoir partiel sans rembourser automatiquement le timbre', async () => {
+    const { service, tx, stockService } = harness();
+    await createOne(service);
+
+    expect(tx.creditNote.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: expect.objectContaining({}),
+          stampDuty: expect.objectContaining({}),
+          refundMethod: 'CASH',
+          consolidatedDocumentId: null,
+        }),
+      }),
+    );
+    const data = tx.creditNote.create.mock.calls[0][0].data;
+    expect(Number(data.total)).toBe(23.8);
+    expect(Number(data.stampDuty)).toBe(0);
+    expect(Number(data.montantRembourse)).toBe(23.8);
+    expect(stockService.applyMovement).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: StockMovementType.RETURN_IN,
+        sourceType: 'CREDIT_NOTE',
+        creditNoteId: 'credit-1',
+        originalSaleId: 'sale-1',
+        originalSaleItemId: 'item-1',
+      }),
+    );
   });
 
-  it('calculates exact HT/TVA/TTC for single line 19%', () => {
-    const result = calculateCreditNoteTotals([
-      { quantity: 3, unitPriceHt: 100, tvaRate: 19 },
-    ]);
-    expect(result).toEqual({ totalHt: 300, totalTva: 57, totalTtc: 357 });
+  it('réduit uniquement la dette d’un document non payé', async () => {
+    const { service, tx, caisseService } = harness({
+      sale: normalSale({ paidAmount: 0, remainingAmount: 120 }),
+    });
+    await createOne(service);
+
+    const data = tx.creditNote.create.mock.calls[0][0].data;
+    expect(Number(data.debtReductionAmount)).toBe(23.8);
+    expect(Number(data.montantRembourse)).toBe(0);
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(caisseService.recordMovement).not.toHaveBeenCalled();
   });
 
-  // ── Partial cash refund ──────────────────────────────────────────────────────
-
-  it('creates a partial cash refund with stock restore, caisse output and partial status', async () => {
-    const { service, tx, stockService, caisseService } = buildService();
-
+  it('plafonne le remboursement au trop-payé après réduction de dette', async () => {
+    const { service, tx, caisseService } = harness({
+      sale: normalSale({ paidAmount: 80, remainingAmount: 40 }),
+    });
     await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
+      saleId: 'sale-1',
       refundMethod: 'CASH',
       items: [
         {
-          productId: product.id,
-          saleItemId: saleItem.id,
-          quantiteRetournee: 1,
+          saleItemId: 'item-1',
+          productId: productA.id,
+          quantiteRetournee: 3,
         },
       ],
     });
 
-    // totals: 1 * 100 * 1.19 = 119
-    expect(tx.creditNote.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          subtotal: 100,
-          tax: 19,
-          total: 119,
-          montantRembourse: 120,
-          stampDuty: 1,
-          statut: CreditNoteStatus.REFUNDED,
-        }),
-      }),
-    );
-    expect(stockService.applyMovement).toHaveBeenCalledWith(
+    const data = tx.creditNote.create.mock.calls[0][0].data;
+    expect(Number(data.total)).toBe(71.4);
+    expect(Number(data.debtReductionAmount)).toBe(40);
+    expect(Number(data.montantRembourse)).toBe(31.4);
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
-        type: StockMovementType.CUSTOMER_RETURN,
-        quantity: 1,
+        type: CaisseMovementType.REFUND_OUT,
+        montant: -31.4,
       }),
     );
+  });
+
+  it('crée un crédit client sans mouvement de caisse', async () => {
+    const { service, tx, caisseService } = harness();
+    await createOne(service, 'CUSTOMER_CREDIT');
+
     expect(tx.payment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           type: PaymentType.CREDIT_NOTE_REFUND,
-          method: PaymentMethod.CASH,
-          cashImpactDone: true,
-        }),
-      }),
-    );
-    expect(caisseService.recordMovement).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -120,
-        paymentMethod: 'CASH',
-      }),
-    );
-    expect(tx.sale.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: sale.id },
-        data: expect.objectContaining({ status: SaleStatus.PARTIALLY_REFUNDED }),
-      }),
-    );
-  });
-
-  // ── Total cash refund ─────────────────────────────────────────────────────────
-
-  it('sets REFUNDED status when all quantities are returned', async () => {
-    // Simulate alreadyReturnedTotal = 476 (4 units already returned)
-    const { service, tx } = buildService(4, 476);
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CASH',
-      items: [
-        {
-          productId: product.id,
-          saleItemId: saleItem.id,
-          quantiteRetournee: 1, // last unit
-        },
-      ],
-    });
-
-    // After this avoir: total returned = 476 + 119 = 595 >= sale.total (595)
-    // so aggregate mock returns 595 (we mock it with 476 + the new creditNote.aggregate called after creation)
-    // Since tx.creditNote.aggregate returns alreadyReturnedTotal=476 (mocked),
-    // the updateSourceSaleRefundStatus logic uses the fresh aggregate which sums all non-cancelled credit notes.
-    // In our mock, aggregate always returns alreadyReturnedTotal=476+119 (the mock returns 476 not adding the new one)
-    // Let's just verify the sale.update was called and check the status logic runs.
-    expect(tx.sale.update).toHaveBeenCalled();
-  });
-
-  // ── Customer credit ───────────────────────────────────────────────────────────
-
-  it('creates customer credit without caisse movement', async () => {
-    const { service, tx, caisseService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CUSTOMER_CREDIT',
-      items: [
-        {
-          productId: product.id,
-          saleItemId: saleItem.id,
-          quantiteRetournee: 1,
-        },
-      ],
-    });
-
-    expect(tx.customer.update).toHaveBeenCalledWith({
-      where: { id: sale.customerId },
-      data: { creditBalance: { increment: 120 } },
-    });
-    expect(caisseService.recordMovement).not.toHaveBeenCalled();
-  });
-
-  // ── NONE refund ───────────────────────────────────────────────────────────────
-
-  it('creates avoir with NONE refund: no caisse, no credit, statut CREATED', async () => {
-    const { service, tx, caisseService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'NONE',
-      items: [
-        {
-          productId: product.id,
-          saleItemId: saleItem.id,
-          quantiteRetournee: 1,
-        },
-      ],
-    });
-
-    expect(tx.creditNote.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          montantRembourse: 0,
-          statut: CreditNoteStatus.CREATED,
-        }),
-      }),
-    );
-    expect(tx.payment.create).not.toHaveBeenCalled();
-    expect(caisseService.recordMovement).not.toHaveBeenCalled();
-    expect(tx.customer.update).not.toHaveBeenCalled();
-  });
-
-  // ── Bank/card refunds → BANK_TREASURY ─────────────────────────────────────────
-
-  it('BANK_TRANSFER refund: cashImpactDone=true and paymentMethod BANK_TRANSFER transmis', async () => {
-    const { service, tx, caisseService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'BANK_TRANSFER',
-      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-    });
-
-    expect(tx.payment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          method: PaymentMethod.BANK_TRANSFER,
-          cashImpactDone: true,
-        }),
-      }),
-    );
-    expect(caisseService.recordMovement).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -120,
-        paymentMethod: 'BANK_TRANSFER',
-      }),
-    );
-  });
-
-  it('CHECK refund: cashImpactDone=true and paymentMethod CHECK transmis', async () => {
-    const { service, tx, caisseService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CHECK',
-      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-    });
-
-    expect(tx.payment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          method: PaymentMethod.CHECK,
-          cashImpactDone: true,
-        }),
-      }),
-    );
-    expect(caisseService.recordMovement).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -120,
-        paymentMethod: 'CHECK',
-      }),
-    );
-  });
-
-  it('CARD refund: cashImpactDone=true and paymentMethod CARD transmis', async () => {
-    const { service, tx, caisseService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CARD',
-      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-    });
-
-    expect(tx.payment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          method: PaymentMethod.CARD,
-          cashImpactDone: true,
-        }),
-      }),
-    );
-    expect(caisseService.recordMovement).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        type: CaisseMovementType.ANNULATION_VENTE,
-        montant: -120,
-        paymentMethod: 'CARD',
-      }),
-    );
-  });
-
-  it('CUSTOMER_CREDIT: cashImpactDone=false, aucun mouvement, creditBalance incrémenté', async () => {
-    const { service, tx, caisseService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CUSTOMER_CREDIT',
-      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-    });
-
-    expect(tx.payment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
           method: PaymentMethod.CREDIT,
           cashImpactDone: false,
         }),
       }),
     );
-    expect(caisseService.recordMovement).not.toHaveBeenCalled();
     expect(tx.customer.update).toHaveBeenCalledWith({
-      where: { id: sale.customerId },
-      data: { creditBalance: { increment: 120 } },
+      where: { id: 'customer-1' },
+      data: { creditBalance: { increment: expect.anything() } },
     });
+    expect(caisseService.recordMovement).not.toHaveBeenCalled();
   });
 
-  // ── Quantity over-return blocked ──────────────────────────────────────────────
+  it('route un remboursement banque avec un seul mouvement négatif', async () => {
+    const { service, tx, caisseService } = harness();
+    await createOne(service, 'BANK_TRANSFER');
 
-  it('rejects when requested quantity exceeds returnable (0 remaining)', async () => {
-    const { service, tx, stockService } = buildService(5); // all 5 already returned
-
-    await expect(
-      service.create({
-        saleId: sale.id,
-        customerId: sale.customerId,
-        refundMethod: 'CASH',
-        items: [
-          {
-            productId: product.id,
-            saleItemId: saleItem.id,
-            quantiteRetournee: 1,
-          },
-        ],
-      }),
-    ).rejects.toThrow(BadRequestException);
-
-    expect(tx.creditNote.create).not.toHaveBeenCalled();
-    expect(stockService.applyMovement).not.toHaveBeenCalled();
-  });
-
-  it('rejects when requested quantity exceeds partially remaining (3 already returned)', async () => {
-    const { service, tx, stockService } = buildService(3); // 3 returned, 2 remain
-
-    await expect(
-      service.create({
-        saleId: sale.id,
-        refundMethod: 'CASH',
-        items: [
-          {
-            productId: product.id,
-            saleItemId: saleItem.id,
-            quantiteRetournee: 3, // only 2 remain
-          },
-        ],
-      }),
-    ).rejects.toThrow(BadRequestException);
-
-    expect(tx.creditNote.create).not.toHaveBeenCalled();
-    expect(stockService.applyMovement).not.toHaveBeenCalled();
-  });
-
-  // ── Multiple avoirs on same sale ──────────────────────────────────────────────
-
-  it('allows second avoir when first was partial (2 of 5 already returned)', async () => {
-    const { service, tx, stockService } = buildService(2); // 2 already returned
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CASH',
-      items: [
-        {
-          productId: product.id,
-          saleItemId: saleItem.id,
-          quantiteRetournee: 2, // 2 more; 3 remain, so valid
-        },
-      ],
-    });
-
-    expect(tx.creditNote.create).toHaveBeenCalled();
-    // Stock restored for returned items
-    expect(stockService.applyMovement).toHaveBeenCalledWith(
+    expect(caisseService.recordMovement).toHaveBeenCalledTimes(1);
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
       tx,
-      expect.objectContaining({ quantity: 2 }),
+      expect.objectContaining({
+        type: CaisseMovementType.REFUND_OUT,
+        paymentMethod: 'BANK_TRANSFER',
+        creditNoteId: 'credit-1',
+      }),
     );
   });
 
-  // ── restock flag ──────────────────────────────────────────────────────────────
-
-  it('skips stock restoration when restock=false (commercial credit note)', async () => {
-    const { service, tx, stockService } = buildService();
-
-    await service.create({
-      saleId: sale.id,
-      customerId: sale.customerId,
-      refundMethod: 'CUSTOMER_CREDIT',
-      restock: false,
-      items: [
-        {
-          productId: product.id,
-          saleItemId: saleItem.id,
-          quantiteRetournee: 2,
-        },
+  it('refuse un retour supérieur à la quantité restante', async () => {
+    const { service, tx } = harness({
+      returned: [
+        { originalSaleItemId: 'item-1', quantiteRetournee: 4 },
       ],
     });
+    await expect(
+      service.create({
+        saleId: 'sale-1',
+        refundMethod: 'NONE',
+        items: [
+          {
+            saleItemId: 'item-1',
+            productId: productA.id,
+            quantiteRetournee: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(tx.creditNote.create).not.toHaveBeenCalled();
+  });
 
+  it('autorise un deuxième avoir sur la quantité restante', async () => {
+    const { service, tx } = harness({
+      returned: [
+        { originalSaleItemId: 'item-1', quantiteRetournee: 3 },
+      ],
+    });
+    await createOne(service, 'NONE');
     expect(tx.creditNote.create).toHaveBeenCalled();
-    expect(stockService.applyMovement).not.toHaveBeenCalled();
   });
 
-  it('per-line restock=false skips stock for that line only', async () => {
-    const product2 = { id: 'product-2', name: 'Produit 2', tva: 19 };
-    const saleItem2 = {
-      id: 'sale-item-2',
-      productId: product2.id,
-      quantity: 3,
-      unitPrice: 50,
-      product: product2,
-    };
-    const saleWithTwo = {
-      ...sale,
-      items: [saleItem, saleItem2],
-    };
-
-    const txMulti: any = {
-      $queryRaw: jest.fn().mockResolvedValue([]),
-      sale: {
-        findFirst: jest.fn().mockResolvedValue(saleWithTwo),
-        findUniqueOrThrow: jest.fn().mockResolvedValue(saleWithTwo),
-        update: jest.fn().mockResolvedValue({}),
-      },
-      creditNoteItem: {
-        groupBy: jest.fn().mockResolvedValue([]),
-      },
-      creditNote: {
-        create: jest.fn(({ data }) => Promise.resolve({ id: 'avoir-1', ...data })),
-        aggregate: jest.fn().mockResolvedValue({ _sum: { total: 0 } }),
-        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'avoir-1' }),
-      },
-      payment: {
-        create: jest.fn(({ data }) =>
-          Promise.resolve({ id: 'payment-1', reference: data.reference, ...data }),
-        ),
-      },
-      customer: { update: jest.fn().mockResolvedValue({}) },
-    };
-
-    const prismaMulti = {
-      $transaction: jest.fn((cb: (tx: any) => Promise<any>) => cb(txMulti)),
-      sale: { findFirst: jest.fn() },
-      creditNoteItem: { groupBy: jest.fn() },
-      creditNote: { findMany: jest.fn(), findUnique: jest.fn() },
-    };
-
-    const stockServiceMulti = { applyMovement: jest.fn().mockResolvedValue({}) };
-    const references = {
-      generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-001'),
-      generate: jest.fn().mockResolvedValue('AV-PAY-001'),
-    };
-
-    const service = new AvoirsService(
-      prismaMulti as any,
-      stockServiceMulti as any,
-      references as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      { recordMovement: jest.fn() } as any,
-    );
-
+  it('ne rembourse le timbre unique que sur un retour total explicite', async () => {
+    const { service, tx } = harness();
     await service.create({
-      saleId: saleWithTwo.id,
-      refundMethod: 'NONE',
+      saleId: 'sale-1',
+      refundMethod: 'CASH',
+      refundStampDuty: true,
       items: [
-        { productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1, restock: false },
-        { productId: product2.id, saleItemId: saleItem2.id, quantiteRetournee: 1, restock: true },
+        {
+          saleItemId: 'item-1',
+          productId: productA.id,
+          quantiteRetournee: 5,
+        },
       ],
     });
-
-    expect(stockServiceMulti.applyMovement).toHaveBeenCalledTimes(1);
-    expect(stockServiceMulti.applyMovement).toHaveBeenCalledWith(
-      txMulti,
-      expect.objectContaining({ productId: product2.id, quantity: 1 }),
-    );
-  });
-
-  // ── totalRefunded persisted on Sale ──────────────────────────────────────────
-
-  it('persists totalRefunded on sale.update when avoir is created', async () => {
-    // aggregate returns 119 (the avoir total summed)
-    const txRefund: any = {
-      $queryRaw: jest.fn().mockResolvedValue([]),
-      sale: {
-        findFirst: jest.fn().mockResolvedValue(sale),
-        findUniqueOrThrow: jest.fn().mockResolvedValue(sale),
-        update: jest.fn().mockResolvedValue({}),
-      },
-      creditNoteItem: { groupBy: jest.fn().mockResolvedValue([]) },
-      creditNote: {
-        create: jest.fn(({ data }) => Promise.resolve({ id: 'av-1', ...data })),
-        aggregate: jest.fn().mockResolvedValue({ _sum: { total: 119 } }),
-        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'av-1' }),
-      },
-      payment: {
-        create: jest.fn(({ data }) =>
-          Promise.resolve({ id: 'p-1', reference: 'ref', ...data }),
-        ),
-      },
-      customer: { update: jest.fn().mockResolvedValue({}) },
-    };
-    const prismaRefund = {
-      $transaction: jest.fn((cb: (tx: any) => Promise<any>) => cb(txRefund)),
-    };
-    const service = new AvoirsService(
-      prismaRefund as any,
-      { applyMovement: jest.fn() } as any,
-      { generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-001'), generate: jest.fn().mockResolvedValue('AV-PAY-001') } as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      { recordMovement: jest.fn() } as any,
-    );
-
-    await service.create({
-      saleId: sale.id,
-      refundMethod: 'CASH',
-      items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-    });
-
-    expect(txRefund.sale.update).toHaveBeenCalledWith(
+    const data = tx.creditNote.create.mock.calls[0][0].data;
+    expect(Number(data.stampDuty)).toBe(1);
+    expect(Number(data.montantRembourse)).toBe(120);
+    expect(tx.sale.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ totalRefunded: 119 }),
-      }),
-    );
-  });
-
-  // ── Validation guards ─────────────────────────────────────────────────────────
-
-  it('rejects empty items array', async () => {
-    const { service } = buildService();
-    await expect(
-      service.create({ saleId: sale.id, refundMethod: 'CASH', items: [] }),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('rejects non-integer quantity', async () => {
-    const { service } = buildService();
-    await expect(
-      service.create({
-        saleId: sale.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1.5 }],
-      }),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('rejects quantity of 0', async () => {
-    const { service } = buildService();
-    await expect(
-      service.create({
-        saleId: sale.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 0 }],
-      }),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  // ── BL support (BON_LIVRAISON) ────────────────────────────────────────────────
-
-  it('accepts BON_LIVRAISON as source document', async () => {
-    const bl = {
-      ...sale,
-      invoiceNumber: 'BL-001',
-      documentType: DocumentType.BON_LIVRAISON,
-    };
-
-    const txBl: any = {
-      $queryRaw: jest.fn().mockResolvedValue([]),
-      sale: {
-        findFirst: jest.fn().mockResolvedValue(bl),
-        findUniqueOrThrow: jest.fn().mockResolvedValue(bl),
-        update: jest.fn().mockResolvedValue({}),
-      },
-      creditNoteItem: { groupBy: jest.fn().mockResolvedValue([]) },
-      creditNote: {
-        create: jest.fn(({ data }) => Promise.resolve({ id: 'av-bl', ...data })),
-        aggregate: jest.fn().mockResolvedValue({ _sum: { total: 119 } }),
-        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'av-bl' }),
-      },
-      payment: {
-        create: jest.fn(({ data }) =>
-          Promise.resolve({ id: 'p-bl', reference: 'ref', ...data }),
-        ),
-      },
-      customer: { update: jest.fn().mockResolvedValue({}) },
-    };
-    const prismaBl = {
-      $transaction: jest.fn((cb: (tx: any) => Promise<any>) => cb(txBl)),
-    };
-
-    const service = new AvoirsService(
-      prismaBl as any,
-      { applyMovement: jest.fn() } as any,
-      { generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Comptoir-01072026-001'), generate: jest.fn().mockResolvedValue('AV-PAY-BL') } as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      { recordMovement: jest.fn() } as any,
-    );
-
-    await expect(
-      service.create({
-        saleId: bl.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-      }),
-    ).resolves.toBeDefined();
-
-    expect(txBl.creditNote.create).toHaveBeenCalled();
-  });
-
-  // ── totalCurrentTtc / totalInitialTtc ────────────────────────────────────────
-
-  describe('totalCurrentTtc and totalInitialTtc', () => {
-    // sale.total = 595 (5 units × 100 × 1.19)
-    // avoir of 1 unit = 119 TTC
-    // expected: initialTtc = 595, currentTtc = 595 - 119 = 476
-
-    function buildTotalsService(
-      saleTotalInitialTtc: null | number,
-      aggregateTotal: number,
-    ) {
-      const saleWithSnapshot = {
-        ...sale,
-        totalInitialTtc: saleTotalInitialTtc,
-      };
-      const tx: any = {
-        $queryRaw: jest.fn().mockResolvedValue([]),
-        sale: {
-          findFirst: jest.fn().mockResolvedValue(saleWithSnapshot),
-          findUniqueOrThrow: jest.fn().mockResolvedValue(saleWithSnapshot),
-          update: jest.fn().mockResolvedValue({}),
-        },
-        creditNoteItem: { groupBy: jest.fn().mockResolvedValue([]) },
-        creditNote: {
-          create: jest.fn(({ data }) => Promise.resolve({ id: 'av-1', ...data })),
-          aggregate: jest.fn().mockResolvedValue({ _sum: { total: aggregateTotal } }),
-          findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'av-1' }),
-        },
-        payment: {
-          create: jest.fn(({ data }) =>
-            Promise.resolve({ id: 'p-1', reference: 'ref', ...data }),
-          ),
-        },
-        customer: { update: jest.fn().mockResolvedValue({}) },
-      };
-      const prisma = {
-        $transaction: jest.fn((cb: (tx: any) => Promise<any>) => cb(tx)),
-      };
-      const service = new AvoirsService(
-        prisma as any,
-        { applyMovement: jest.fn() } as any,
-        {
-          generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-001'),
-          generate: jest.fn().mockResolvedValue('AV-PAY-001'),
-        } as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        { recordMovement: jest.fn() } as any,
-      );
-      return { service, tx };
-    }
-
-    it('sets totalInitialTtc from sale.total and totalCurrentTtc = total - refunded on first avoir', async () => {
-      // First ever avoir: totalInitialTtc is null → should snapshot sale.total (595)
-      // aggregate returns 119 (this avoir)
-      const { service, tx } = buildTotalsService(null, 119);
-
-      await service.create({
-        saleId: sale.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-      });
-
-      expect(tx.sale.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            totalInitialTtc: 595,
-            totalCurrentTtc: 476, // 595 - 119
-            totalRefunded: 119,
-          }),
+        data: expect.objectContaining({
+          creditStatus: SaleCreditStatus.FULL,
+          paymentStatus: PaymentStatus.PAID,
         }),
-      );
-    });
-
-    it('does not overwrite totalInitialTtc on subsequent avoirs', async () => {
-      // Second avoir: totalInitialTtc already = 595, aggregate = 238 (2 avoirs of 119 each)
-      const { service, tx } = buildTotalsService(595, 238);
-
-      await service.create({
-        saleId: sale.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-      });
-
-      // totalInitialTtc must NOT be in the update data (already set)
-      const updateCall = tx.sale.update.mock.calls[0][0];
-      expect(updateCall.data).not.toHaveProperty('totalInitialTtc');
-      expect(updateCall.data).toMatchObject({
-        totalCurrentTtc: 357, // 595 - 238
-        totalRefunded: 238,
-      });
-    });
-
-    it('sets totalCurrentTtc to 0 when fully refunded (avoir total)', async () => {
-      // All 5 units returned: aggregate = 595
-      const { service, tx } = buildTotalsService(null, 595);
-
-      await service.create({
-        saleId: sale.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-      });
-
-      expect(tx.sale.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            totalCurrentTtc: 0,
-            status: SaleStatus.REFUNDED,
-          }),
-        }),
-      );
-    });
-
-    it('example: FAC 79.473 DT, avoir 58.786 DT → current 20.687 DT', async () => {
-      const bigSale = {
-        ...sale,
-        total: 79.473,
-        totalInitialTtc: null,
-        items: [{ id: 'si-big', quantity: 1 }],
-      };
-      const tx: any = {
-        $queryRaw: jest.fn().mockResolvedValue([]),
-        sale: {
-          findFirst: jest.fn().mockResolvedValue(bigSale),
-          findUniqueOrThrow: jest.fn().mockResolvedValue(bigSale),
-          update: jest.fn().mockResolvedValue({}),
-        },
-        creditNoteItem: { groupBy: jest.fn().mockResolvedValue([]) },
-        creditNote: {
-          create: jest.fn(({ data }) => Promise.resolve({ id: 'av-big', ...data })),
-          aggregate: jest.fn().mockResolvedValue({ _sum: { total: 58.786 } }),
-          findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'av-big' }),
-        },
-        payment: {
-          create: jest.fn(({ data }) =>
-            Promise.resolve({ id: 'p-big', reference: 'ref', ...data }),
-          ),
-        },
-        customer: { update: jest.fn().mockResolvedValue({}) },
-      };
-      const prisma = {
-        $transaction: jest.fn((cb: (tx: any) => Promise<any>) => cb(tx)),
-      };
-      const svc = new AvoirsService(
-        prisma as any,
-        { applyMovement: jest.fn() } as any,
-        {
-          generateSalesDocumentNumber: jest.fn().mockResolvedValue('AV-Client-01072026-999'),
-          generate: jest.fn().mockResolvedValue('AV-PAY-BIG'),
-        } as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        { recordMovement: jest.fn() } as any,
-      );
-
-      // We can't call svc.create here because the dto.items validation requires
-      // real saleItems; just verify the updateSourceSaleRefundStatus logic directly
-      // by checking what sale.update would be called with after the refund aggregate.
-      // The aggregate mock returns 58.786 and sale.total = 79.473.
-      // Expected: initialTtc = 79.473, currentTtc = 79.473 - 58.786 = 20.687
-
-      // Call create with a minimal item that passes validation via the mocked saleItem
-      const bigSaleWithItem = {
-        ...bigSale,
-        items: [{ id: saleItem.id, productId: product.id, quantity: 1, unitPrice: 79.473, product }],
-      };
-      tx.sale.findFirst.mockResolvedValue(bigSaleWithItem);
-      tx.sale.findUniqueOrThrow.mockResolvedValue({ ...bigSale, items: [{ id: saleItem.id, quantity: 1 }] });
-
-      await svc.create({
-        saleId: bigSale.id,
-        refundMethod: 'CASH',
-        items: [{ productId: product.id, saleItemId: saleItem.id, quantiteRetournee: 1 }],
-      });
-
-      const updateData = tx.sale.update.mock.calls[0][0].data;
-      expect(updateData.totalInitialTtc).toBeCloseTo(79.473, 3);
-      expect(updateData.totalCurrentTtc).toBeCloseTo(20.687, 3);
-      expect(updateData.totalRefunded).toBeCloseTo(58.786, 3);
-    });
-  });
-
-  // ── Getters ──────────────────────────────────────────────────────────────────
-
-  it('findAll delegates to prisma.creditNote.findMany', async () => {
-    const { service } = buildService();
-    const prismaFindMany = {
-      $transaction: jest.fn(),
-      sale: { findFirst: jest.fn() },
-      creditNoteItem: { groupBy: jest.fn() },
-      creditNote: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'av-1' }]),
-        findUnique: jest.fn(),
-      },
-    };
-
-    const svc = new AvoirsService(
-      prismaFindMany as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
-
-    const result = await svc.findAll('customer-1', undefined);
-    expect(prismaFindMany.creditNote.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ customerId: 'customer-1' }),
       }),
     );
-    expect(result).toHaveLength(1);
+  });
+
+  it('refuse le timbre sur un avoir partiel', async () => {
+    const { service } = harness();
+    await expect(
+      createOne(service, 'CASH', { refundStampDuty: true }),
+    ).rejects.toThrow(/timbre fiscal/);
+  });
+
+  it.each([
+    [DocumentType.BON_LIVRAISON, false, 'BL'],
+    [DocumentType.FACTURE, false, 'Facture'],
+  ])('accepte un document normal %s', async (documentType) => {
+    const { service } = harness({
+      sale: normalSale({ documentType }),
+    });
+    await expect(createOne(service, 'NONE')).resolves.toBeDefined();
+  });
+
+  it.each([
+    [DocumentType.BON_LIVRAISON, 'BLG'],
+    [DocumentType.FACTURE, 'FACG'],
+  ])(
+    'alloue en FIFO un retour consolidé %s sur les lignes sources',
+    async (documentType) => {
+      const source1 = {
+        id: 'bl-1',
+        total: 60,
+        stampDuty: 1,
+        stockImpactDone: true,
+        items: [item('bl1-a', 'bl-1', productA, 3)],
+      };
+      const source2 = {
+        id: 'bl-2',
+        total: 40,
+        stampDuty: 1,
+        stockImpactDone: true,
+        items: [item('bl2-a', 'bl-2', productA, 2)],
+      };
+      const source3 = {
+        id: 'bl-3',
+        total: 80,
+        stampDuty: 1,
+        stockImpactDone: true,
+        items: [item('bl3-b', 'bl-3', productB, 4)],
+      };
+      const consolidated = normalSale({
+        id: 'sale-1',
+        invoiceNumber: 'GRP-001',
+        documentType,
+        isConsolidated: true,
+        stockImpactDone: false,
+        consolidationStatus: 'ACTIVE',
+        items: [],
+        consolidationSources: [
+          { sourceReference: 'BL1', sourceSale: source1 },
+          { sourceReference: 'BL2', sourceSale: source2 },
+          { sourceReference: 'BL3', sourceSale: source3 },
+        ],
+      });
+      const { service, tx } = harness({ sale: consolidated });
+      await service.create({
+        saleId: 'sale-1',
+        refundMethod: 'NONE',
+        items: [
+          { productId: productA.id, quantiteRetournee: 4 },
+          { productId: productB.id, quantiteRetournee: 1 },
+        ],
+      });
+
+      const createdItems = tx.creditNote.create.mock.calls[0][0].data.items.create;
+      expect(
+        createdItems.map((line: any) => [
+          line.sourceReference,
+          line.quantiteRetournee,
+          line.originalSaleItemId,
+        ]),
+      ).toEqual([
+        ['BL1', 3, 'bl1-a'],
+        ['BL2', 1, 'bl2-a'],
+        ['BL3', 1, 'bl3-b'],
+      ]);
+    },
+  );
+
+  it.each([
+    ['stock', { stockFailure: new Error('stock failed') }],
+    ['caisse', { cashFailure: new Error('cash failed') }],
+  ])('propage une erreur %s pour rollback de la transaction', async (_, failure) => {
+    const { service, tx } = harness(failure);
+    await expect(createOne(service)).rejects.toThrow(/failed/);
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 });

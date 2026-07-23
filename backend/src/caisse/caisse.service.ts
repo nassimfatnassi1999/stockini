@@ -97,6 +97,7 @@ const OUT_TYPES = [
   CaisseMovementType.DEPENSE_GENERALE,
   CaisseMovementType.RETRAIT_MANUEL,
   CaisseMovementType.ANNULATION_VENTE,
+  CaisseMovementType.REFUND_OUT,
 ];
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -750,6 +751,7 @@ export class CaisseService {
       userId?: string;
       paymentMethod?: string | null;
       treasuryAccount?: TreasuryAccount;
+      creditNoteId?: string;
     },
   ) {
     // Central protection: CREDIT is never a cash/bank event.
@@ -802,6 +804,8 @@ export class CaisseService {
         motif: input.motif,
         referenceDoc: input.referenceDoc,
         expenseId: input.expenseId,
+        creditNoteId: input.creditNoteId,
+        paymentMethod: input.paymentMethod,
         userId: input.userId,
       },
     });
@@ -813,6 +817,7 @@ export class CaisseService {
       [CaisseMovementType.DEPOT_MANUEL]: 'caisse.depot',
       [CaisseMovementType.RETRAIT_MANUEL]: 'caisse.retrait',
       [CaisseMovementType.ANNULATION_VENTE]: 'caisse.annulation_vente',
+      [CaisseMovementType.REFUND_OUT]: 'caisse.refund_out',
       [CaisseMovementType.ANNULATION_ACHAT]: 'caisse.annulation_achat',
       [CaisseMovementType.ANNULATION_DEPENSE]: 'caisse.annulation_depense',
       [CaisseMovementType.CASH_RESET]: 'caisse.reset',

@@ -263,6 +263,7 @@ const STOCK_ENTRY_TYPES = [
   StockMovementType.ENTRY,
   StockMovementType.PURCHASE_RECEPTION,
   StockMovementType.CUSTOMER_RETURN,
+  StockMovementType.RETURN_IN,
 ];
 
 const STOCK_EXIT_TYPES = [

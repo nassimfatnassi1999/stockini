@@ -117,6 +117,7 @@ function AvoirDetailModal({
               <thead>
                 <tr className="bg-gray-100">
                   <th className="text-left p-2 border">Désignation</th>
+                  <th className="text-left p-2 border">Source</th>
                   <th className="text-right p-2 border">Qté</th>
                   <th className="text-right p-2 border">PU HT</th>
                   <th className="text-right p-2 border">Total HT</th>
@@ -129,6 +130,9 @@ function AvoirDetailModal({
                 {avoir.items.map((item) => (
                   <tr key={item.id} className="odd:bg-white even:bg-gray-50">
                     <td className="p-2 border">{item.designation}</td>
+                    <td className="p-2 border font-mono text-gray-500">
+                      {item.sourceReference ?? avoir.sale?.invoiceNumber ?? "—"}
+                    </td>
                     <td className="p-2 border text-right">
                       {item.quantiteRetournee}
                     </td>
@@ -192,6 +196,9 @@ interface LineState {
   saleItemId: string;
   productId: string;
   designation: string;
+  sourceReference: string;
+  quantiteSold: number;
+  quantiteDejaRetournee: number;
   quantiteRetournable: number;
   unitPrice: number;
   tvaRate: number;
@@ -240,6 +247,13 @@ const ReturnLineRow = memo(function ReturnLineRow({
         />
       </td>
       <td className="p-2 align-top font-medium">{line.designation}</td>
+      <td className="p-2 align-top font-mono text-gray-500">
+        {line.sourceReference}
+      </td>
+      <td className="p-2 text-right align-top">{line.quantiteSold}</td>
+      <td className="p-2 text-right align-top">
+        {line.quantiteDejaRetournee}
+      </td>
       <td className="p-2 text-right align-top">{line.quantiteRetournable}</td>
       <td className="p-2 text-right align-top">
         <input
@@ -280,13 +294,15 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
   const [saleSearch, setSaleSearch] = useState("");
   const [selectedSaleId, setSelectedSaleId] = useState("");
   const [selectedSaleInvoice, setSelectedSaleInvoice] = useState("");
+  const [selectedSaleLabel, setSelectedSaleLabel] = useState("");
   const [motif, setMotif] = useState("");
   const [refundMethod, setRefundMethod] = useState<RefundMethod>("CASH");
+  const [refundStampDuty, setRefundStampDuty] = useState(false);
   const [lines, setLines] = useState<LineState[]>([]);
 
   const salesQuery = useQuery({
     queryKey: ["stockini-sales"],
-    queryFn: () => stockiniApi.sales(),
+    queryFn: () => stockiniApi.sales({ limit: 100 }),
   });
   const sales: Sale[] = Array.isArray(salesQuery.data?.data)
     ? salesQuery.data.data
@@ -297,7 +313,13 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
       saleSearch
         ? sales.filter((s) => {
             const q = saleSearch.toLowerCase();
-            return (
+            const eligible =
+              ["FACTURE", "BON_LIVRAISON"].includes(s.documentType) &&
+              ["COMPLETED", "PARTIALLY_REFUNDED"].includes(s.status) &&
+              (s.isConsolidated
+                ? s.consolidationStatus === "ACTIVE"
+                : s.stockImpactDone);
+            return eligible && (
               s.invoiceNumber.toLowerCase().includes(q) ||
               (s.customer?.name ?? "").toLowerCase().includes(q)
             );
@@ -319,6 +341,9 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
         saleItemId: item.saleItemId,
         productId: item.productId,
         designation: item.product?.name ?? item.productId,
+        sourceReference: item.sourceReference,
+        quantiteSold: item.quantiteSold,
+        quantiteDejaRetournee: item.quantiteDejaRetournee,
         quantiteRetournable: item.quantiteRetournable,
         unitPrice: item.unitPrice,
         tvaRate: item.tvaRate,
@@ -332,6 +357,15 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
   const handleSelectSale = (sale: Sale) => {
     setSelectedSaleId(sale.id);
     setSelectedSaleInvoice(sale.invoiceNumber);
+    setSelectedSaleLabel(
+      sale.documentType === "BON_LIVRAISON"
+        ? sale.isConsolidated
+          ? "BLG consolidé"
+          : "BL"
+        : sale.isConsolidated
+          ? "FACG consolidée"
+          : "Facture",
+    );
     setSaleSearch("");
     setLines([]);
   };
@@ -361,7 +395,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
   const validation = useMemo<LineErrors>(() => {
     const errors: LineErrors = { lines: {} };
     if (!selectedSaleId) {
-      errors.form = "Sélectionnez une facture.";
+      errors.form = "Sélectionnez un document.";
       return errors;
     }
     if (selectedLines.length === 0) {
@@ -395,6 +429,35 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
       ),
     [selectedLines],
   );
+  const isFullReturn =
+    lines.length > 0 &&
+    lines.every(
+      (line) =>
+        line.quantiteDejaRetournee +
+          (line.selected ? line.quantiteRetournee : 0) >=
+        line.quantiteSold,
+    );
+  useEffect(() => {
+    if (!isFullReturn) setRefundStampDuty(false);
+  }, [isFullReturn]);
+  const creditTotal =
+    totals.totalTtc + (refundStampDuty && isFullReturn ? 1 : 0);
+  const effectiveTotal = returnableQuery.data?.effectiveTotal ?? 0;
+  const effectivePaid = returnableQuery.data?.effectivePaid ?? 0;
+  const debtReduction = Math.min(
+    creditTotal,
+    Math.max(effectiveTotal - effectivePaid, 0),
+  );
+  const refundable = Math.min(
+    creditTotal,
+    Math.max(effectivePaid - Math.max(effectiveTotal - creditTotal, 0), 0),
+  );
+  const realRefund =
+    refundMethod !== "NONE" && refundMethod !== "CUSTOMER_CREDIT"
+      ? refundable
+      : 0;
+  const customerCredit =
+    refundMethod === "CUSTOMER_CREDIT" ? refundable : 0;
 
   const createMutation = useMutation({
     mutationFn: () => {
@@ -404,6 +467,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
         customerId: sale?.customer?.id,
         motif: motif || undefined,
         refundMethod,
+        refundStampDuty,
         items: selectedLines.map((l) => ({
           productId: l.productId,
           saleItemId: l.saleItemId,
@@ -429,6 +493,8 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
       setMotif("");
       setSelectedSaleId("");
       setSelectedSaleInvoice("");
+      setSelectedSaleLabel("");
+      setRefundStampDuty(false);
       onClose();
     },
     onError: (err: unknown) => {
@@ -485,7 +551,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
         {/* Facture selection */}
         <div>
           <label className="block text-sm font-medium mb-1">
-            Facture concernée *
+            Document concerné *
           </label>
           {!selectedSaleId ? (
             <>
@@ -496,7 +562,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
                 />
                 <input
                   className="w-full border rounded pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  placeholder="Numéro de facture ou nom du client…"
+                  placeholder="N° BL, facture, BLG, FACG ou nom du client…"
                   value={saleSearch}
                   onChange={(e) => setSaleSearch(e.target.value)}
                   autoFocus
@@ -513,6 +579,15 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
                       <span className="font-mono font-semibold">
                         {s.invoiceNumber}
                       </span>
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px]">
+                        {s.documentType === "BON_LIVRAISON"
+                          ? s.isConsolidated
+                            ? "BLG consolidé"
+                            : "BL"
+                          : s.isConsolidated
+                            ? "FACG consolidée"
+                            : "Facture"}
+                      </span>
                       <span className="text-gray-500 truncate">
                         {s.customer?.name ?? "Comptoir"}
                       </span>
@@ -525,20 +600,21 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
               )}
               {saleSearch && filteredSales.length === 0 && (
                 <p className="text-xs text-gray-400 mt-1">
-                  Aucune facture trouvée
+                  Aucun document éligible trouvé
                 </p>
               )}
             </>
           ) : (
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded px-3 py-2">
               <span>
-                Facture : <strong>{selectedSaleInvoice}</strong>
+                {selectedSaleLabel} : <strong>{selectedSaleInvoice}</strong>
               </span>
               <button
                 className="ml-auto text-gray-400 hover:text-gray-600"
                 onClick={() => {
                   setSelectedSaleId("");
                   setSelectedSaleInvoice("");
+                  setSelectedSaleLabel("");
                   setLines([]);
                 }}
               >
@@ -557,7 +633,7 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
             {returnableQuery.isSuccess &&
               returnableQuery.data?.items.length === 0 && (
                 <p className="text-sm text-orange-600 bg-orange-50 rounded px-3 py-2">
-                  Tous les articles de cette facture ont déjà été retournés.
+                  Tous les articles de ce document ont déjà été retournés.
                 </p>
               )}
             {lines.length > 0 && (
@@ -571,7 +647,10 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
                       <tr>
                         <th className="p-2 w-8 text-center"></th>
                         <th className="p-2 text-left">Désignation</th>
-                        <th className="p-2 text-right">Disponible</th>
+                        <th className="p-2 text-left">Source</th>
+                        <th className="p-2 text-right">Vendue</th>
+                        <th className="p-2 text-right">Déjà retournée</th>
+                        <th className="p-2 text-right">Retournable</th>
                         <th className="p-2 text-right">Quantité</th>
                         <th className="p-2 text-right">PU HT</th>
                         <th className="p-2 text-right">Total HT</th>
@@ -633,6 +712,17 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
+            <label className="mt-2 flex items-start gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={refundStampDuty}
+                disabled={!isFullReturn}
+                onChange={(event) =>
+                  setRefundStampDuty(event.target.checked)
+                }
+              />
+              Rembourser le timbre unique de 1 DT (avoir total uniquement)
+            </label>
           </div>
         </div>
 
@@ -653,14 +743,20 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
                 <span>{money(totals.totalTtc)}</span>
               </div>
               <div className="flex justify-between gap-8">
-                <span>Timbre fiscal</span>
-                <span>{money(1)}</span>
+                <span>Timbre remboursé</span>
+                <span>{money(refundStampDuty ? 1 : 0)}</span>
               </div>
-              <div className="flex justify-between gap-8 font-bold text-red-700 border-t pt-1">
-                <span>Remboursement</span>
-                <span>
-                  {money(refundMethod === "NONE" ? 0 : totals.totalTtc + 1)}
-                </span>
+              <div className="flex justify-between gap-8 border-t pt-1">
+                <span>Réduction de dette</span>
+                <span>{money(debtReduction)}</span>
+              </div>
+              <div className="flex justify-between gap-8 font-bold text-red-700">
+                <span>Remboursement réel</span>
+                <span>{money(realRefund)}</span>
+              </div>
+              <div className="flex justify-between gap-8 font-semibold text-blue-700">
+                <span>Crédit client</span>
+                <span>{money(customerCredit)}</span>
               </div>
             </div>
           </div>

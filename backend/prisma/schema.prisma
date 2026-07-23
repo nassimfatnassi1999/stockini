@@ -24,6 +24,7 @@ enum StockMovementType {
   SALE
   PURCHASE_RECEPTION
   CUSTOMER_RETURN
+  RETURN_IN
   SUPPLIER_RETURN
   INVENTORY_CORRECTION
   TRANSFER
@@ -36,6 +37,7 @@ enum CaisseMovementType {
   DEPOT_MANUEL
   RETRAIT_MANUEL
   ANNULATION_VENTE
+  REFUND_OUT
   ANNULATION_ACHAT
   ANNULATION_DEPENSE
   CASH_RESET
@@ -87,6 +89,7 @@ enum PaymentStatus {
   UNPAID
   PARTIAL
   PAID
+  CREDIT_BALANCE
 }
 
 enum PaymentMethod {
@@ -123,6 +126,12 @@ enum CreditNoteStatus {
   CREATED
   REFUNDED
   CANCELLED
+}
+
+enum SaleCreditStatus {
+  NONE
+  PARTIAL
+  FULL
 }
 
 enum EmailStatus {
@@ -324,78 +333,90 @@ model Supplier {
 }
 
 model StockMovement {
-  id               String            @id @default(cuid())
-  productId        String
-  type             StockMovementType
-  quantity         Int
-  previousQuantity Int
-  newQuantity      Int
-  reason           String?
-  reference        String?           @unique
-  userId           String?
-  createdAt        DateTime          @default(now())
-  product          Product           @relation(fields: [productId], references: [id])
-  user             User?             @relation(fields: [userId], references: [id])
+  id                 String            @id @default(cuid())
+  productId          String
+  type               StockMovementType
+  quantity           Int
+  previousQuantity   Int
+  newQuantity        Int
+  reason             String?
+  reference          String?           @unique
+  userId             String?
+  createdAt          DateTime          @default(now())
+  sourceType         String?
+  sourceId           String?
+  creditNoteId       String?
+  originalSaleId     String?
+  originalSaleItemId String?
+  product            Product           @relation(fields: [productId], references: [id])
+  user               User?             @relation(fields: [userId], references: [id])
 
   @@index([productId])
   @@index([type])
   @@index([createdAt])
+  @@index([sourceType, sourceId])
+  @@index([creditNoteId])
+  @@index([originalSaleItemId])
 }
 
 model Sale {
-  id                       String                    @id @default(cuid())
-  invoiceNumber            String                    @unique
-  customerId               String?
-  subtotal                 Decimal                   @db.Decimal(12, 3)
-  discount                 Decimal                   @default(0) @db.Decimal(12, 3)
-  tax                      Decimal                   @default(0) @db.Decimal(12, 3)
-  total                    Decimal                   @db.Decimal(12, 3)
-  stampDuty                Decimal                   @default(1) @db.Decimal(12, 3)
-  paidAmount               Decimal                   @default(0) @db.Decimal(12, 3)
-  remainingAmount          Decimal                   @default(0) @db.Decimal(12, 3)
-  totalRefunded            Decimal                   @default(0) @db.Decimal(12, 3)
-  totalInitialTtc          Decimal?                  @db.Decimal(12, 3)
-  totalCurrentTtc          Decimal?                  @db.Decimal(12, 3)
-  paymentStatus            PaymentStatus?
-  status                   SaleStatus                @default(DRAFT)
-  documentType             DocumentType              @default(DEVIS)
-  stockImpactDone          Boolean                   @default(false)
-  lastSalePriceImpactDone  Boolean                   @default(false) @map("last_sale_price_impact_done")
-  reserveStock             Boolean                   @default(false)
-  sourceDocumentId         String?                   @map("source_document_id")
-  transformedToId          String?                   @map("transformed_to_id")
-  sellerId                 String?
-  clientType               String?                   @map("client_type")
-  counterClientFirstName   String?                   @map("counter_client_first_name")
-  counterClientLastName    String?                   @map("counter_client_last_name")
-  counterClientFullName    String?                   @map("counter_client_full_name")
-  counterClientPhone       String?                   @map("counter_client_phone")
-  counterClientAddress     String?                   @map("counter_client_address")
-  counterClientEmail       String?                   @map("counter_client_email")
-  counterClientTaxId       String?                   @map("counter_client_tax_id")
-  counterClientNote        String?                   @map("counter_client_note")
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
-  isEdited                 Boolean                   @default(false)
-  editedAt                 DateTime?
-  deletedAt                DateTime?
-  deletedBy                String?
-  customer                 Customer?                 @relation(fields: [customerId], references: [id])
-  seller                   User?                     @relation("SellerSales", fields: [sellerId], references: [id])
-  items                    SaleItem[]
-  payments                 Payment[]
-  generatedDocuments       GeneratedDocument[]
-  creditNotes              CreditNote[]
-  productPriceHistories    ProductPriceHistory[]
-  isConsolidated           Boolean                   @default(false) @map("is_consolidated")
-  consolidationStatus      ConsolidationStatus?      @map("consolidation_status")
-  consolidationNote        String?                   @map("consolidation_note")
-  consolidatedAt           DateTime?                 @map("consolidated_at")
-  consolidationCancelledAt DateTime?                 @map("consolidation_cancelled_at")
+  id                        String                    @id @default(cuid())
+  invoiceNumber             String                    @unique
+  customerId                String?
+  subtotal                  Decimal                   @db.Decimal(12, 3)
+  discount                  Decimal                   @default(0) @db.Decimal(12, 3)
+  tax                       Decimal                   @default(0) @db.Decimal(12, 3)
+  total                     Decimal                   @db.Decimal(12, 3)
+  stampDuty                 Decimal                   @default(1) @db.Decimal(12, 3)
+  paidAmount                Decimal                   @default(0) @db.Decimal(12, 3)
+  remainingAmount           Decimal                   @default(0) @db.Decimal(12, 3)
+  totalRefunded             Decimal                   @default(0) @db.Decimal(12, 3)
+  totalInitialTtc           Decimal?                  @db.Decimal(12, 3)
+  totalCurrentTtc           Decimal?                  @db.Decimal(12, 3)
+  creditedAmount            Decimal                   @default(0) @db.Decimal(12, 3)
+  creditedQuantity          Decimal                   @default(0) @db.Decimal(12, 3)
+  creditStatus              SaleCreditStatus          @default(NONE)
+  effectiveTotal            Decimal?                  @db.Decimal(12, 3)
+  paymentStatus             PaymentStatus?
+  status                    SaleStatus                @default(DRAFT)
+  documentType              DocumentType              @default(DEVIS)
+  stockImpactDone           Boolean                   @default(false)
+  lastSalePriceImpactDone   Boolean                   @default(false) @map("last_sale_price_impact_done")
+  reserveStock              Boolean                   @default(false)
+  sourceDocumentId          String?                   @map("source_document_id")
+  transformedToId           String?                   @map("transformed_to_id")
+  sellerId                  String?
+  clientType                String?                   @map("client_type")
+  counterClientFirstName    String?                   @map("counter_client_first_name")
+  counterClientLastName     String?                   @map("counter_client_last_name")
+  counterClientFullName     String?                   @map("counter_client_full_name")
+  counterClientPhone        String?                   @map("counter_client_phone")
+  counterClientAddress      String?                   @map("counter_client_address")
+  counterClientEmail        String?                   @map("counter_client_email")
+  counterClientTaxId        String?                   @map("counter_client_tax_id")
+  counterClientNote         String?                   @map("counter_client_note")
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  isEdited                  Boolean                   @default(false)
+  editedAt                  DateTime?
+  deletedAt                 DateTime?
+  deletedBy                 String?
+  customer                  Customer?                 @relation(fields: [customerId], references: [id])
+  seller                    User?                     @relation("SellerSales", fields: [sellerId], references: [id])
+  items                     SaleItem[]
+  payments                  Payment[]
+  generatedDocuments        GeneratedDocument[]
+  creditNotes               CreditNote[]
+  productPriceHistories     ProductPriceHistory[]
+  isConsolidated            Boolean                   @default(false) @map("is_consolidated")
+  consolidationStatus       ConsolidationStatus?      @map("consolidation_status")
+  consolidationNote         String?                   @map("consolidation_note")
+  consolidatedAt            DateTime?                 @map("consolidated_at")
+  consolidationCancelledAt  DateTime?                 @map("consolidation_cancelled_at")
   replacedByConsolidationId String?                   @map("replaced_by_consolidation_id")
-  replacedAt               DateTime?                  @map("replaced_at")
-  consolidationSources     SaleConsolidationSource[] @relation("ConsolidatedSale")
-  consolidationMemberships SaleConsolidationSource[] @relation("ConsolidationSourceSale")
+  replacedAt                DateTime?                 @map("replaced_at")
+  consolidationSources      SaleConsolidationSource[] @relation("ConsolidatedSale")
+  consolidationMemberships  SaleConsolidationSource[] @relation("ConsolidationSourceSale")
 
   @@index([customerId])
   @@index([sellerId])
@@ -757,54 +778,65 @@ model DropdownOption {
 }
 
 model CreditNote {
-  id               String              @id @default(cuid())
-  numero           String              @unique
-  saleId           String
-  customerId       String?
-  dateAvoir        DateTime            @default(now())
-  subtotal         Decimal             @db.Decimal(12, 3)
-  tax              Decimal             @default(0) @db.Decimal(12, 3)
-  total            Decimal             @db.Decimal(12, 3)
-  stampDuty        Decimal             @default(1) @db.Decimal(12, 3)
-  montantRembourse Decimal             @db.Decimal(12, 3)
-  motif            String?
-  statut           CreditNoteStatus    @default(CREATED)
-  createdById      String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  sale             Sale                @relation(fields: [saleId], references: [id])
-  customer         Customer?           @relation(fields: [customerId], references: [id])
-  createdBy        User?               @relation(fields: [createdById], references: [id])
-  items            CreditNoteItem[]
-  payments         Payment[]
-  documents        GeneratedDocument[]
+  id                     String              @id @default(cuid())
+  numero                 String              @unique
+  saleId                 String
+  originalDocumentId     String?
+  customerId             String?
+  dateAvoir              DateTime            @default(now())
+  subtotal               Decimal             @db.Decimal(12, 3)
+  tax                    Decimal             @default(0) @db.Decimal(12, 3)
+  total                  Decimal             @db.Decimal(12, 3)
+  stampDuty              Decimal             @default(1) @db.Decimal(12, 3)
+  montantRembourse       Decimal             @db.Decimal(12, 3)
+  debtReductionAmount    Decimal             @default(0) @db.Decimal(12, 3)
+  customerCreditAmount   Decimal             @default(0) @db.Decimal(12, 3)
+  refundMethod           String              @default("NONE")
+  consolidatedDocumentId String?
+  motif                  String?
+  statut                 CreditNoteStatus    @default(CREATED)
+  createdById            String?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  sale                   Sale                @relation(fields: [saleId], references: [id])
+  customer               Customer?           @relation(fields: [customerId], references: [id])
+  createdBy              User?               @relation(fields: [createdById], references: [id])
+  items                  CreditNoteItem[]
+  payments               Payment[]
+  documents              GeneratedDocument[]
 
   @@index([saleId])
+  @@index([originalDocumentId])
   @@index([customerId])
   @@index([createdById])
   @@index([createdAt])
 }
 
 model CreditNoteItem {
-  id                String     @id @default(cuid())
-  creditNoteId      String
-  saleItemId        String?
-  productId         String
-  designation       String
-  quantiteRetournee Int
-  prixUnitaireHt    Decimal    @db.Decimal(12, 3)
-  tva               Decimal    @default(19) @db.Decimal(5, 2)
-  totalHt           Decimal    @db.Decimal(12, 3)
-  totalTtc          Decimal    @db.Decimal(12, 3)
-  motifLigne        String?
-  stockRestocked    Boolean    @default(true) @map("stock_restocked")
-  creditNote        CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
-  product           Product    @relation(fields: [productId], references: [id])
-  saleItem          SaleItem?  @relation(fields: [saleItemId], references: [id])
+  id                 String     @id @default(cuid())
+  creditNoteId       String
+  saleItemId         String?
+  productId          String
+  designation        String
+  quantiteRetournee  Int
+  prixUnitaireHt     Decimal    @db.Decimal(12, 3)
+  tva                Decimal    @default(19) @db.Decimal(5, 2)
+  totalHt            Decimal    @db.Decimal(12, 3)
+  totalTtc           Decimal    @db.Decimal(12, 3)
+  motifLigne         String?
+  stockRestocked     Boolean    @default(true) @map("stock_restocked")
+  originalSaleId     String?
+  originalSaleItemId String?
+  sourceReference    String?
+  creditNote         CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  product            Product    @relation(fields: [productId], references: [id])
+  saleItem           SaleItem?  @relation(fields: [saleItemId], references: [id])
 
   @@index([creditNoteId])
   @@index([productId])
   @@index([saleItemId])
+  @@index([originalSaleId])
+  @@index([originalSaleItemId])
 }
 
 model CaisseMovement {
@@ -817,6 +849,8 @@ model CaisseMovement {
   motif           String?
   referenceDoc    String?
   expenseId       String?
+  creditNoteId    String?
+  paymentMethod   String?
   userId          String?
   createdAt       DateTime           @default(now())
   clearedAt       DateTime?
@@ -829,6 +863,7 @@ model CaisseMovement {
   @@index([createdAt])
   @@index([userId])
   @@index([expenseId])
+  @@index([creditNoteId])
   @@index([type, createdAt])
   @@index([treasuryAccount, createdAt])
 }

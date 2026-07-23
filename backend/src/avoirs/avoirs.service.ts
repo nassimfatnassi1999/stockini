@@ -10,8 +10,10 @@ import {
   DocumentStatus,
   DocumentType,
   PaymentMethod,
+  PaymentStatus,
   PaymentType,
   Prisma,
+  SaleCreditStatus,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
@@ -24,14 +26,7 @@ import { MinioService } from '../documents/minio.service';
 import { SettingsService } from '../settings/settings.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CreateCreditNoteDto, type RefundMethod } from './dto/avoir.dto';
-import {
-  calculateCreditNoteLineTotals,
-  calculateCreditNoteTotals,
-} from '../credit-notes/utils/credit-note-calculation.util';
-import {
-  commercialTotalFinal,
-  DEFAULT_STAMP_DUTY,
-} from '../common/utils/commercial-document';
+import { commercialTotalFinal } from '../common/utils/commercial-document';
 
 const AVOIR_INCLUDE = {
   sale: { select: { invoiceNumber: true, customerId: true } },
@@ -74,40 +69,98 @@ export class AvoirsService {
           },
         },
         customer: { select: { id: true, name: true } },
+        consolidationSources: {
+          where: { active: true },
+          orderBy: { displayOrder: 'asc' },
+          include: {
+            sourceSale: {
+              include: {
+                items: {
+                  orderBy: { id: 'asc' },
+                  include: {
+                    product: {
+                      select: {
+                        id: true,
+                        reference: true,
+                        name: true,
+                        tva: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
-    if (!sale) throw new NotFoundException(`Facture ${saleId} introuvable`);
+    if (!sale) throw new NotFoundException(`Document ${saleId} introuvable`);
+    this.assertReturnableDocument(sale);
 
-    // Sum already-returned quantities per saleItem
-    const existingReturns = await this.prisma.creditNoteItem.groupBy({
-      by: ['saleItemId'],
-      _sum: { quantiteRetournee: true },
+    const sourceItems = this.sourceItemsForDocument(sale);
+    const sourceItemIds = sourceItems.map((item) => item.id);
+    const existingReturns = await this.prisma.creditNoteItem.findMany({
       where: {
-        saleItemId: { in: sale.items.map((i) => i.id) },
         creditNote: { statut: { not: 'CANCELLED' } },
+        OR: [
+          { originalSaleItemId: { in: sourceItemIds } },
+          {
+            originalSaleItemId: null,
+            saleItemId: { in: sourceItemIds },
+          },
+        ],
+      },
+      select: {
+        originalSaleItemId: true,
+        saleItemId: true,
+        quantiteRetournee: true,
       },
     });
-    const returnedMap = new Map(
-      existingReturns.map((r) => [r.saleItemId, r._sum.quantiteRetournee ?? 0]),
-    );
+    const returnedMap = this.returnedQuantityMap(existingReturns);
+    const settledRefunds = await this.prisma.payment.aggregate({
+      where: {
+        saleId: sale.id,
+        type: PaymentType.CREDIT_NOTE_REFUND,
+        deletedAt: null,
+      },
+      _sum: { amount: true },
+    });
 
     return {
       saleId: sale.id,
       invoiceNumber: sale.invoiceNumber,
       customer: sale.customer,
-      items: sale.items
+      documentType: sale.documentType,
+      isConsolidated: sale.isConsolidated,
+      documentLabel: this.documentLabel(sale),
+      paidAmount: Number(sale.paidAmount),
+      effectivePaid: Math.max(
+        0,
+        Number(sale.paidAmount) - Number(settledRefunds._sum.amount ?? 0),
+      ),
+      effectiveTotal: Number(
+        sale.effectiveTotal ??
+          sale.totalCurrentTtc ??
+          new Prisma.Decimal(sale.total).plus(sale.stampDuty),
+      ),
+      items: sourceItems
         .map((item) => {
           const alreadyReturned = returnedMap.get(item.id) ?? 0;
           const cancelledQuantity = 0;
+          const returnableQuantity = new Prisma.Decimal(item.quantity)
+            .minus(alreadyReturned)
+            .minus(cancelledQuantity);
           return {
             saleItemId: item.id,
+            sourceSaleId: item.saleId,
+            sourceSaleItemId: item.id,
+            sourceReference: item.sourceReference,
             productId: item.productId,
             product: item.product,
             quantiteSold: item.quantity,
             quantiteDejaRetournee: alreadyReturned,
             quantiteAnnulee: cancelledQuantity,
-            quantiteRetournable:
-              item.quantity - alreadyReturned - cancelledQuantity,
+            quantiteRetournable: returnableQuantity.toNumber(),
             unitPrice:
               item.finalUnitPrice != null
                 ? Number(item.finalUnitPrice)
@@ -117,7 +170,7 @@ export class AvoirsService {
                     (item.marginPercent == null
                       ? 1 - Number(item.discountPercent ?? 0) / 100
                       : 1),
-            tvaRate: Number(item.product?.tva ?? 19),
+            tvaRate: Number(item.tvaPercent ?? item.product?.tva ?? 19),
             total: Number(item.total),
           };
         })
@@ -138,39 +191,50 @@ export class AvoirsService {
       return await this.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${dto.saleId} FOR UPDATE`;
 
-        // Validate sale
         const sale = await tx.sale.findFirst({
           where: { id: dto.saleId, deletedAt: null },
           include: {
             customer: { select: { name: true } },
             items: { include: { product: true } },
+            consolidationSources: {
+              where: { active: true },
+              orderBy: { displayOrder: 'asc' },
+              include: {
+                sourceSale: {
+                  include: {
+                    items: {
+                      orderBy: { id: 'asc' },
+                      include: { product: true },
+                    },
+                  },
+                },
+              },
+            },
           },
         });
         if (!sale)
-          throw new NotFoundException(`Facture ${dto.saleId} introuvable`);
-        const saleCanBeReturned =
-          sale.status === SaleStatus.COMPLETED ||
-          sale.status === SaleStatus.PARTIALLY_REFUNDED;
-        if (
-          !saleCanBeReturned ||
-          !(
-            [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
-          ).includes(sale.documentType) ||
-          !sale.stockImpactDone
-        ) {
-          throw new BadRequestException(
-            'Un avoir doit être lié à une facture ou un bon de livraison validé avec stock impacté',
+          throw new NotFoundException(`Document ${dto.saleId} introuvable`);
+        this.assertReturnableDocument(sale);
+
+        const sourceItems = this.sourceItemsForDocument(sale);
+        const sourceSaleIds = [
+          ...new Set(sourceItems.map((item) => item.saleId)),
+        ];
+        if (sourceSaleIds.length) {
+          await tx.$queryRaw(
+            Prisma.sql`SELECT id FROM "Sale" WHERE id IN (${Prisma.join(
+              sourceSaleIds,
+            )}) FOR UPDATE`,
           );
         }
 
-        // Validate customer matches
         if (
           dto.customerId &&
           sale.customerId &&
           dto.customerId !== sale.customerId
         ) {
           throw new BadRequestException(
-            'Le client ne correspond pas à la facture',
+            'Le client ne correspond pas au document',
           );
         }
 
@@ -181,42 +245,39 @@ export class AvoirsService {
           );
         }
 
-        // Map saleItems by id and by productId for lookup
-        const saleItemsById = new Map(sale.items.map((i) => [i.id, i]));
-        const saleItemsByProductId = new Map(
-          sale.items.map((i) => [i.productId, i]),
-        );
-
-        // Check already-returned quantities
-        const existingReturns = await tx.creditNoteItem.groupBy({
-          by: ['saleItemId'],
-          _sum: { quantiteRetournee: true },
+        const sourceItemsById = new Map(sourceItems.map((item) => [item.id, item]));
+        const sourceItemIds = sourceItems.map((item) => item.id);
+        const existingReturns = await tx.creditNoteItem.findMany({
           where: {
-            saleItemId: { in: sale.items.map((i) => i.id) },
             creditNote: { statut: { not: 'CANCELLED' } },
+            OR: [
+              { originalSaleItemId: { in: sourceItemIds } },
+              {
+                originalSaleItemId: null,
+                saleItemId: { in: sourceItemIds },
+              },
+            ],
+          },
+          select: {
+            originalSaleItemId: true,
+            saleItemId: true,
+            quantiteRetournee: true,
           },
         });
-        const returnedMap = new Map(
-          existingReturns.map((r) => [
-            r.saleItemId,
-            r._sum.quantiteRetournee ?? 0,
-          ]),
-        );
-
-        const seenSaleItems = new Set<string>();
-
-        // Validate each item
+        const returnedMap = this.returnedQuantityMap(existingReturns);
         const globalRestock = dto.restock !== false;
 
         const resolvedItems: Array<{
           saleItemId: string;
+          originalSaleId: string;
+          sourceReference: string;
           productId: string;
           designation: string;
           quantiteRetournee: number;
-          prixUnitaireHt: number;
-          tva: number;
-          totalHt: number;
-          totalTtc: number;
+          prixUnitaireHt: Prisma.Decimal;
+          tva: Prisma.Decimal;
+          totalHt: Prisma.Decimal;
+          totalTtc: Prisma.Decimal;
           motifLigne?: string;
           restock: boolean;
         }> = [];
@@ -233,81 +294,142 @@ export class AvoirsService {
             );
           }
 
-          const saleItem = dtoItem.saleItemId
-            ? saleItemsById.get(dtoItem.saleItemId)
-            : saleItemsByProductId.get(dtoItem.productId);
-
-          if (!saleItem) {
-            throw new BadRequestException(
-              `Le produit ${dtoItem.productId} ne fait pas partie de cette facture`,
-            );
-          }
-          if (seenSaleItems.has(saleItem.id)) {
-            throw new BadRequestException(
-              `La ligne ${saleItem.product?.name ?? dtoItem.productId} est présente plusieurs fois`,
-            );
-          }
-          seenSaleItems.add(saleItem.id);
-
-          const alreadyReturned = returnedMap.get(saleItem.id) ?? 0;
-          const returnable = saleItem.quantity - alreadyReturned;
-
-          if (dtoItem.quantiteRetournee > returnable) {
-            throw new BadRequestException(
-              `Quantité retournable insuffisante pour ${saleItem.product?.name ?? dtoItem.productId} (max: ${returnable})`,
-            );
-          }
-
-          // Un avoir rembourse le net HT réellement facturé, jamais le brut avant remise.
-          const unitPriceHt =
-            saleItem.finalUnitPrice != null
-              ? Number(saleItem.finalUnitPrice)
-              : saleItem.total != null
-                ? Number(saleItem.total) / saleItem.quantity
-                : Number(saleItem.unitPrice) *
-                  (saleItem.marginPercent == null
-                    ? 1 - Number(saleItem.discountPercent ?? 0) / 100
-                    : 1);
-          const tvaRate = Number(
-            saleItem.tvaPercent ?? saleItem.product?.tva ?? 19,
+          const candidates = dtoItem.saleItemId
+            ? [sourceItemsById.get(dtoItem.saleItemId)].filter(Boolean)
+            : sourceItems.filter((item) => item.productId === dtoItem.productId);
+          let remainingRequested = new Prisma.Decimal(
+            dtoItem.quantiteRetournee,
           );
-          const lineTotals = calculateCreditNoteLineTotals({
-            quantity: dtoItem.quantiteRetournee,
-            unitPriceHt,
-            tvaRate,
-          });
-
-          resolvedItems.push({
-            saleItemId: saleItem.id,
-            productId: saleItem.productId,
-            designation:
-              saleItem.designation ??
-              saleItem.product?.name ??
-              dtoItem.productId,
-            quantiteRetournee: dtoItem.quantiteRetournee,
-            prixUnitaireHt: unitPriceHt,
-            tva: tvaRate,
-            totalHt: lineTotals.totalHt,
-            totalTtc: lineTotals.totalTtc,
-            motifLigne: dtoItem.motifLigne,
-            restock:
-              dtoItem.restock !== undefined ? dtoItem.restock : globalRestock,
-          });
+          for (const saleItem of candidates) {
+            if (!saleItem || remainingRequested.lte(0)) break;
+            const returnable = new Prisma.Decimal(saleItem.quantity).minus(
+              returnedMap.get(saleItem.id) ?? 0,
+            );
+            const allocated = Prisma.Decimal.min(
+              remainingRequested,
+              returnable,
+            );
+            if (allocated.lte(0)) continue;
+            const allocatedQuantity = allocated.toNumber();
+            const unitPriceHt =
+              saleItem.finalUnitPrice != null
+                ? new Prisma.Decimal(saleItem.finalUnitPrice)
+                : new Prisma.Decimal(saleItem.total).div(saleItem.quantity);
+            const tvaRate = new Prisma.Decimal(
+              saleItem.tvaPercent ?? saleItem.product?.tva ?? 19,
+            );
+            const totalHt = unitPriceHt
+              .mul(allocated)
+              .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+            const totalTtc = totalHt
+              .mul(tvaRate.div(100).plus(1))
+              .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+            resolvedItems.push({
+              saleItemId: saleItem.id,
+              originalSaleId: saleItem.saleId,
+              sourceReference: saleItem.sourceReference,
+              productId: saleItem.productId,
+              designation:
+                saleItem.designation ??
+                saleItem.product?.name ??
+                dtoItem.productId,
+              quantiteRetournee: allocatedQuantity,
+              prixUnitaireHt: unitPriceHt,
+              tva: tvaRate,
+              totalHt,
+              totalTtc,
+              motifLigne: dtoItem.motifLigne,
+              restock:
+                dtoItem.restock !== undefined
+                  ? dtoItem.restock
+                  : globalRestock,
+            });
+            returnedMap.set(
+              saleItem.id,
+              (returnedMap.get(saleItem.id) ?? 0) + allocatedQuantity,
+            );
+            remainingRequested = remainingRequested.minus(allocated);
+          }
+          if (remainingRequested.gt(0)) {
+            throw new BadRequestException(
+              `Quantité retournable insuffisante pour ${dtoItem.productId}`,
+            );
+          }
         }
 
-        const totals = calculateCreditNoteTotals(
-          resolvedItems.map((item) => ({
-            quantity: item.quantiteRetournee,
-            unitPriceHt: item.prixUnitaireHt,
-            tvaRate: item.tva,
-          })),
+        const subtotal = this.sumDecimal(
+          resolvedItems.map((item) => item.totalHt),
         );
-        const subtotal = totals.totalHt;
-        const tax = totals.totalTva;
-        const total = totals.totalTtc;
-        const stampDuty = DEFAULT_STAMP_DUTY;
-        const totalFinal = commercialTotalFinal(total, stampDuty);
-        const montantRembourse = refundMethod === 'NONE' ? 0 : totalFinal;
+        const total = this.sumDecimal(
+          resolvedItems.map((item) => item.totalTtc),
+        );
+        const tax = total.minus(subtotal);
+        const isFullReturn = sourceItems.every(
+          (item) => (returnedMap.get(item.id) ?? 0) >= item.quantity,
+        );
+        if (dto.refundStampDuty && !isFullReturn) {
+          throw new BadRequestException(
+            'Le timbre fiscal ne peut être remboursé que sur un avoir total',
+          );
+        }
+        const stampDuty = dto.refundStampDuty
+          ? new Prisma.Decimal(sale.stampDuty)
+          : new Prisma.Decimal(0);
+        const creditAmount = total.plus(stampDuty);
+
+        const totalBeforeCredits = new Prisma.Decimal(
+          sale.totalInitialTtc ??
+            commercialTotalFinal(sale.total, sale.stampDuty),
+        );
+        const creditsBefore = new Prisma.Decimal(sale.creditedAmount ?? 0);
+        const settledRefunds = await tx.payment.aggregate({
+          where: {
+            saleId: sale.id,
+            type: PaymentType.CREDIT_NOTE_REFUND,
+            deletedAt: null,
+          },
+          _sum: { amount: true },
+        });
+        const effectivePaidBefore = Prisma.Decimal.max(
+          new Prisma.Decimal(sale.paidAmount).minus(
+            settledRefunds._sum.amount ?? 0,
+          ),
+          0,
+        );
+        const effectiveTotalBefore = Prisma.Decimal.max(
+          totalBeforeCredits.minus(creditsBefore),
+          0,
+        );
+        const debtReductionAmount = Prisma.Decimal.min(
+          creditAmount,
+          Prisma.Decimal.max(
+            effectiveTotalBefore.minus(effectivePaidBefore),
+            0,
+          ),
+        );
+        const effectiveTotalAfter = Prisma.Decimal.max(
+          effectiveTotalBefore.minus(creditAmount),
+          0,
+        );
+        const refundableAmount =
+          refundMethod === 'NONE'
+            ? new Prisma.Decimal(0)
+            : Prisma.Decimal.min(
+                creditAmount,
+                Prisma.Decimal.max(
+                  effectivePaidBefore.minus(effectiveTotalAfter),
+                  0,
+                ),
+              );
+        const customerCreditAmount =
+          refundMethod === 'CUSTOMER_CREDIT'
+            ? refundableAmount
+            : new Prisma.Decimal(0);
+        const montantRembourse = (
+          ['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK'] as RefundMethod[]
+        ).includes(refundMethod)
+          ? refundableAmount
+          : new Prisma.Decimal(0);
 
         const documentDate = new Date();
         const numero = await this.references.generateSalesDocumentNumber(
@@ -324,6 +446,7 @@ export class AvoirsService {
             numero,
             dateAvoir: documentDate,
             saleId: dto.saleId,
+            originalDocumentId: sale.id,
             customerId: effectiveCustomerId,
             motif: dto.motif,
             subtotal,
@@ -331,14 +454,21 @@ export class AvoirsService {
             total,
             stampDuty,
             montantRembourse,
+            debtReductionAmount,
+            customerCreditAmount,
+            refundMethod,
+            consolidatedDocumentId: sale.isConsolidated ? sale.id : null,
             statut:
-              refundMethod === 'NONE'
+              refundableAmount.isZero()
                 ? CreditNoteStatus.CREATED
                 : CreditNoteStatus.REFUNDED,
             createdById: user?.id,
             items: {
               create: resolvedItems.map((item) => ({
                 saleItemId: item.saleItemId,
+                originalSaleId: item.originalSaleId,
+                originalSaleItemId: item.saleItemId,
+                sourceReference: item.sourceReference,
                 productId: item.productId,
                 designation: item.designation,
                 quantiteRetournee: item.quantiteRetournee,
@@ -354,19 +484,23 @@ export class AvoirsService {
           include: AVOIR_INCLUDE,
         });
 
-        // Restore stock only for lines where restock is enabled
         for (const item of resolvedItems) {
           if (!item.restock) continue;
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
-            type: StockMovementType.CUSTOMER_RETURN,
+            type: StockMovementType.RETURN_IN,
             quantity: item.quantiteRetournee,
             reason: `Retour client - Avoir ${numero}`,
             userId: user?.id,
+            sourceType: 'CREDIT_NOTE',
+            sourceId: avoir.id,
+            creditNoteId: avoir.id,
+            originalSaleId: item.originalSaleId,
+            originalSaleItemId: item.saleItemId,
           });
         }
 
-        if (refundMethod !== 'NONE' && montantRembourse > 0) {
+        if (!refundableAmount.isZero()) {
           const paymentMethod = this.paymentMethodForRefund(refundMethod);
           // Real-money refund methods that impact a treasury account.
           const isRealMoneyRefund = (
@@ -382,7 +516,7 @@ export class AvoirsService {
               ),
               type: PaymentType.CREDIT_NOTE_REFUND,
               method: paymentMethod,
-              amount: montantRembourse,
+              amount: refundableAmount,
               // cashImpactDone = true for all real-money methods, not just CASH.
               cashImpactDone: isRealMoneyRefund,
               saleId: dto.saleId,
@@ -392,26 +526,140 @@ export class AvoirsService {
             },
           });
 
-          if (isRealMoneyRefund) {
-            // CASH → PHYSICAL_CASH, CARD/BANK_TRANSFER/CHECK → BANK_TREASURY
+          if (isRealMoneyRefund && !montantRembourse.isZero()) {
             await this.caisseService.recordMovement(tx, {
-              type: CaisseMovementType.ANNULATION_VENTE,
-              montant: -montantRembourse,
+              type: CaisseMovementType.REFUND_OUT,
+              montant: -montantRembourse.toNumber(),
               motif: `Remboursement avoir ${numero}`,
               referenceDoc: payment.reference,
               userId: user?.id,
               paymentMethod: refundMethod,
+              creditNoteId: avoir.id,
             });
           }
           if (refundMethod === 'CUSTOMER_CREDIT' && effectiveCustomerId) {
             await tx.customer.update({
               where: { id: effectiveCustomerId },
-              data: { creditBalance: { increment: montantRembourse } },
+              data: { creditBalance: { increment: customerCreditAmount } },
             });
           }
         }
 
-        await this.updateSourceSaleRefundStatus(tx, sale.id);
+        const creditedAmount = creditsBefore.plus(creditAmount);
+        const creditedQuantity = this.sumDecimal(
+          sourceItems.map((item) => returnedMap.get(item.id) ?? 0),
+        );
+        const effectivePaidAfter = effectivePaidBefore.minus(refundableAmount);
+        const remainingAmount = Prisma.Decimal.max(
+          effectiveTotalAfter.minus(effectivePaidAfter),
+          0,
+        );
+        const overpaid = Prisma.Decimal.max(
+          effectivePaidAfter.minus(effectiveTotalAfter),
+          0,
+        );
+        const paymentStatus = !overpaid.isZero()
+          ? PaymentStatus.CREDIT_BALANCE
+          : remainingAmount.isZero()
+            ? PaymentStatus.PAID
+            : effectivePaidAfter.isZero()
+              ? PaymentStatus.UNPAID
+              : PaymentStatus.PARTIAL;
+        await tx.sale.update({
+          where: { id: sale.id },
+          data: {
+            status: isFullReturn
+              ? SaleStatus.REFUNDED
+              : SaleStatus.PARTIALLY_REFUNDED,
+            totalRefunded: creditedAmount,
+            totalInitialTtc: totalBeforeCredits,
+            totalCurrentTtc: effectiveTotalAfter,
+            creditedAmount,
+            creditedQuantity,
+            creditStatus: isFullReturn
+              ? SaleCreditStatus.FULL
+              : SaleCreditStatus.PARTIAL,
+            effectiveTotal: effectiveTotalAfter,
+            remainingAmount,
+            paymentStatus,
+          },
+        });
+
+        if (sale.isConsolidated) {
+          for (const sourceSaleId of sourceSaleIds) {
+            const source = sale.consolidationSources.find(
+              (link) => link.sourceSale.id === sourceSaleId,
+            )?.sourceSale;
+            if (!source) continue;
+            const sourceCredits = await tx.creditNoteItem.aggregate({
+              where: {
+                originalSaleId: sourceSaleId,
+                creditNote: { statut: { not: CreditNoteStatus.CANCELLED } },
+              },
+              _sum: { totalTtc: true, quantiteRetournee: true },
+            });
+            const sourceCreditedAmount = new Prisma.Decimal(
+              sourceCredits._sum.totalTtc ?? 0,
+            );
+            const sourceFull = source.items.every(
+              (sourceItem) =>
+                (returnedMap.get(sourceItem.id) ?? 0) >= sourceItem.quantity,
+            );
+            await tx.sale.update({
+              where: { id: sourceSaleId },
+              data: {
+                creditedAmount: sourceCreditedAmount,
+                creditedQuantity: sourceCredits._sum.quantiteRetournee ?? 0,
+                creditStatus: sourceFull
+                  ? SaleCreditStatus.FULL
+                  : SaleCreditStatus.PARTIAL,
+                effectiveTotal: Prisma.Decimal.max(
+                  new Prisma.Decimal(source.total)
+                    .plus(source.stampDuty)
+                    .minus(sourceCreditedAmount),
+                  0,
+                ),
+              },
+            });
+          }
+        }
+
+        await tx.auditLog.create({
+          data: {
+            action: 'credit_note.created',
+            entity: 'CreditNote',
+            entityId: avoir.id,
+            userId: user?.id,
+            userName: user?.email,
+            oldValue: {
+              effectiveTotal: effectiveTotalBefore.toNumber(),
+              effectivePaid: effectivePaidBefore.toNumber(),
+            },
+            newValue: {
+              effectiveTotal: effectiveTotalAfter.toNumber(),
+              effectivePaid: effectivePaidAfter.toNumber(),
+              remaining: remainingAmount.toNumber(),
+              overpaid: overpaid.toNumber(),
+            },
+            metadata: {
+              creditNoteReference: numero,
+              originalDocumentId: sale.id,
+              originalDocumentReference: sale.invoiceNumber,
+              consolidated: sale.isConsolidated,
+              sourceSaleIds,
+              stockQuantity: resolvedItems
+                .filter((item) => item.restock)
+                .reduce((sum, item) => sum + item.quantiteRetournee, 0),
+              creditAmount: creditAmount.toNumber(),
+              debtReductionAmount: debtReductionAmount.toNumber(),
+              refundedAmount: montantRembourse.toNumber(),
+              customerCreditAmount: customerCreditAmount.toNumber(),
+              refundMethod,
+              stampRefunded: stampDuty.toNumber(),
+              reason: dto.motif ?? null,
+            },
+          },
+        });
 
         return tx.creditNote.findUniqueOrThrow({
           where: { id: avoir.id },
@@ -597,6 +845,104 @@ export class AvoirsService {
     return { buffer: pdfBuffer, fileName };
   }
 
+  private assertReturnableDocument(sale: {
+    status: SaleStatus;
+    documentType: DocumentType;
+    stockImpactDone: boolean;
+    isConsolidated: boolean;
+    consolidationStatus?: string | null;
+    consolidationSources?: Array<{
+      sourceSale: { stockImpactDone: boolean };
+    }>;
+  }) {
+    const validStatus =
+      sale.status === SaleStatus.COMPLETED ||
+      sale.status === SaleStatus.PARTIALLY_REFUNDED;
+    const validType = (
+      [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+    ).includes(sale.documentType);
+    const stockWasImpacted = sale.isConsolidated
+      ? Boolean(sale.consolidationSources?.length) &&
+        sale.consolidationSources!.every(
+          (source) => source.sourceSale.stockImpactDone,
+        )
+      : sale.stockImpactDone;
+    if (
+      !validStatus ||
+      !validType ||
+      !stockWasImpacted ||
+      (sale.isConsolidated && sale.consolidationStatus !== 'ACTIVE')
+    ) {
+      throw new BadRequestException(
+        'Un avoir doit être lié à un BL, une facture, un BLG ou une FACG actif dont le stock source a été impacté',
+      );
+    }
+  }
+
+  private sourceItemsForDocument(sale: {
+    invoiceNumber: string;
+    isConsolidated: boolean;
+    items: any[];
+    consolidationSources?: Array<{
+      sourceReference: string;
+      sourceSale: { id: string; items: any[] };
+    }>;
+  }): any[] {
+    if (!sale.isConsolidated) {
+      return sale.items.map((item) => ({
+        ...item,
+        sourceReference: sale.invoiceNumber,
+      }));
+    }
+    return (sale.consolidationSources ?? []).flatMap((source) =>
+      source.sourceSale.items.map((item) => ({
+        ...item,
+        saleId: source.sourceSale.id,
+        sourceReference: source.sourceReference,
+      })),
+    );
+  }
+
+  private returnedQuantityMap(
+    rows: Array<{
+      originalSaleItemId?: string | null;
+      saleItemId?: string | null;
+      quantiteRetournee: number;
+    }>,
+  ): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const row of rows) {
+      const sourceItemId = row.originalSaleItemId ?? row.saleItemId;
+      if (!sourceItemId) continue;
+      result.set(
+        sourceItemId,
+        (result.get(sourceItemId) ?? 0) + row.quantiteRetournee,
+      );
+    }
+    return result;
+  }
+
+  private sumDecimal(
+    values: Array<Prisma.Decimal | number>,
+  ): Prisma.Decimal {
+    return values
+      .reduce<Prisma.Decimal>(
+        (sum, value) => sum.plus(value),
+        new Prisma.Decimal(0),
+      )
+      .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+  }
+
+  private documentLabel(sale: {
+    documentType: DocumentType;
+    isConsolidated: boolean;
+  }) {
+    if (sale.documentType === DocumentType.BON_LIVRAISON) {
+      return sale.isConsolidated ? 'BLG consolidé' : 'BL';
+    }
+    return sale.isConsolidated ? 'FACG consolidée' : 'Facture';
+  }
+
   private resolveRefundMethod(dto: CreateCreditNoteDto): RefundMethod {
     if (dto.refundMethod) return dto.refundMethod;
     if (dto.paymentMethod === 'CREDIT') return 'CUSTOMER_CREDIT';
@@ -608,7 +954,7 @@ export class AvoirsService {
     ) {
       return dto.paymentMethod;
     }
-    return 'CASH';
+    return 'NONE';
   }
 
   private paymentMethodForRefund(refundMethod: RefundMethod): PaymentMethod {
@@ -620,67 +966,6 @@ export class AvoirsService {
       default:
         return refundMethod;
     }
-  }
-
-  private async updateSourceSaleRefundStatus(
-    tx: Prisma.TransactionClient,
-    saleId: string,
-  ) {
-    const sale = await tx.sale.findUniqueOrThrow({
-      where: { id: saleId },
-      include: { items: { select: { id: true, quantity: true } } },
-    });
-
-    const activeReturns = await tx.creditNoteItem.groupBy({
-      by: ['saleItemId'],
-      _sum: { quantiteRetournee: true },
-      where: {
-        saleItemId: { in: sale.items.map((item) => item.id) },
-        creditNote: { statut: { not: 'CANCELLED' } },
-      },
-    });
-    const returnedByLine = new Map(
-      activeReturns.map((row) => [
-        row.saleItemId,
-        row._sum.quantiteRetournee ?? 0,
-      ]),
-    );
-    const allQuantitiesReturned = sale.items.every(
-      (item) => (returnedByLine.get(item.id) ?? 0) >= item.quantity,
-    );
-
-    const refundedTotals = await tx.creditNote.aggregate({
-      where: { saleId, statut: { not: 'CANCELLED' } },
-      _sum: { total: true, stampDuty: true },
-    });
-    const refundedTotal =
-      Number(refundedTotals._sum.total ?? 0) +
-      Number(refundedTotals._sum.stampDuty ?? 0);
-
-    // Snapshot the original total on the very first avoir (never overwrite after that).
-    const initialTtc =
-      sale.totalInitialTtc != null
-        ? Number(sale.totalInitialTtc)
-        : commercialTotalFinal(sale.total, sale.stampDuty);
-    const currentTtc = Math.max(0, initialTtc - refundedTotal);
-
-    const nextStatus =
-      allQuantitiesReturned || refundedTotal >= initialTtc - 0.001
-        ? SaleStatus.REFUNDED
-        : SaleStatus.PARTIALLY_REFUNDED;
-
-    await tx.sale.update({
-      where: { id: saleId },
-      data: {
-        status: nextStatus,
-        totalRefunded: refundedTotal,
-        // Only set the initial snapshot once (first avoir).
-        ...(sale.totalInitialTtc == null && {
-          totalInitialTtc: commercialTotalFinal(sale.total, sale.stampDuty),
-        }),
-        totalCurrentTtc: currentTtc,
-      },
-    });
   }
 
   private async getCompanySettings() {

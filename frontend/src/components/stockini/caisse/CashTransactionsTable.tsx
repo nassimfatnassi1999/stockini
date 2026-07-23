@@ -38,6 +38,7 @@ const TYPE_LABELS: Record<string, string> = {
   DEPOT_MANUEL:        'Dépôt manuel',
   RETRAIT_MANUEL:      'Retrait manuel',
   ANNULATION_VENTE:    'Annulation vente',
+  REFUND_OUT:          'Remboursement avoir',
   ANNULATION_ACHAT:    'Annulation achat',
   CASH_RESET:          'Remise à zéro',
 };
