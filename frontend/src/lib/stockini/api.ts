@@ -49,6 +49,7 @@ import type {
   TrashItem,
 } from "./types";
 import type { CreditNotePayload } from "@/features/avoirs/utils/credit-note-calculation";
+import { normalizePaginatedResponse } from './paginated-response';
 
 const PAYABLE_METHODS = new Set(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK']);
 
@@ -142,16 +143,22 @@ export const stockiniApi = {
   topSelling: () => api.get("/reports/top-selling").then((r) => r.data),
   productPage: (params?: ProductsQueryParams, signal?: AbortSignal) =>
     api
-      .get<PaginatedApiResponse<Product>>("/products", {
+      .get<unknown>("/products", {
         params: cleanQueryParams(params),
         signal,
       })
-      .then((r) => r.data),
+      .then((r) =>
+        normalizePaginatedResponse<Product>(
+          r.data,
+          params,
+          'GET /products',
+        ),
+      ),
   products: async (params?: ProductsQueryParams, signal?: AbortSignal) => {
     const requestedPage = params?.page;
     const compatibilityLimit = params?.limit ?? 100;
     const first = await api
-      .get<PaginatedApiResponse<Product>>("/products", {
+      .get<unknown>("/products", {
         params: cleanQueryParams({
           ...params,
           page: requestedPage ?? 1,
@@ -159,7 +166,13 @@ export const stockiniApi = {
         }),
         signal,
       })
-      .then((r) => r.data);
+      .then((r) =>
+        normalizePaginatedResponse<Product>(
+          r.data,
+          { page: requestedPage ?? 1, limit: compatibilityLimit },
+          'GET /products (options)',
+        ),
+      );
     if (requestedPage !== undefined || !first.pagination.hasNextPage) return first.data;
 
     const remainingPages = await Promise.all(
@@ -167,7 +180,7 @@ export const stockiniApi = {
         { length: first.pagination.totalPages - 1 },
         (_, index) =>
           api
-            .get<PaginatedApiResponse<Product>>("/products", {
+            .get<unknown>("/products", {
               params: cleanQueryParams({
                 ...params,
                 page: index + 2,
@@ -175,7 +188,13 @@ export const stockiniApi = {
               }),
               signal,
             })
-            .then((r) => r.data.data),
+            .then((r) =>
+              normalizePaginatedResponse<Product>(
+                r.data,
+                { page: index + 2, limit: compatibilityLimit },
+                'GET /products (options)',
+              ).data,
+            ),
       ),
     );
     return first.data.concat(...remainingPages);
@@ -185,8 +204,14 @@ export const stockiniApi = {
     signal?: AbortSignal,
   ) =>
     api
-      .get<PaginatedApiResponse<Customer>>('/customers', { params, signal })
-      .then((r) => r.data),
+      .get<unknown>('/customers', { params, signal })
+      .then((r) =>
+        normalizePaginatedResponse<Customer>(
+          r.data,
+          params,
+          'GET /customers',
+        ),
+      ),
   product: (id: string) =>
     api.get<Product>(`/products/${id}`).then((r) => r.data),
   createProduct: (
@@ -209,15 +234,27 @@ export const stockiniApi = {
     api.delete(`/products/${id}`).then((r) => r.data),
   customers: async () => {
     const first = await api
-      .get<PaginatedApiResponse<Customer>>('/customers', { params: { page: 1, limit: 100 } })
-      .then((r) => r.data);
+      .get<unknown>('/customers', { params: { page: 1, limit: 100 } })
+      .then((r) =>
+        normalizePaginatedResponse<Customer>(
+          r.data,
+          { page: 1, limit: 100 },
+          'GET /customers (options)',
+        ),
+      );
     const rest = await Promise.all(
       Array.from({ length: first.pagination.totalPages - 1 }, (_, index) =>
         api
-          .get<PaginatedApiResponse<Customer>>('/customers', {
+          .get<unknown>('/customers', {
             params: { page: index + 2, limit: 100 },
           })
-          .then((r) => r.data.data),
+          .then((r) =>
+            normalizePaginatedResponse<Customer>(
+              r.data,
+              { page: index + 2, limit: 100 },
+              'GET /customers (options)',
+            ).data,
+          ),
       ),
     );
     return first.data.concat(...rest);
@@ -240,19 +277,37 @@ export const stockiniApi = {
     signal?: AbortSignal,
   ) =>
     api
-      .get<PaginatedApiResponse<Supplier>>('/suppliers', { params, signal })
-      .then((r) => r.data),
+      .get<unknown>('/suppliers', { params, signal })
+      .then((r) =>
+        normalizePaginatedResponse<Supplier>(
+          r.data,
+          params,
+          'GET /suppliers',
+        ),
+      ),
   suppliers: async () => {
     const first = await api
-      .get<PaginatedApiResponse<Supplier>>('/suppliers', { params: { page: 1, limit: 100 } })
-      .then((r) => r.data);
+      .get<unknown>('/suppliers', { params: { page: 1, limit: 100 } })
+      .then((r) =>
+        normalizePaginatedResponse<Supplier>(
+          r.data,
+          { page: 1, limit: 100 },
+          'GET /suppliers (options)',
+        ),
+      );
     const rest = await Promise.all(
       Array.from({ length: first.pagination.totalPages - 1 }, (_, index) =>
         api
-          .get<PaginatedApiResponse<Supplier>>('/suppliers', {
+          .get<unknown>('/suppliers', {
             params: { page: index + 2, limit: 100 },
           })
-          .then((r) => r.data.data),
+          .then((r) =>
+            normalizePaginatedResponse<Supplier>(
+              r.data,
+              { page: index + 2, limit: 100 },
+              'GET /suppliers (options)',
+            ).data,
+          ),
       ),
     );
     return first.data.concat(...rest);
@@ -265,10 +320,14 @@ export const stockiniApi = {
     api.delete(`/suppliers/${id}`).then((r) => r.data),
   sales: (params?: SalesQueryParams) =>
     api
-      .get<
-        PaginatedResponse<Sale>
-      >("/sales", { params: cleanPaginationParams(params) })
-      .then((r) => r.data),
+      .get<unknown>("/sales", { params: cleanPaginationParams(params) })
+      .then((r) =>
+        normalizePaginatedResponse<Sale>(
+          r.data,
+          params,
+          'GET /sales',
+        ),
+      ),
   sale: (id: string) => api.get<SaleDetail>(`/sales/${id}`).then((r) => r.data),
   saleNextReference: (documentType: SalesDocumentType) =>
     api
@@ -386,19 +445,37 @@ export const stockiniApi = {
     signal?: AbortSignal,
   ) =>
     api
-      .get<PaginatedApiResponse<Alert>>('/alerts', { params, signal })
-      .then((r) => r.data),
+      .get<unknown>('/alerts', { params, signal })
+      .then((r) =>
+        normalizePaginatedResponse<Alert>(
+          r.data,
+          params,
+          'GET /alerts',
+        ),
+      ),
   alerts: async () => {
     const first = await api
-      .get<PaginatedApiResponse<Alert>>('/alerts', { params: { page: 1, limit: 100 } })
-      .then((r) => r.data);
+      .get<unknown>('/alerts', { params: { page: 1, limit: 100 } })
+      .then((r) =>
+        normalizePaginatedResponse<Alert>(
+          r.data,
+          { page: 1, limit: 100 },
+          'GET /alerts (options)',
+        ),
+      );
     const rest = await Promise.all(
       Array.from({ length: first.pagination.totalPages - 1 }, (_, index) =>
         api
-          .get<PaginatedApiResponse<Alert>>('/alerts', {
+          .get<unknown>('/alerts', {
             params: { page: index + 2, limit: 100 },
           })
-          .then((r) => r.data.data),
+          .then((r) =>
+            normalizePaginatedResponse<Alert>(
+              r.data,
+              { page: index + 2, limit: 100 },
+              'GET /alerts (options)',
+            ).data,
+          ),
       ),
     );
     return first.data.concat(...rest);

@@ -85,7 +85,8 @@ export default function CorbeillePage() {
       stockiniApi.restoreTrashItem(entity, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trash'] });
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-products'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-suppliers'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
@@ -124,7 +125,8 @@ export default function CorbeillePage() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['trash'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['purchases'] });

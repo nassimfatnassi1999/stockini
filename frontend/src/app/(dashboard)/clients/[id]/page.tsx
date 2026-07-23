@@ -27,7 +27,8 @@ function ClientDetailsRoute() {
     mutationFn: (data: Partial<Customer>) => stockiniApi.updateCustomer(id as string, data),
     onSuccess: (updatedClient) => {
       queryClient.setQueryData(['customer', id], updatedClient);
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       toast.success('Client modifié avec succès');
     },
     onError: () => {

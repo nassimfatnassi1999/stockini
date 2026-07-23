@@ -339,7 +339,8 @@ export function PaymentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
@@ -368,7 +369,7 @@ export function PaymentsPage() {
     amountNum > 0 &&
     (!nonCashOverpayment || (Boolean(payTarget?.customer?.id) && surplusDisposition === 'CUSTOMER_CREDIT'));
 
-  const unpaidCount = salesQuery.data?.total ?? 0;
+  const unpaidCount = salesQuery.data?.pagination.totalItems ?? 0;
 
 
   return (
@@ -421,10 +422,10 @@ export function PaymentsPage() {
               setSurplusDisposition(sale.customer?.id ? 'CUSTOMER_CREDIT' : 'CASH_SURPLUS');
             })}
             data={salesData}
-            total={salesQuery.data?.total ?? 0}
+            total={salesQuery.data?.pagination.totalItems ?? 0}
             page={invPage}
             limit={invLimit}
-            totalPages={salesQuery.data?.totalPages ?? 1}
+            totalPages={salesQuery.data?.pagination.totalPages ?? 1}
             loading={salesQuery.isFetching && !salesQuery.isError}
             error={salesQuery.error}
             onRetry={() => salesQuery.refetch()}

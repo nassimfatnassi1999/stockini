@@ -80,7 +80,7 @@ import type {
   Customer,
   DropdownOption,
   EmailPreview,
-  PaginatedResponse,
+  PaginatedApiResponse,
   Sale,
   SaleDetail,
   SalesDocumentType,
@@ -807,8 +807,8 @@ export default function VentesPage() {
   const canCancelConsolidation = can(PERMISSION_CANCEL_CONSOLIDATION);
 
   const customersQuery = useQuery<Customer[]>({
-    queryKey: ["customers"],
-    queryFn: () => api.get<Customer[]>("/customers").then((r) => r.data),
+    queryKey: ["stockini-customer-options"],
+    queryFn: () => stockiniApi.customers(),
   });
 
   const filledLines = lines.filter(isFilledLine);
@@ -1010,7 +1010,7 @@ export default function VentesPage() {
     status: salesStatus || undefined,
   };
 
-  const salesQuery = useQuery<PaginatedResponse<Sale>>({
+  const salesQuery = useQuery<PaginatedApiResponse<Sale>>({
     queryKey: [
       "stockini-sales",
       salesPage,
@@ -1291,7 +1291,8 @@ export default function VentesPage() {
     onSuccess: (newSale) => {
       queryClient.invalidateQueries({ queryKey: ["stockini-sales"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-products"] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["stockini-customers-page"] });
+      queryClient.invalidateQueries({ queryKey: ["stockini-customer-options"] });
       if (Number((newSale as { paidAmount?: unknown }).paidAmount) > 0) {
         queryClient.invalidateQueries({ queryKey: ["caisse-summary"] });
         queryClient.invalidateQueries({ queryKey: ["caisse-transactions"] });
@@ -1337,7 +1338,8 @@ export default function VentesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["stockini-sales"] });
       queryClient.invalidateQueries({ queryKey: ["trash"] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["stockini-customers-page"] });
+      queryClient.invalidateQueries({ queryKey: ["stockini-customer-options"] });
       queryClient.invalidateQueries({ queryKey: ["caisse-summary"] });
       toast.success("Vente déplacée dans la corbeille");
       setDeleteTarget(null);
@@ -2038,7 +2040,7 @@ export default function VentesPage() {
                           : "bg-slate-200 text-slate-600",
                       )}
                     >
-                      {salesQuery.data?.total ?? salesList.length}
+                      {salesQuery.data?.pagination.totalItems ?? salesList.length}
                     </span>
                   </button>
                   <button
@@ -2163,7 +2165,7 @@ export default function VentesPage() {
                         updateSalesUrl({ status: value || undefined, page: 1 });
                       }
                     }}
-                    resultsCount={salesQuery.data?.total ?? 0}
+                    resultsCount={salesQuery.data?.pagination.totalItems ?? 0}
                     onReset={() => {
                       if (salesDebounceRef.current) clearTimeout(salesDebounceRef.current);
                       setSalesLocalSearch("");
@@ -2430,8 +2432,8 @@ export default function VentesPage() {
                   <DataTablePagination
                     page={salesPage}
                     limit={salesLimit}
-                    totalItems={salesQuery.data?.total ?? 0}
-                    totalPages={salesQuery.data?.totalPages ?? 0}
+                    totalItems={salesQuery.data?.pagination.totalItems ?? 0}
+                    totalPages={salesQuery.data?.pagination.totalPages ?? 0}
                     disabled={salesQuery.isFetching}
                     onPageChange={setSalesPage}
                     onLimitChange={setSalesLimit}

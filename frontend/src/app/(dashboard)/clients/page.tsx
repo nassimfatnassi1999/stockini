@@ -16,7 +16,14 @@ import { MoveToTrashDialog } from '@/components/stockini/MoveToTrashDialog';
 import { Can } from '@/components/shared/Can';
 import { PermissionGuard } from '@/components/shared/PermissionGuard';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import type { Customer, DropdownOption } from '@/lib/stockini/types';
+import { stockiniApi } from '@/lib/stockini/api';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import type {
+  Customer,
+  DropdownOption,
+  PaginatedApiResponse,
+} from '@/lib/stockini/types';
 
 const CUSTOMER_TYPES = [
   { value: 'INDIVIDUAL', label: 'Passager' },
@@ -133,7 +140,15 @@ export default function ClientsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
   const formId = useId();
-  const [search, setSearch] = useState('');
+  const {
+    page,
+    limit,
+    search,
+    setSearch,
+    urlSearch,
+    setPage,
+    setLimit,
+  } = useUrlPagination();
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<CreateCustomerForm>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
@@ -162,12 +177,13 @@ export default function ClientsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showModal, form.type]);
 
-  const customersQuery = useQuery<Customer[]>({
-    queryKey: ['customers', search],
-    queryFn: () =>
-      api
-        .get<Customer[]>('/customers', { params: search.trim() ? { search: search.trim() } : undefined })
-        .then((r) => r.data),
+  const customersQuery = useQuery<PaginatedApiResponse<Customer>>({
+    queryKey: ['stockini-customers-page', page, limit, urlSearch],
+    queryFn: ({ signal }) =>
+      stockiniApi.customerPage(
+        { page, limit, search: urlSearch || undefined },
+        signal,
+      ),
     placeholderData: (prev) => prev,
   });
   const customerTypesQuery = useQuery<DropdownOption[]>({
@@ -178,7 +194,8 @@ export default function ClientsPage() {
   const createMutation = useMutation({
     mutationFn: (data: Partial<CreateCustomerForm>) => api.post<Customer>('/customers', data).then((r) => r.data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       toast.success('Client créé avec succès');
       setShowModal(false);
       setForm(EMPTY_FORM);
@@ -191,10 +208,9 @@ export default function ClientsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/customers/${id}`).then((r) => r.data),
-    onSuccess: (_data, id) => {
-      queryClient.setQueryData<Customer[]>(['customers'], (prev) =>
-        prev ? prev.filter((c) => c.id !== id) : prev,
-      );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       queryClient.invalidateQueries({ queryKey: ['trash'] });
       toast.success('Client déplacé dans la corbeille');
       setTrashTarget(null);
@@ -209,11 +225,9 @@ export default function ClientsPage() {
   const lockMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.patch<Customer>(`/customers/${id}/lock`, { reason: reason || undefined }).then((r) => r.data),
-    onSuccess: (updated) => {
-      queryClient.setQueryData<Customer[]>(['customers', search], (prev) =>
-        prev ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)) : prev,
-      );
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       toast.success('Client verrouillé');
       setLockTarget(null);
     },
@@ -225,11 +239,9 @@ export default function ClientsPage() {
 
   const unlockMutation = useMutation({
     mutationFn: (id: string) => api.patch<Customer>(`/customers/${id}/unlock`).then((r) => r.data),
-    onSuccess: (updated) => {
-      queryClient.setQueryData<Customer[]>(['customers', search], (prev) =>
-        prev ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)) : prev,
-      );
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       toast.success('Client déverrouillé');
       setUnlockTarget(null);
     },
@@ -239,7 +251,8 @@ export default function ClientsPage() {
     },
   });
 
-  const customers = customersQuery.data ?? [];
+  const customers = customersQuery.data?.data ?? [];
+  const pagination = customersQuery.data?.pagination;
   const customerTypeOptions = customerTypesQuery.data?.length
     ? customerTypesQuery.data.map((option) => ({ value: option.value, label: option.label }))
     : CUSTOMER_TYPES;
@@ -441,6 +454,17 @@ export default function ClientsPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {(pagination?.totalItems ?? 0) > 0 && (
+          <DataTablePagination
+            page={page}
+            limit={limit}
+            totalItems={pagination?.totalItems ?? 0}
+            totalPages={pagination?.totalPages ?? 0}
+            disabled={customersQuery.isFetching}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
+          />
         )}
       </div>
 

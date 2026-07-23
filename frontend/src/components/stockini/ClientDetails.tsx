@@ -125,7 +125,8 @@ export function ClientDetails({ client, onClose, onSave, saving = false }: Clien
           autoLockEnabled: formData.autoLockEnabled,
         });
         queryClient.invalidateQueries({ queryKey: ['customer', client.id] });
-        queryClient.invalidateQueries({ queryKey: ['customers'] });
+        queryClient.invalidateQueries({ queryKey: ['stockini-customers-page'] });
+        queryClient.invalidateQueries({ queryKey: ['stockini-customer-options'] });
       }
     } catch {
       toast.error('Erreur lors de la sauvegarde des paramètres');
