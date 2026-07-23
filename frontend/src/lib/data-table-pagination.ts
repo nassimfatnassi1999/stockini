@@ -49,3 +49,14 @@ export function getPaginationDisabledState(
     nextDisabled: disabled || totalPages === 0 || page >= totalPages,
   };
 }
+
+export function getPaginationRange(
+  page: number,
+  limit: number,
+  totalItems: number,
+) {
+  return {
+    startItem: totalItems === 0 ? 0 : (page - 1) * limit + 1,
+    endItem: Math.min(page * limit, totalItems),
+  };
+}

@@ -12,6 +12,7 @@ import {
   Min,
 } from 'class-validator';
 import { StockMovementType } from '@prisma/client';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class StockChangeDto {
   @IsString()
@@ -41,20 +42,7 @@ export class StockAdjustmentDto {
   reason?: string;
 }
 
-export class StockMovementQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-
+export class StockMovementQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;

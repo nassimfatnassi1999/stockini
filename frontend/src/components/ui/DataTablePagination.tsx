@@ -1,10 +1,12 @@
 'use client';
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import {
   getPaginationItems,
   getPaginationDisabledState,
+  getPaginationRange,
   PRODUCT_PAGE_LIMITS,
 } from '@/lib/data-table-pagination';
 
@@ -29,14 +31,23 @@ export function DataTablePagination({
   onLimitChange,
   disabled = false,
 }: DataTablePaginationProps) {
-  const from = totalItems === 0 ? 0 : (page - 1) * limit + 1;
-  const to = Math.min(page * limit, totalItems);
+  const { startItem: from, endItem: to } = getPaginationRange(
+    page,
+    limit,
+    totalItems,
+  );
   const items = getPaginationItems(page, totalPages);
   const { previousDisabled, nextDisabled } = getPaginationDisabledState(
     page,
     totalPages,
     disabled,
   );
+
+  useEffect(() => {
+    if (!disabled && page > Math.max(totalPages, 1)) {
+      onPageChange(Math.max(totalPages, 1));
+    }
+  }, [disabled, onPageChange, page, totalPages]);
 
   return (
     <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -84,7 +95,7 @@ export function DataTablePagination({
                 onClick={() => onPageChange(item)}
                 disabled={disabled}
                 aria-current={item === page ? 'page' : undefined}
-                aria-label={`Page ${item}`}
+                aria-label={`Aller à la page ${item}`}
                 className={cn(
                   'inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50',
                   item === page

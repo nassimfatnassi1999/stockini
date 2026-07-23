@@ -25,8 +25,13 @@ import { PdfService } from '../documents/pdf.service';
 import { MinioService } from '../documents/minio.service';
 import { SettingsService } from '../settings/settings.service';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateCreditNoteDto, type RefundMethod } from './dto/avoir.dto';
+import {
+  CreateCreditNoteDto,
+  type CreditNoteQueryDto,
+  type RefundMethod,
+} from './dto/avoir.dto';
 import { commercialTotalFinal } from '../common/utils/commercial-document';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 
 const AVOIR_INCLUDE = {
   sale: { select: { invoiceNumber: true, customerId: true } },
@@ -675,15 +680,49 @@ export class AvoirsService {
     }
   }
 
-  findAll(customerId?: string, saleId?: string) {
-    return this.prisma.creditNote.findMany({
-      where: {
-        ...(customerId && { customerId }),
-        ...(saleId && { saleId }),
-      },
+  async findAll(query: CreditNoteQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where: Prisma.CreditNoteWhereInput = {
+      ...(query.customerId && { customerId: query.customerId }),
+      ...(query.saleId && { saleId: query.saleId }),
+      ...(query.search && {
+        OR: [
+          { numero: { contains: query.search, mode: 'insensitive' } },
+          { motif: { contains: query.search, mode: 'insensitive' } },
+          { customer: { name: { contains: query.search, mode: 'insensitive' } } },
+          { sale: { invoiceNumber: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.creditNote.findMany({
+        where,
+        include: AVOIR_INCLUDE,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.creditNote.count({ where }),
+    ]);
+    return buildPaginatedResponse(data, page, limit, total);
+  }
+
+  async findBySale(saleId: string, query: CreditNoteQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where: Prisma.CreditNoteWhereInput = { saleId };
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.creditNote.findMany({
+      where: { saleId },
       include: AVOIR_INCLUDE,
       orderBy: { createdAt: 'desc' },
-    });
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.creditNote.count({ where }),
+    ]);
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   async findOne(id: string) {

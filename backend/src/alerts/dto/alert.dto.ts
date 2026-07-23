@@ -2,10 +2,23 @@ import { AlertType } from '@prisma/client';
 import {
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
 } from 'class-validator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+
+export class AlertQueryDto extends PaginationQueryDto {
+  @IsOptional()
+  @IsString()
+  @IsIn(['true', 'false'])
+  isRead?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
 
 export class CreateAlertDto {
   @IsEnum(AlertType)

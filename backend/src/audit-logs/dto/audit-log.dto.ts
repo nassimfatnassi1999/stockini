@@ -1,7 +1,8 @@
 import { IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
-export class AuditLogQueryDto {
+export class AuditLogQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   entity?: string;
@@ -25,19 +26,6 @@ export class AuditLogQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(200)
-  limit?: number;
 
   @IsOptional()
   @IsString()

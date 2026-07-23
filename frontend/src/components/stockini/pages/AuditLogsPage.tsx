@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 // ─── Action → badge variant ──────────────────────────────────────────────────
 
@@ -241,59 +243,17 @@ function FilterBar({
   );
 }
 
-// ─── Pagination ───────────────────────────────────────────────────────────────
-
-function Pagination({
-  page,
-  totalPages,
-  total,
-  limit,
-  onChange,
-}: {
-  page: number;
-  totalPages: number;
-  total: number;
-  limit: number;
-  onChange: (p: number) => void;
-}) {
-  if (totalPages <= 1) return null;
-  return (
-    <div className="flex items-center justify-between text-sm text-text-secondary pt-2">
-      <span>{total} résultat{total !== 1 ? 's' : ''}</span>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={page <= 1}
-          onClick={() => onChange(page - 1)}
-          className="h-7 px-2"
-        >
-          ‹ Précédent
-        </Button>
-        <span className="text-xs">Page {page} / {totalPages}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={page >= totalPages}
-          onClick={() => onChange(page + 1)}
-          className="h-7 px-2"
-        >
-          Suivant ›
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-const DEFAULT_QUERY: AuditLogQuery = { page: 1, limit: 50 };
+const DEFAULT_QUERY: AuditLogQuery = { page: 1, limit: 10 };
 
 export function AuditLogsPage() {
-  const [query, setQuery] = useState<AuditLogQuery>(DEFAULT_QUERY);
+  const { page, limit, setPage, setLimit } = useUrlPagination();
+  const [filters, setFilters] = useState<AuditLogQuery>({});
   const [selected, setSelected] = useState<AuditLog | null>(null);
+  const query: AuditLogQuery = { ...filters, page, limit };
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ['stockini-audit-logs', query],
     queryFn: () => stockiniApi.auditLogs(query),
     staleTime: 30_000,
@@ -303,8 +263,14 @@ export function AuditLogsPage() {
   const totalPages = data?.totalPages ?? 1;
   const total = data?.total ?? 0;
 
-  const updateQuery = (patch: Partial<AuditLogQuery>) =>
-    setQuery((q) => ({ ...q, ...patch }));
+  const updateQuery = (patch: Partial<AuditLogQuery>) => {
+    if (patch.page !== undefined) setPage(patch.page);
+    if (patch.limit !== undefined) setLimit(patch.limit);
+    const { page: _page, limit: _limit, ...filterPatch } = patch;
+    if (Object.keys(filterPatch).length > 0) {
+      setFilters((current) => ({ ...current, ...filterPatch }));
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -322,7 +288,10 @@ export function AuditLogsPage() {
       <FilterBar
         query={query}
         onChange={updateQuery}
-        onReset={() => setQuery(DEFAULT_QUERY)}
+        onReset={() => {
+          setFilters({});
+          setLimit(DEFAULT_QUERY.limit ?? 10);
+        }}
       />
 
       {/* Table */}
@@ -395,12 +364,14 @@ export function AuditLogsPage() {
       )}
 
       {/* Pagination */}
-      <Pagination
+      <DataTablePagination
         page={query.page ?? 1}
         totalPages={totalPages}
-        total={total}
-        limit={query.limit ?? 50}
-        onChange={(p) => updateQuery({ page: p })}
+        totalItems={total}
+        limit={query.limit ?? 10}
+        disabled={isFetching}
+        onPageChange={setPage}
+        onLimitChange={setLimit}
       />
 
       {/* Detail panel */}

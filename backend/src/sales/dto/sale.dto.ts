@@ -23,6 +23,7 @@ import {
   SaleStatus,
   SurplusDisposition,
 } from '@prisma/client';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export const SALES_DOCUMENT_TYPES = [
   'DEVIS',
@@ -232,20 +233,7 @@ export class UpdateSaleDto {
   @IsOptional() @IsEnum(PaymentMethod) paymentMethod?: PaymentMethod;
 }
 
-export class SalePaginationDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-
+export class SalePaginationDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;

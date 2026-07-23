@@ -1,7 +1,8 @@
 'use client';
 
-import { ArrowDownCircle, ArrowUpCircle, Banknote, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Banknote, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
 
 export interface CashTransaction {
   id:             string;
@@ -29,6 +30,7 @@ interface Props {
   pagination:   CashPagination | undefined;
   isLoading:    boolean;
   onPageChange: (page: number) => void;
+  onLimitChange: (limit: number) => void;
   showAccount?: boolean;
 }
 
@@ -64,7 +66,14 @@ function formatDate(iso: string) {
   });
 }
 
-export function CashTransactionsTable({ data, pagination, isLoading, onPageChange, showAccount = true }: Props) {
+export function CashTransactionsTable({
+  data,
+  pagination,
+  isLoading,
+  onPageChange,
+  onLimitChange,
+  showAccount = true,
+}: Props) {
   if (isLoading) {
     return (
       <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -174,30 +183,16 @@ export function CashTransactionsTable({ data, pagination, isLoading, onPageChang
         </table>
       </div>
 
-      {pagination && pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-border px-4 py-3">
-          <p className="text-[11px] text-text-secondary">
-            {pagination.total} transaction{pagination.total !== 1 ? 's' : ''} — page {pagination.page}/{pagination.totalPages}
-          </p>
-          <div className="flex gap-1">
-            <button
-              type="button"
-              disabled={pagination.page <= 1}
-              onClick={() => onPageChange(pagination.page - 1)}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-text-secondary transition-colors hover:bg-surface disabled:opacity-40"
-            >
-              <ChevronLeft size={13} />
-            </button>
-            <button
-              type="button"
-              disabled={pagination.page >= pagination.totalPages}
-              onClick={() => onPageChange(pagination.page + 1)}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-text-secondary transition-colors hover:bg-surface disabled:opacity-40"
-            >
-              <ChevronRight size={13} />
-            </button>
-          </div>
-        </div>
+      {pagination && pagination.total > 0 && (
+        <DataTablePagination
+          page={pagination.page}
+          limit={pagination.limit}
+          totalItems={pagination.total}
+          totalPages={pagination.totalPages}
+          disabled={isLoading}
+          onPageChange={onPageChange}
+          onLimitChange={onLimitChange}
+        />
       )}
     </div>
   );

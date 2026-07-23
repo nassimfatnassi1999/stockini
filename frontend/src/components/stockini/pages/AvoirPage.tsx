@@ -26,6 +26,7 @@ import {
   calculateCreditNoteTotals,
   type RefundMethod,
 } from "@/features/avoirs/utils/credit-note-calculation";
+import { DataTablePagination } from "@/components/ui/DataTablePagination";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -772,23 +773,30 @@ export function AvoirPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailAvoir, setDetailAvoir] = useState<CreditNote | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const avoirsQuery = useQuery({
-    queryKey: ["stockini-avoirs"],
-    queryFn: () => stockiniApi.avoirs(),
-  });
-  const avoirs: CreditNote[] = avoirsQuery.data ?? [];
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-  const filtered = avoirs.filter((a) => {
-    const q = search.toLowerCase();
-    return (
-      a.numero.toLowerCase().includes(q) ||
-      (a.customer?.name ?? "").toLowerCase().includes(q) ||
-      (a.sale?.invoiceNumber ?? "").toLowerCase().includes(q) ||
-      (a.motif ?? "").toLowerCase().includes(q)
-    );
+  const avoirsQuery = useQuery({
+    queryKey: ["stockini-avoirs", page, limit, debouncedSearch],
+    queryFn: ({ signal }) =>
+      stockiniApi.avoirPage(
+        { page, limit, search: debouncedSearch || undefined },
+        signal,
+      ),
+    placeholderData: (previous) => previous,
   });
+  const filtered: CreditNote[] = avoirsQuery.data?.data ?? [];
+  const pagination = avoirsQuery.data?.pagination;
 
   return (
     <>
@@ -990,6 +998,17 @@ export function AvoirPage() {
               ))}
             </tbody>
           </table>
+          {(pagination?.totalItems ?? 0) > 0 && (
+            <DataTablePagination
+              page={page}
+              limit={limit}
+              totalItems={pagination?.totalItems ?? 0}
+              totalPages={pagination?.totalPages ?? 0}
+              disabled={avoirsQuery.isFetching}
+              onPageChange={setPage}
+              onLimitChange={(next) => { setLimit(next); setPage(1); }}
+            />
+          )}
         </CardContent>
       </Card>
 

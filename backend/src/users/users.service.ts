@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 import {
   CreateUserDto,
   ResetPasswordDto,
@@ -26,7 +27,7 @@ export class UsersService {
 
   async findAll(query: UsersQueryDto) {
     const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {};
@@ -59,13 +60,7 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   async findOne(id: string) {

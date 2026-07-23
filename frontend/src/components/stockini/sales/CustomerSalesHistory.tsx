@@ -29,6 +29,7 @@ import { SalesDocumentGenerationPanel } from './SalesDocumentGenerationPanel';
 import { SalesSelectionActionsBar } from './SalesSelectionActionsBar';
 import { isSourceOfActiveConsolidation, SalePaymentCell } from './SaleConsolidationDisplay';
 import { toast } from '@/lib/toast';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
 
 const DOCUMENT_LABELS: Record<string, string> = {
   DEVIS: 'Devis', BON_COMMANDE: 'BC', BON_LIVRAISON: 'BL', FACTURE: 'Facture', AVOIR: 'Avoir',
@@ -298,10 +299,15 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-xs text-slate-500">
-        <label className="flex items-center gap-2">Lignes : <select className="app-select h-8 w-20" value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}>{[5, 10, 20, 50].map((n) => <option key={n}>{n}</option>)}</select></label>
-        <div className="flex items-center gap-2"><span>Page {pagination?.page ?? 1} sur {Math.max(1, pagination?.totalPages ?? 1)}</span><Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={14} /></Button><Button size="sm" variant="outline" disabled={page >= (pagination?.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></Button></div>
-      </div>
+      <DataTablePagination
+        page={page}
+        limit={limit}
+        totalItems={pagination?.total ?? 0}
+        totalPages={pagination?.totalPages ?? 0}
+        disabled={query.isFetching}
+        onPageChange={setPage}
+        onLimitChange={(next) => { setLimit(next); setPage(1); }}
+      />
       {detailSaleId && <SaleDetailsModal saleId={detailSaleId} onClose={() => setDetailSaleId(null)} />}
       {dialogOpen && <ConsolidateDocumentsDialog sales={selectedSales.map((sale) => ({ ...sale, customer: { id: customerId, name: 'Client' } } as unknown as Sale))} onClose={() => setDialogOpen(false)} loading={consolidation.isPending} onConfirm={(value) => consolidation.mutate(value)} />}
       {deconsolidationTarget && <DeconsolidateDialog sale={{ id: deconsolidationTarget.id, invoiceNumber: deconsolidationTarget.invoiceNumber, total: deconsolidationTarget.total, stampDuty: deconsolidationTarget.stampDuty, totalFinal: deconsolidationTarget.totalTtc }} onClose={() => setDeconsolidationTarget(null)} onSuccess={() => { setSelected([]); setDetailSaleId(null); }} />}

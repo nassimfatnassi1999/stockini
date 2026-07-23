@@ -5,6 +5,7 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { CustomersService } from '../customers/customers.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ReportsService } from '../reports/reports.service';
+import { buildPagination } from '../common/utils/pagination.util';
 import type {
   CashPeriod,
   CashQueryDto,
@@ -327,7 +328,7 @@ export class CaisseService {
 
   async getTransactions(query: CashTransactionsQueryDto) {
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const hasDateFilter =
@@ -405,7 +406,10 @@ export class CaisseService {
 
     return {
       data: rows,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        ...buildPagination(page, limit, total),
+        total,
+      },
     };
   }
 

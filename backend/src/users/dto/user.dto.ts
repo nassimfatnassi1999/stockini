@@ -9,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export const VALID_ROLES = [
   'ADMIN',
@@ -72,7 +73,7 @@ export class ResetPasswordDto {
   password!: string;
 }
 
-export class UsersQueryDto {
+export class UsersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
@@ -87,15 +88,4 @@ export class UsersQueryDto {
   @IsIn(['active', 'inactive', ''])
   status?: string;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number;
 }

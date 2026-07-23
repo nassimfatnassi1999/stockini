@@ -6,6 +6,9 @@ import { ReferenceGeneratorService } from '../references/reference-generator.ser
 import { SettingsService } from '../settings/settings.service';
 import { CreateCustomerDto, LockCustomerDto, UpdateCustomerDto, UpdateDebtSettingsDto } from './dto/customer.dto';
 import { CustomerSalesQueryDto } from './dto/customer-sales-query.dto';
+import { CustomerQueryDto } from './dto/customer-query.dto';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
+import { buildPagination } from '../common/utils/pagination.util';
 
 @Injectable()
 export class CustomersService {
@@ -108,20 +111,53 @@ export class CustomersService {
     return total.toNumber();
   }
 
-  async findAll(search?: string) {
-    const customers = await this.prisma.customer.findMany({
-      where: search
-        ? {
-            deletedAt: null,
-            OR: [
-              { name: { contains: search, mode: 'insensitive' } },
-              { phone: { contains: search, mode: 'insensitive' } },
-              { email: { contains: search, mode: 'insensitive' } },
-            ],
-          }
-        : { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(query: CustomerQueryDto = new CustomerQueryDto()) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const visibility: Prisma.CustomerWhereInput = {
+      OR: [
+        { origin: CustomerOrigin.MANUAL },
+        {
+          sales: {
+            some: {
+              deletedAt: null,
+              status: { not: 'CANCELLED' },
+              remainingAmount: { gt: 0 },
+              consolidationMemberships: { none: { active: true } },
+              OR: [
+                { documentType: 'FACTURE' },
+                { documentType: 'BON_LIVRAISON', transformedToId: null },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    const where: Prisma.CustomerWhereInput = {
+      deletedAt: null,
+      AND: [
+        visibility,
+        ...(query.search
+          ? [{
+              OR: [
+                { name: { contains: query.search, mode: 'insensitive' as const } },
+                { reference: { contains: query.search, mode: 'insensitive' as const } },
+                { phone: { contains: query.search, mode: 'insensitive' as const } },
+                { email: { contains: query.search, mode: 'insensitive' as const } },
+              ],
+            }]
+          : []),
+      ],
+    };
+    const [customers, total] = await this.prisma.$transaction([
+      this.prisma.customer.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.customer.count({ where }),
+    ]);
 
     // Calcul des dettes en une seule requête groupée (FACTURE + BL non transformés, non supprimés, non annulés)
     const invoices = await this.prisma.sale.findMany({
@@ -160,16 +196,15 @@ export class CustomersService {
       }
     }
 
-    return customers
-      .map((c) => {
+    const data = customers.map((c) => {
         const debt = debtMap.get(c.id);
         return {
           ...c,
           debtAmount: debt ? debt.debtAmount.toNumber() : 0,
           unpaidInvoicesCount: debt ? debt.unpaidInvoicesCount : 0,
         };
-      })
-      .filter((c) => c.origin === CustomerOrigin.MANUAL || c.debtAmount > 0);
+      }).filter((c) => c.origin === CustomerOrigin.MANUAL || c.debtAmount > 0);
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   async findOne(id: string) {
@@ -187,7 +222,7 @@ export class CustomersService {
     });
 
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(50, Math.max(1, query.limit ?? 10));
+    const limit = query.limit ?? 10;
     const and: Prisma.SaleWhereInput[] = [];
 
     if (query.search?.trim()) {
@@ -329,7 +364,7 @@ export class CustomersService {
 
     return {
       data,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: { ...buildPagination(page, limit, total), total },
       summary: {
         totalTtc: totalPayable,
         totalPaid,

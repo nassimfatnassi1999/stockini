@@ -23,8 +23,12 @@ describe('SuppliersService.findAll debt aggregation', () => {
       })),
     );
     const prisma = {
-      supplier: { findMany },
+      supplier: {
+        findMany,
+        count: jest.fn().mockResolvedValue(suppliers.length),
+      },
       purchase: { findMany: purchaseFindMany },
+      $transaction: jest.fn((operations: Array<Promise<unknown>>) => Promise.all(operations)),
     } as any;
     const service = new SuppliersService(prisma, {} as any);
     return { service, purchaseFindMany };
@@ -41,8 +45,8 @@ describe('SuppliersService.findAll debt aggregation', () => {
 
     const result = await service.findAll();
 
-    expect(result[0].totalDebt).toBe('80.500');
-    expect(result[1].totalDebt).toBe('0.000');
+    expect(result.data[0].totalDebt).toBe('80.500');
+    expect(result.data[1].totalDebt).toBe('0.000');
 
     // l'agrégation exclut les achats annulés et ne garde que reste à payer > 0
     const where = purchaseFindMany.mock.calls[0][0].where;

@@ -12,6 +12,7 @@ import {
   type ProductSearchMode,
   UpdateProductDto,
 } from './dto/product.dto';
+import { buildPagination } from '../common/utils/pagination.util';
 
 @Injectable()
 export class ProductsService {
@@ -107,18 +108,9 @@ export class ProductsService {
       }),
       this.prisma.product.count({ where }),
     ]);
-    const totalPages = Math.ceil(totalItems / limit);
-
     return {
       data: products,
-      pagination: {
-        page,
-        limit,
-        totalItems,
-        totalPages,
-        hasPreviousPage: page > 1,
-        hasNextPage: page < totalPages,
-      },
+      pagination: buildPagination(page, limit, totalItems),
     };
   }
 

@@ -2,13 +2,13 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
-  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Min,
 } from 'class-validator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export type ProductSearchMode = 'REFERENCE' | 'DESIGNATION';
 
@@ -148,19 +148,7 @@ export class UpdateProductDto {
   isActive?: boolean;
 }
 
-export class ProductQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @IsIn([10, 20, 30, 50, 100])
-  limit: number = 10;
-
+export class ProductQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;

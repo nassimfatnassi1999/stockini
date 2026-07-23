@@ -9,6 +9,8 @@ import { openPdfInNewTab, pdfOpenErrorMessage } from "@/lib/openPdf";
 import { toast } from "@/lib/toast";
 import { money } from "@/lib/stockini/format";
 import type { CreditNote, Sale } from "@/lib/stockini/types";
+import { DataTablePagination } from "@/components/ui/DataTablePagination";
+import { useState } from "react";
 
 function fmtDate(d: string | Date) {
   return new Date(d).toLocaleDateString("fr-TN", {
@@ -145,26 +147,21 @@ interface Props {
 }
 
 export function CreditNoteHistorySlideOver({ sale, onClose }: Props) {
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const query = useQuery({
-    queryKey: ["sale-credit-notes", sale.id],
-    queryFn: () => stockiniApi.saleCreditNotes(sale.id),
+    queryKey: ["sale-credit-notes", sale.id, page, limit],
+    queryFn: ({ signal }) =>
+      stockiniApi.saleCreditNotes(sale.id, { page, limit }, signal),
+    placeholderData: (previous) => previous,
     staleTime: 0,
   });
 
-  const avoirs: CreditNote[] = query.data ?? [];
-
-  // Compute totals from the freshly fetched avoirs so the banner is always
-  // correct even if the parent passed a slightly stale sale object.
-  const activeAvoirs = avoirs.filter((av) => av.statut !== "CANCELLED");
-  const computedRefunded = activeAvoirs.reduce(
-    (sum, av) => sum + Number(av.totalFinal),
-    0,
-  );
+  const avoirs: CreditNote[] = query.data?.data ?? [];
 
   // Prefer server-computed fields; fall back to local computation while loading.
   const initialTtc = Number(sale.totalInitialTtc ?? sale.totalFinal);
-  const totalRefunded =
-    query.isFetched ? computedRefunded : Number(sale.totalRefunded ?? 0);
+  const totalRefunded = Number(sale.totalRefunded ?? 0);
   const currentTtc = Math.max(0, initialTtc - totalRefunded);
 
   const isRefunded = sale.status === "REFUNDED";
@@ -246,6 +243,17 @@ export function CreditNoteHistorySlideOver({ sale, onClose }: Props) {
         {avoirs.map((avoir) => (
           <AvoirCard key={avoir.id} avoir={avoir} />
         ))}
+        {(query.data?.pagination.totalItems ?? 0) > 0 && (
+          <DataTablePagination
+            page={page}
+            limit={limit}
+            totalItems={query.data?.pagination.totalItems ?? 0}
+            totalPages={query.data?.pagination.totalPages ?? 0}
+            disabled={query.isFetching}
+            onPageChange={setPage}
+            onLimitChange={(next) => { setLimit(next); setPage(1); }}
+          />
+        )}
       </div>
     </SlideOver>
   );

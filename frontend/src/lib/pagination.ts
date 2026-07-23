@@ -1,5 +1,5 @@
-export const DEFAULT_PAGE_SIZE = 5;
-export const PAGINATION_LIMIT_OPTIONS = [5, 10, 20, 30, 50, 100] as const;
+export const DEFAULT_PAGE_SIZE = 10;
+export const PAGINATION_LIMIT_OPTIONS = [10, 20, 30, 50, 100] as const;
 
 type PaginationParams = {
   page?: unknown;

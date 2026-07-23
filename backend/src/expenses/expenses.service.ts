@@ -5,6 +5,7 @@ import { CaisseService } from '../caisse/caisse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { CancelExpenseDto, CreateExpenseDto, ExpenseQueryDto } from './dto/expense.dto';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class ExpensesService {
@@ -17,7 +18,7 @@ export class ExpensesService {
 
   async findAll(query: ExpenseQueryDto) {
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ExpenseWhereInput = {
@@ -70,7 +71,7 @@ export class ExpensesService {
       this.prisma.expense.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   async create(dto: CreateExpenseDto, userId?: string) {

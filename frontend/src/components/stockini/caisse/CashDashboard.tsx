@@ -23,6 +23,7 @@ import { toast } from '@/lib/toast';
 import { CashSummaryCards, type CashSummary, type AccountView } from './CashSummaryCards';
 import { CashFilters, type CashFilterState } from './CashFilters';
 import { CashTransactionsTable, type CashTransaction, type CashPagination } from './CashTransactionsTable';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 import { CashAnalyticsCharts, type CashAnalytics } from './CashAnalyticsCharts';
 import { CashResetModal } from './CashResetModal';
 import { CashManualOpModal } from './CashManualOpModal';
@@ -50,7 +51,7 @@ export function CashDashboard() {
     startDate: '',
     endDate:   '',
   });
-  const [page, setPage] = useState(1);
+  const { page, limit, setPage, setLimit } = useUrlPagination();
   const [showReset, setShowReset] = useState(false);
   const [showDepot, setShowDepot] = useState(false);
   const [showRetrait, setShowRetrait] = useState(false);
@@ -97,9 +98,9 @@ export function CashDashboard() {
 
   const txParams = buildParams(true);
   const txQuery = useQuery<{ data: CashTransaction[]; pagination: CashPagination }>({
-    queryKey: ['caisse-transactions', txParams, page],
+    queryKey: ['caisse-transactions', txParams, page, limit],
     queryFn:  () =>
-      api.get('/caisse/transactions', { params: cleanPaginationParams({ ...txParams, page, limit: 50 }) }).then((r) => r.data),
+      api.get('/caisse/transactions', { params: cleanPaginationParams({ ...txParams, page, limit }) }).then((r) => r.data),
     staleTime: 30_000,
   });
 
@@ -293,6 +294,7 @@ export function CashDashboard() {
             pagination={txQuery.data?.pagination}
             isLoading={txQuery.isLoading}
             onPageChange={setPage}
+            onLimitChange={setLimit}
             showAccount={accountTab === 'global'}
           />
         </>

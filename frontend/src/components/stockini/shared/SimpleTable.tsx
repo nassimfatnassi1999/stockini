@@ -9,14 +9,19 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from './PageHeader';
 import { StateRows } from './StateRows';
+import {
+  DataTablePagination,
+  type DataTablePaginationProps,
+} from '@/components/ui/DataTablePagination';
 
-export function SimpleTable({ title, subtitle, headers, rows, loading, error }: {
+export function SimpleTable({ title, subtitle, headers, rows, loading, error, pagination }: {
   title: string;
   subtitle: string;
   headers: string[];
   rows: React.ReactNode[][];
   loading: boolean;
   error: unknown;
+  pagination?: DataTablePaginationProps;
 }) {
   return (
     <>
@@ -49,6 +54,9 @@ export function SimpleTable({ title, subtitle, headers, rows, loading, error }: 
               ))}
             </TableBody>
           </Table>
+          {pagination && pagination.totalItems > 0 && (
+            <DataTablePagination {...pagination} disabled={pagination.disabled || loading} />
+          )}
         </CardContent>
       </Card>
     </>

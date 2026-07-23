@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,9 @@ import { RowActions } from '../shared/RowActions';
 import { SimpleTable } from '../shared/SimpleTable';
 import { cleanPayload, emptyForm, useDropdownOptions } from '../shared/form-utils';
 import type { FieldConfig } from '../shared/form-utils';
+import { SearchBox } from '../shared/SearchBox';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
+import { getValidPage } from '@/lib/data-table-pagination';
 
 function stockValueClass(currentStock: number | null, minimumStock: number | null) {
   if (currentStock === null || minimumStock === null) return 'text-slate-700';
@@ -43,6 +46,7 @@ function AlertStatusBadge({ isRead }: { isRead: boolean }) {
 export function AlertsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
+  const { page, limit, search, setSearch, urlSearch, updateParams } = useUrlPagination();
   const [editing, setEditing] = useState<Alert | null>(null);
   const alertTypeOptions = useDropdownOptions('alert_types');
   const fields: FieldConfig[] = [
@@ -52,10 +56,19 @@ export function AlertsPage() {
     { name: 'isRead', label: 'Lu', type: 'checkbox' },
   ];
   const [form, setForm] = useState<Record<string, string | boolean>>(emptyForm(fields));
-  const query = useQuery({ queryKey: ['stockini-alerts'], queryFn: stockiniApi.alerts });
-  const data = [...(query.data ?? [])].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  const query = useQuery({
+    queryKey: ['stockini-alerts-page', page, limit, urlSearch],
+    queryFn: ({ signal }) =>
+      stockiniApi.alertPage({ page, limit, search: urlSearch || undefined }, signal),
+    placeholderData: (previous) => previous,
+  });
+  const data = query.data?.data ?? [];
+  const pagination = query.data?.pagination;
+  useEffect(() => {
+    if (pagination && page > Math.max(pagination.totalPages, 1)) {
+      updateParams({ page: getValidPage(page, pagination.totalPages) }, 'replace');
+    }
+  }, [page, pagination, updateParams]);
   const saveMutation = useMutation({
     mutationFn: () => {
       const payload = cleanPayload(form, fields) as Partial<Alert>;
@@ -63,6 +76,7 @@ export function AlertsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-alerts-page'] });
       setEditing(null);
       setForm(emptyForm(fields));
       toast.success('Alerte enregistrée');
@@ -72,24 +86,28 @@ export function AlertsPage() {
     mutationFn: stockiniApi.deleteAlert,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-alerts-page'] });
       toast.success('Alerte supprimée');
     },
   });
   return (
     <>
-      <div className="mb-4 flex items-end justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <PageHeader title="Alertes" subtitle="Alertes de stock, factures impayées, retards achats et système." />
-        <Can permission="alerts.create">
-          <Button type="button" size="sm" onClick={() => { setEditing({} as Alert); setForm(emptyForm(fields)); }}>
-            <Plus size={14} />
-            Nouveau
-          </Button>
-        </Can>
+        <div className="flex min-w-0 items-center gap-2">
+          <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une alerte…" />
+          <Can permission="alerts.create">
+            <Button type="button" size="sm" onClick={() => { setEditing({} as Alert); setForm(emptyForm(fields)); }}>
+              <Plus size={14} />
+              Nouveau
+            </Button>
+          </Can>
+        </div>
       </div>
       <SimpleTable
         title=""
         subtitle=""
-        loading={query.isLoading}
+        loading={query.isPending}
         error={query.error}
         headers={['Date', 'Type', 'Produit', 'Référence', 'Stock actuel', 'Seuil minimum', 'Message', 'Statut', 'Actions']}
         rows={data.map((alert: Alert) => {
@@ -126,6 +144,15 @@ export function AlertsPage() {
             />,
           ];
         })}
+        pagination={{
+          page,
+          limit,
+          totalItems: pagination?.totalItems ?? 0,
+          totalPages: pagination?.totalPages ?? 0,
+          disabled: query.isFetching || deleteMutation.isPending,
+          onPageChange: (next) => updateParams({ page: next }),
+          onLimitChange: (next) => updateParams({ limit: next, page: 1 }),
+        }}
       />
       {editing && can(editing.id ? 'alerts.update' : 'alerts.create') && (
         <CrudModal

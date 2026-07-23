@@ -29,6 +29,7 @@ import {
   VALID_SUPPLIER_PAYMENT_WHERE,
 } from '../common/services/purchase-payment-state';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 import {
   CreatePurchaseDto,
   PayablePurchaseQueryDto,
@@ -162,12 +163,13 @@ export class PurchasesService {
 
   async findAll(query?: PurchasePaginationDto) {
     const page = Math.max(1, query?.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
+    const limit = query?.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const where: Prisma.PurchaseWhereInput = {
       deletedAt: null,
       ...(query?.status && { status: query.status }),
+      ...(query?.paymentStatus && { paymentStatus: query.paymentStatus }),
       ...(query?.supplierId && { supplierId: query.supplierId }),
       ...((query?.dateFrom || query?.dateTo) && {
         createdAt: {
@@ -210,56 +212,23 @@ export class PurchasesService {
     const orderBy: Prisma.PurchaseOrderByWithRelationInput = (query?.sortBy &&
       allowedSortFields[query.sortBy]) || { createdAt: 'desc' };
 
-    const dynamicFinancialQuery =
-      !!query?.paymentStatus ||
-      ['paidAmount', 'remainingAmount', 'paymentStatus'].includes(
-        query?.sortBy ?? '',
-      );
-    const rows = await this.prisma.purchase.findMany({
-      where,
-      include: {
-        supplier: true,
-        items: true,
-        payments: { where: VALID_SUPPLIER_PAYMENT_WHERE },
-      },
-      orderBy: dynamicFinancialQuery ? { createdAt: 'desc' } : orderBy,
-      ...(dynamicFinancialQuery ? {} : { skip, take: limit }),
-    });
-    let data = rows.map((purchase) => this.withPaymentState(purchase));
-    if (query?.paymentStatus) {
-      data = data.filter(
-        (purchase) => purchase.paymentStatus === query.paymentStatus,
-      );
-    }
-    if (dynamicFinancialQuery && query?.sortBy) {
-      const direction = sortOrder === 'asc' ? 1 : -1;
-      const field = query.sortBy as
-        | 'paidAmount'
-        | 'remainingAmount'
-        | 'paymentStatus';
-      data.sort((left, right) => {
-        if (field === 'paymentStatus') {
-          return (
-            left.paymentStatus.localeCompare(right.paymentStatus) * direction
-          );
-        }
-        return (
-          new Prisma.Decimal(left[field]).comparedTo(right[field]) * direction
-        );
-      });
-    }
-    const total = dynamicFinancialQuery
-      ? data.length
-      : await this.prisma.purchase.count({ where });
-    if (dynamicFinancialQuery) data = data.slice(skip, skip + limit);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.purchase.findMany({
+        where,
+        include: {
+          supplier: true,
+          items: true,
+          payments: { where: VALID_SUPPLIER_PAYMENT_WHERE },
+        },
+        orderBy,
+        skip,
+        take: limit,
+      }),
+      this.prisma.purchase.count({ where }),
+    ]);
+    const data = rows.map((purchase) => this.withPaymentState(purchase));
 
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   /**

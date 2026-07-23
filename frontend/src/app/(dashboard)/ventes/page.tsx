@@ -70,6 +70,8 @@ import { ConsolidatedDocumentBadge } from "@/components/stockini/sales/Consolida
 import { DeconsolidateDialog } from "@/components/stockini/sales/DeconsolidateDialog";
 import { SalesDocumentGenerationPanel } from "@/components/stockini/sales/SalesDocumentGenerationPanel";
 import { SalesSelectionActionsBar } from "@/components/stockini/sales/SalesSelectionActionsBar";
+import { DataTablePagination } from "@/components/ui/DataTablePagination";
+import { useUrlPagination } from "@/hooks/useUrlPagination";
 import {
   isSourceOfActiveConsolidation,
   SalePaymentCell,
@@ -736,20 +738,26 @@ export default function VentesPage() {
     targetType: SalesDocumentType;
   } | null>(null);
   // ── Sales history pagination + filters ────────────────────────────────────
-  const [salesPage, setSalesPage] = useState(1);
-  const [salesLimit, setSalesLimit] = useState(5);
-  const [salesSearch, setSalesSearch] = useState("");
-  const [salesLocalSearch, setSalesLocalSearch] = useState("");
-  const [salesDocType, setSalesDocType] = useState("");
-  const [salesStatus, setSalesStatus] = useState("");
+  const {
+    page: salesPage,
+    limit: salesLimit,
+    setPage: setSalesPage,
+    setLimit: setSalesLimit,
+    searchParams: salesUrlParams,
+    updateParams: updateSalesUrl,
+  } = useUrlPagination();
+  const salesSearch = salesUrlParams.get("search") ?? "";
+  const salesDocType = salesUrlParams.get("documentType") ?? "";
+  const salesStatus = salesUrlParams.get("status") ?? "";
+  const [salesLocalSearch, setSalesLocalSearch] = useState(salesSearch);
   const salesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => setSalesLocalSearch(salesSearch), [salesSearch]);
 
   const handleSalesSearchChange = (value: string) => {
     setSalesLocalSearch(value);
     if (salesDebounceRef.current) clearTimeout(salesDebounceRef.current);
     salesDebounceRef.current = setTimeout(() => {
-      setSalesSearch(value);
-      setSalesPage(1);
+      updateSalesUrl({ search: value.trim() || undefined, page: 1 }, "replace");
     }, 300);
   };
 
@@ -2149,20 +2157,22 @@ export default function VentesPage() {
                     }}
                     onFilterChange={(key, value) => {
                       if (key === "docType") {
-                        setSalesDocType(value);
-                        setSalesPage(1);
+                        updateSalesUrl({ documentType: value || undefined, page: 1 });
                       }
                       if (key === "status") {
-                        setSalesStatus(value);
-                        setSalesPage(1);
+                        updateSalesUrl({ status: value || undefined, page: 1 });
                       }
                     }}
                     resultsCount={salesQuery.data?.total ?? 0}
                     onReset={() => {
-                      handleSalesSearchChange("");
-                      setSalesDocType("");
-                      setSalesStatus("");
-                      setSalesPage(1);
+                      if (salesDebounceRef.current) clearTimeout(salesDebounceRef.current);
+                      setSalesLocalSearch("");
+                      updateSalesUrl({
+                        documentType: undefined,
+                        status: undefined,
+                        search: undefined,
+                        page: 1,
+                      });
                     }}
                     isFetching={salesQuery.isFetching}
                   />
@@ -2417,66 +2427,15 @@ export default function VentesPage() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-2.5 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] text-slate-400">
-                        Lignes&nbsp;:
-                      </span>
-                      <select
-                        value={salesLimit}
-                        onChange={(e) => {
-                          setSalesLimit(Number(e.target.value));
-                          setSalesPage(1);
-                        }}
-                        className="h-7 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400/25 hover:border-slate-300 transition-colors"
-                      >
-                        {[5, 10, 20, 30, 100].map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {(salesQuery.data?.total ?? 0) > 0 && (
-                        <span className="text-[12px] text-slate-400">
-                          {(salesPage - 1) * salesLimit + 1}–
-                          {Math.min(
-                            salesPage * salesLimit,
-                            salesQuery.data?.total ?? 0,
-                          )}{" "}
-                          sur {salesQuery.data?.total ?? 0}
-                        </span>
-                      )}
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setSalesPage((p) => p - 1)}
-                          disabled={salesPage <= 1 || salesQuery.isFetching}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label="Page précédente"
-                        >
-                          <ChevronLeft size={13} />
-                        </button>
-                        <span className="min-w-[76px] text-center text-[12px] font-medium text-slate-600">
-                          Page {salesPage} /{" "}
-                          {Math.max(salesQuery.data?.totalPages ?? 1, 1)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setSalesPage((p) => p + 1)}
-                          disabled={
-                            salesPage >= (salesQuery.data?.totalPages ?? 1) ||
-                            salesQuery.isFetching
-                          }
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label="Page suivante"
-                        >
-                          <ChevronRight size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <DataTablePagination
+                    page={salesPage}
+                    limit={salesLimit}
+                    totalItems={salesQuery.data?.total ?? 0}
+                    totalPages={salesQuery.data?.totalPages ?? 0}
+                    disabled={salesQuery.isFetching}
+                    onPageChange={setSalesPage}
+                    onLimitChange={setSalesLimit}
+                  />
                 </>
               )}
               {activeHistoryTab === "documents" && (

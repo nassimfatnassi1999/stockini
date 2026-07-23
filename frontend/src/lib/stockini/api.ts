@@ -180,6 +180,13 @@ export const stockiniApi = {
     );
     return first.data.concat(...remainingPages);
   },
+  customerPage: (
+    params?: { page?: number; limit?: number; search?: string },
+    signal?: AbortSignal,
+  ) =>
+    api
+      .get<PaginatedApiResponse<Customer>>('/customers', { params, signal })
+      .then((r) => r.data),
   product: (id: string) =>
     api.get<Product>(`/products/${id}`).then((r) => r.data),
   createProduct: (
@@ -200,7 +207,21 @@ export const stockiniApi = {
   },
   deleteProduct: (id: string) =>
     api.delete(`/products/${id}`).then((r) => r.data),
-  customers: () => api.get<Customer[]>("/customers").then((r) => r.data),
+  customers: async () => {
+    const first = await api
+      .get<PaginatedApiResponse<Customer>>('/customers', { params: { page: 1, limit: 100 } })
+      .then((r) => r.data);
+    const rest = await Promise.all(
+      Array.from({ length: first.pagination.totalPages - 1 }, (_, index) =>
+        api
+          .get<PaginatedApiResponse<Customer>>('/customers', {
+            params: { page: index + 2, limit: 100 },
+          })
+          .then((r) => r.data.data),
+      ),
+    );
+    return first.data.concat(...rest);
+  },
   customer: (id: string) =>
     api.get<Customer>(`/customers/${id}`).then((r) => r.data),
   customerSales: (
@@ -214,7 +235,28 @@ export const stockiniApi = {
       .then((r) => r.data),
   updateCustomer: (id: string, data: Partial<Customer>) =>
     api.patch<Customer>(`/customers/${id}`, data).then((r) => r.data),
-  suppliers: () => api.get<Supplier[]>("/suppliers").then((r) => r.data),
+  supplierPage: (
+    params?: { page?: number; limit?: number; search?: string },
+    signal?: AbortSignal,
+  ) =>
+    api
+      .get<PaginatedApiResponse<Supplier>>('/suppliers', { params, signal })
+      .then((r) => r.data),
+  suppliers: async () => {
+    const first = await api
+      .get<PaginatedApiResponse<Supplier>>('/suppliers', { params: { page: 1, limit: 100 } })
+      .then((r) => r.data);
+    const rest = await Promise.all(
+      Array.from({ length: first.pagination.totalPages - 1 }, (_, index) =>
+        api
+          .get<PaginatedApiResponse<Supplier>>('/suppliers', {
+            params: { page: index + 2, limit: 100 },
+          })
+          .then((r) => r.data.data),
+      ),
+    );
+    return first.data.concat(...rest);
+  },
   createSupplier: (data: Partial<Supplier>) =>
     api.post<Supplier>("/suppliers", data).then((r) => r.data),
   updateSupplier: (id: string, data: Partial<Supplier>) =>
@@ -339,7 +381,28 @@ export const stockiniApi = {
       .post<Payment>(`/payments/purchases/${purchaseId}/pay`, data)
       .then((r) => r.data);
   },
-  alerts: () => api.get<Alert[]>("/alerts").then((r) => r.data),
+  alertPage: (
+    params?: { page?: number; limit?: number; search?: string; isRead?: string },
+    signal?: AbortSignal,
+  ) =>
+    api
+      .get<PaginatedApiResponse<Alert>>('/alerts', { params, signal })
+      .then((r) => r.data),
+  alerts: async () => {
+    const first = await api
+      .get<PaginatedApiResponse<Alert>>('/alerts', { params: { page: 1, limit: 100 } })
+      .then((r) => r.data);
+    const rest = await Promise.all(
+      Array.from({ length: first.pagination.totalPages - 1 }, (_, index) =>
+        api
+          .get<PaginatedApiResponse<Alert>>('/alerts', {
+            params: { page: index + 2, limit: 100 },
+          })
+          .then((r) => r.data.data),
+      ),
+    );
+    return first.data.concat(...rest);
+  },
   createAlert: (data: Partial<Alert>) =>
     api.post<Alert>("/alerts", data).then((r) => r.data),
   updateAlert: (id: string, data: Partial<Alert>) =>
@@ -603,8 +666,19 @@ export const stockiniApi = {
     api
       .get<ReturnableItemsResponse>(`/avoirs/sales/${saleId}/returnable-items`)
       .then((r) => r.data),
+  avoirPage: (
+    params?: { customerId?: string; saleId?: string; search?: string; page?: number; limit?: number },
+    signal?: AbortSignal,
+  ) =>
+    api
+      .get<PaginatedApiResponse<CreditNote>>('/avoirs', { params, signal })
+      .then((r) => r.data),
   avoirs: (params?: { customerId?: string; saleId?: string }) =>
-    api.get<CreditNote[]>("/avoirs", { params }).then((r) => r.data),
+    api
+      .get<PaginatedApiResponse<CreditNote>>('/avoirs', {
+        params: { ...params, page: 1, limit: 100 },
+      })
+      .then((r) => r.data.data),
   avoir: (id: string) =>
     api.get<CreditNote>(`/avoirs/${id}`).then((r) => r.data),
   createAvoir: (data: CreditNotePayload) =>
@@ -612,9 +686,16 @@ export const stockiniApi = {
   avoirsByCustomer: (customerId: string) =>
     api.get<CreditNote[]>(`/avoirs/clients/${customerId}`).then((r) => r.data),
   /** Historique des avoirs liés à une facture ou un BL */
-  saleCreditNotes: (saleId: string) =>
+  saleCreditNotes: (
+    saleId: string,
+    params?: { page?: number; limit?: number },
+    signal?: AbortSignal,
+  ) =>
     api
-      .get<CreditNote[]>(`/avoirs/sales/${saleId}/credit-notes`)
+      .get<PaginatedApiResponse<CreditNote>>(`/avoirs/sales/${saleId}/credit-notes`, {
+        params,
+        signal,
+      })
       .then((r) => r.data),
   avoirPdf: (id: string): Promise<Blob> =>
     api.get(`/avoirs/${id}/pdf`, { responseType: 'blob' }).then((r) => r.data as Blob),

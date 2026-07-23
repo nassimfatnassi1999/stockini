@@ -16,6 +16,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
 import { SuppliersService } from './suppliers.service';
+import { SupplierQueryDto } from './dto/supplier-query.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('suppliers')
@@ -30,8 +31,8 @@ export class SuppliersController {
 
   @RequirePermissions('suppliers.view')
   @Get()
-  findAll(@Query('search') search?: string) {
-    return this.suppliersService.findAll(search);
+  findAll(@Query() query: SupplierQueryDto) {
+    return this.suppliersService.findAll(query);
   }
 
   @RequirePermissions('suppliers.view')

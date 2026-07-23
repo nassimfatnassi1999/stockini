@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators';
 import { AlertsService } from './alerts.service';
-import { CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
+import { AlertQueryDto, CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('alerts')
@@ -28,8 +28,8 @@ export class AlertsController {
 
   @RequirePermissions('alerts.view')
   @Get()
-  findAll(@Query('isRead') isRead?: string) {
-    return this.alertsService.findAll(isRead);
+  findAll(@Query() query: AlertQueryDto) {
+    return this.alertsService.findAll(query);
   }
 
   @RequirePermissions('alerts.mark_read')

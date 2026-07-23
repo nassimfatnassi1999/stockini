@@ -4,6 +4,8 @@ import { getSupplierDebtMap } from '../common/services/purchase-payment-state';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
+import { SupplierQueryDto } from './dto/supplier-query.dto';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class SuppliersService {
@@ -25,30 +27,40 @@ export class SuppliersService {
     );
   }
 
-  async findAll(search?: string) {
-    const suppliers = await this.prisma.supplier.findMany({
-      where: search
+  async findAll(query: SupplierQueryDto = new SupplierQueryDto()) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where: Prisma.SupplierWhereInput = query.search
         ? {
             deletedAt: null,
             OR: [
-              { name: { contains: search, mode: 'insensitive' } },
-              { phone: { contains: search, mode: 'insensitive' } },
-              { email: { contains: search, mode: 'insensitive' } },
+              { name: { contains: query.search, mode: 'insensitive' } },
+              { reference: { contains: query.search, mode: 'insensitive' } },
+              { phone: { contains: query.search, mode: 'insensitive' } },
+              { email: { contains: query.search, mode: 'insensitive' } },
             ],
           }
-        : { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
+        : { deletedAt: null };
+    const [suppliers, total] = await this.prisma.$transaction([
+      this.prisma.supplier.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.supplier.count({ where }),
+    ]);
 
     const debts = await getSupplierDebtMap(
       this.prisma,
       suppliers.map((supplier) => supplier.id),
     );
-    return suppliers.map((supplier) => ({
+    const data = suppliers.map((supplier) => ({
       ...supplier,
       // « Notre dette » : ce que NOUS devons au fournisseur (somme des restes à payer).
       totalDebt: (debts.get(supplier.id) ?? new Prisma.Decimal(0)).toFixed(3),
     }));
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   /** Dette dynamique d'un fournisseur précis. */

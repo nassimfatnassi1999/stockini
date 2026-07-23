@@ -12,21 +12,9 @@ import {
   Min,
 } from 'class-validator';
 import { ExpenseStatus, TreasuryAccount } from '@prisma/client';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
-export class ExpenseQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-
+export class ExpenseQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;

@@ -40,6 +40,7 @@ function buildService(customers: ReturnType<typeof makeCustomer>[], invoices: Re
   const prisma: any = {
     customer: {
       findMany: jest.fn().mockResolvedValue(customers),
+      count: jest.fn().mockResolvedValue(customers.length),
       findFirstOrThrow: jest.fn().mockImplementation(({ where }: { where: { id: string } }) =>
         Promise.resolve(customers.find((c) => c.id === where.id) ?? null),
       ),
@@ -49,6 +50,7 @@ function buildService(customers: ReturnType<typeof makeCustomer>[], invoices: Re
     sale: {
       findMany: jest.fn().mockResolvedValue(invoices),
     },
+    $transaction: jest.fn((operations: Array<Promise<unknown>>) => Promise.all(operations)),
   };
   const references = { generateForCustomer: jest.fn(), peekNextCustomerReference: jest.fn() } as any;
   const settings = { assertActiveOption: jest.fn() } as any;
@@ -66,9 +68,9 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
 
     const result = await service.findAll();
 
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('c1');
-    expect(result[0].debtAmount).toBe(0);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].id).toBe('c1');
+    expect(result.data[0].debtAmount).toBe(0);
   });
 
   it('masque un client SALE_COUNTER entièrement payé (dette = 0)', async () => {
@@ -78,7 +80,7 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
 
     const result = await service.findAll();
 
-    expect(result).toHaveLength(0);
+    expect(result.data).toHaveLength(0);
   });
 
   it('affiche un client SALE_COUNTER avec dette > 0', async () => {
@@ -88,8 +90,8 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
 
     const result = await service.findAll();
 
-    expect(result).toHaveLength(1);
-    expect(result[0].debtAmount).toBeCloseTo(200);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].debtAmount).toBeCloseTo(200);
   });
 
   it('masque SALE_COUNTER après règlement total de la dette', async () => {
@@ -100,7 +102,7 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
 
     const result = await service.findAll();
 
-    expect(result).toHaveLength(0);
+    expect(result.data).toHaveLength(0);
   });
 
   it('garde toujours les clients MANUAL même avec dette = 0, et affiche la dette pour SALE_COUNTER avec solde', async () => {
@@ -114,9 +116,9 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
 
     const result = await service.findAll();
 
-    expect(result).toHaveLength(2);
-    const manualResult = result.find((c) => c.id === 'm1')!;
-    const counterResult = result.find((c) => c.id === 'sc1')!;
+    expect(result.data).toHaveLength(2);
+    const manualResult = result.data.find((c) => c.id === 'm1')!;
+    const counterResult = result.data.find((c) => c.id === 'sc1')!;
     expect(manualResult.debtAmount).toBe(0);
     expect(counterResult.debtAmount).toBeCloseTo(150);
   });
@@ -127,7 +129,7 @@ describe('CustomersService.findAll — filtrage origin/dette', () => {
 
     const result = await service.findAll();
 
-    expect(result).toHaveLength(1);
+    expect(result.data).toHaveLength(1);
   });
 
   it('les documents/historiques ne sont pas affectés — findOne retourne le client SALE_COUNTER', async () => {
@@ -197,7 +199,9 @@ describe('CustomersService.findSales', () => {
     expect(result.data[0].paidAmount.toNumber()).toBe(40);
     expect(result.data[0].totalTtc.toNumber()).toBe(101);
     expect(result.data[0].remainingAmount.toNumber()).toBe(59);
-    expect(result.pagination).toEqual({ page: 1, limit: 10, total: 1, totalPages: 1 });
+    expect(result.pagination).toEqual(expect.objectContaining({
+      page: 1, limit: 10, total: 1, totalItems: 1, totalPages: 1,
+    }));
     expect(result.summary.totalRemaining.toNumber()).toBe(59);
     expect(result.summary.totalRemaining.lte(result.summary.totalTtc)).toBe(true);
   });

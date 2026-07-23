@@ -971,7 +971,10 @@ export interface CustomerSalesPagination {
   page: number;
   limit: number;
   total: number;
+  totalItems?: number;
   totalPages: number;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
 }
 
 export interface PurchasesQueryParams {

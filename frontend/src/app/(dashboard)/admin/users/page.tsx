@@ -30,6 +30,8 @@ import { CreateUserModal } from '@/components/stockini/users/CreateUserModal';
 import { EditUserModal } from '@/components/stockini/users/EditUserModal';
 import { ResetPasswordModal } from '@/components/stockini/users/ResetPasswordModal';
 import { DeleteUserDialog } from '@/components/stockini/users/DeleteUserDialog';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 type ModalState =
   | { type: 'none' }
@@ -38,8 +40,6 @@ type ModalState =
   | { type: 'reset'; user: User }
   | { type: 'delete'; user: User }
   | { type: 'detail'; user: User };
-
-const PAGE_SIZE_OPTIONS = [5, 10, 20, 30, 100];
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -114,12 +114,17 @@ function UserDetailModal({ user, onClose }: { user: User; onClose: () => void })
 export default function UsersPage() {
   const { can, userId: currentUserId } = usePermissions();
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const {
+    page,
+    limit: pageSize,
+    search,
+    setSearch,
+    urlSearch: debouncedSearch,
+    setPage,
+    setLimit: setPageSize,
+  } = useUrlPagination();
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | ''>('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(5);
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
 
   const params: UsersQueryParams = {
@@ -135,11 +140,6 @@ export default function UsersPage() {
 
   function handleSearchChange(value: string) {
     setSearch(value);
-    clearTimeout((handleSearchChange as unknown as { _t: ReturnType<typeof setTimeout> })._t);
-    (handleSearchChange as unknown as { _t: ReturnType<typeof setTimeout> })._t = setTimeout(() => {
-      setDebouncedSearch(value);
-      setPage(1);
-    }, 350);
   }
 
   function closeModal() {
@@ -239,7 +239,6 @@ export default function UsersPage() {
                 className="text-[11px] text-orange-400 underline"
                 onClick={() => {
                   setSearch('');
-                  setDebouncedSearch('');
                   setRoleFilter('');
                   setStatusFilter('');
                   setPage(1);
@@ -346,47 +345,15 @@ export default function UsersPage() {
 
       {/* Pagination */}
       {!isLoading && total > 0 && (
-        <div className="flex items-center justify-between text-[12px] text-white/50">
-          <span>
-            {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} sur {total} utilisateur
-            {total > 1 ? 's' : ''}
-          </span>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              <span>Lignes :</span>
-              <select
-                value={pageSize}
-                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                className="rounded border border-white/20 bg-transparent px-1 py-0.5 text-white text-[12px]"
-              >
-                {PAGE_SIZE_OPTIONS.map((s) => (
-                  <option key={s} value={s} className="bg-gray-900">{s}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <span className="px-2 text-white">
-                {page} / {totalPages}
-              </span>
-              <button
-                type="button"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
-        </div>
+        <DataTablePagination
+          page={page}
+          limit={pageSize}
+          totalItems={total}
+          totalPages={totalPages}
+          disabled={isLoading}
+          onPageChange={setPage}
+          onLimitChange={setPageSize}
+        />
       )}
 
       {/* Modals */}

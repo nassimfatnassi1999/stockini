@@ -1,9 +1,9 @@
 'use client';
 
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown } from 'lucide-react';
+import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
-import { PAGINATION_LIMIT_OPTIONS } from '@/lib/pagination';
+import { DataTablePagination } from './DataTablePagination';
 import type { ToolbarFilter } from '@/components/stockini/shared/HistoryToolbar';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -65,78 +65,6 @@ function SkeletonRows({ cols }: { cols: number }) {
         </tr>
       ))}
     </>
-  );
-}
-
-// ─── Pagination ────────────────────────────────────────────────────────────────
-
-interface PaginationProps {
-  page: number;
-  totalPages: number;
-  total: number;
-  limit: number;
-  loading: boolean;
-  onPageChange: (p: number) => void;
-  onLimitChange: (l: number) => void;
-}
-
-function Pagination({
-  page,
-  totalPages,
-  total,
-  limit,
-  loading,
-  onPageChange,
-  onLimitChange,
-}: PaginationProps) {
-  const from = total === 0 ? 0 : (page - 1) * limit + 1;
-  const to = Math.min(page * limit, total);
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-sm">
-      <div className="flex items-center gap-2 text-text-muted">
-        <span>Lignes par page&nbsp;:</span>
-        <select
-          value={limit}
-          onChange={(e) => { onLimitChange(Number(e.target.value)); onPageChange(1); }}
-          disabled={loading}
-          className="h-7 rounded-md border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-        >
-          {PAGINATION_LIMIT_OPTIONS.map((l) => (
-            <option key={l} value={l}>{l}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex items-center gap-3 text-text-muted">
-        <span className="text-xs">
-          {total === 0 ? '0 résultat' : `${from}–${to} sur ${total}`}
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onPageChange(page - 1)}
-            disabled={page <= 1 || loading}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="Page précédente"
-          >
-            <ChevronLeft size={13} />
-          </button>
-          <span className="min-w-[80px] text-center text-xs font-medium text-text-primary">
-            Page {page} / {Math.max(totalPages, 1)}
-          </span>
-          <button
-            type="button"
-            onClick={() => onPageChange(page + 1)}
-            disabled={page >= totalPages || loading}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="Page suivante"
-          >
-            <ChevronRight size={13} />
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -321,12 +249,12 @@ export function DataTable<T = Record<string, unknown>>({
       </div>
 
       {/* ── Pagination ── */}
-      <Pagination
+      <DataTablePagination
         page={page}
         totalPages={totalPages}
-        total={total}
+        totalItems={total}
         limit={limit}
-        loading={loading}
+        disabled={loading}
         onPageChange={onPageChange}
         onLimitChange={onLimitChange}
       />

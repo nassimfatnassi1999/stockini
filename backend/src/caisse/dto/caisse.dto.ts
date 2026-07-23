@@ -20,6 +20,7 @@ import {
   PaymentMethod,
   TreasuryAccount,
 } from '@prisma/client';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export type CashPeriod =
   | 'today'
@@ -40,7 +41,7 @@ const CASH_PERIOD_VALUES: CashPeriod[] = [
 
 // ─── Unified date-filter base ──────────────────────────────────────────────────
 
-export class CashQueryDto {
+export class CashQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(CASH_PERIOD_VALUES)
   period?: CashPeriod;
@@ -72,19 +73,6 @@ export class CashTransactionsQueryDto extends CashQueryDto {
   @IsOptional()
   @IsEnum(CashDirection)
   direction?: CashDirection;
-
-  @Type(() => Number)
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @Type(() => Number)
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
 
   @IsOptional()
   @IsString()

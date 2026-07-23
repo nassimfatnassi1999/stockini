@@ -18,6 +18,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, isPurchaseOrder, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
@@ -166,6 +168,12 @@ export function DepensesPage() {
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceSupplierFilter, setInvoiceSupplierFilter] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'' | 'UNPAID' | 'PARTIAL'>('');
+  const {
+    page: expensePage,
+    limit: expenseLimit,
+    setPage: setExpensePage,
+    setLimit: setExpenseLimit,
+  } = useUrlPagination();
 
   useEffect(() => {
     setExpenseForm((form) => ({
@@ -173,6 +181,7 @@ export function DepensesPage() {
       date: new Date().toISOString().slice(0, 10),
     }));
   }, []);
+  useEffect(() => setExpensePage(1), [expenseFilters]);
   const paymentMethodOptions = usePaymentMethodOptions();
   const expenseCategoryOptions = useExpenseCategoryOptions();
 
@@ -193,11 +202,11 @@ export function DepensesPage() {
   });
   const balanceQuery = useQuery({ queryKey: ['caisse-balance'], queryFn: stockiniApi.caisseBalance });
   const expensesQuery = useQuery({
-    queryKey: ['stockini-expenses', expenseFilters],
+    queryKey: ['stockini-expenses', expenseFilters, expensePage, expenseLimit],
     queryFn: () =>
       stockiniApi.expenses({
-        page: 1,
-        limit: 100,
+        page: expensePage,
+        limit: expenseLimit,
         search: expenseFilters.search || undefined,
         category: expenseFilters.category || undefined,
         paymentSource: expenseFilters.paymentSource || undefined,
@@ -457,6 +466,17 @@ export function DepensesPage() {
                 ))}
               </TableBody>
             </Table>
+            {(expensesQuery.data?.total ?? 0) > 0 && (
+              <DataTablePagination
+                page={expensePage}
+                limit={expenseLimit}
+                totalItems={expensesQuery.data?.total ?? 0}
+                totalPages={expensesQuery.data?.totalPages ?? 0}
+                disabled={expensesQuery.isFetching}
+                onPageChange={setExpensePage}
+                onLimitChange={setExpenseLimit}
+              />
+            )}
           </CardContent>
         </Card>
       )}

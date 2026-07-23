@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useId, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, CreditCard, Eye, Package, Pencil, ReceiptText, RotateCcw, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
@@ -27,6 +27,8 @@ import { isPurchaseOrder, money } from '@/lib/stockini/format';
 import type { DropdownOption, PaginatedResponse, Purchase, PurchasesQueryParams, Supplier } from '@/lib/stockini/types';
 import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
 import { openPdfInNewTab } from '@/lib/openPdf';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 type PurchaseDocType = 'BON_COMMANDE' | 'BON_RECEPTION' | 'FACTURE';
 type ReceptionMode = 'LIBRE' | 'FROM_COMMANDE';
@@ -131,19 +133,25 @@ export default function AchatsPage() {
   const explicitCommandeLoadRef = useRef<string | null>(null);
 
   // ── Purchases history pagination + filters ────────────────────────────────
-  const [purchasesPage, setPurchasesPage] = useState(1);
-  const [purchasesLimit, setPurchasesLimit] = useState(5);
-  const [purchasesSearch, setPurchasesSearch] = useState('');
-  const [purchasesLocalSearch, setPurchasesLocalSearch] = useState('');
-  const [purchasesStatus, setPurchasesStatus] = useState('');
+  const {
+    page: purchasesPage,
+    limit: purchasesLimit,
+    setPage: setPurchasesPage,
+    setLimit: setPurchasesLimit,
+    searchParams: purchasesUrlParams,
+    updateParams: updatePurchasesUrl,
+  } = useUrlPagination();
+  const purchasesSearch = purchasesUrlParams.get('search') ?? '';
+  const purchasesStatus = purchasesUrlParams.get('status') ?? '';
+  const [purchasesLocalSearch, setPurchasesLocalSearch] = useState(purchasesSearch);
   const purchasesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => setPurchasesLocalSearch(purchasesSearch), [purchasesSearch]);
 
   const handlePurchasesSearchChange = (value: string) => {
     setPurchasesLocalSearch(value);
     if (purchasesDebounceRef.current) clearTimeout(purchasesDebounceRef.current);
     purchasesDebounceRef.current = setTimeout(() => {
-      setPurchasesSearch(value);
-      setPurchasesPage(1);
+      updatePurchasesUrl({ search: value.trim() || undefined, page: 1 }, 'replace');
     }, 300);
   };
 
@@ -831,13 +839,13 @@ export default function AchatsPage() {
             ]}
             filterValues={{ status: purchasesStatus }}
             onFilterChange={(key, value) => {
-              if (key === 'status') { setPurchasesStatus(value); setPurchasesPage(1); }
+              if (key === 'status') updatePurchasesUrl({ status: value || undefined, page: 1 });
             }}
             resultsCount={purchasesQuery.data?.total ?? 0}
             onReset={() => {
-              handlePurchasesSearchChange('');
-              setPurchasesStatus('');
-              setPurchasesPage(1);
+              if (purchasesDebounceRef.current) clearTimeout(purchasesDebounceRef.current);
+              setPurchasesLocalSearch('');
+              updatePurchasesUrl({ status: undefined, search: undefined, page: 1 });
             }}
             isFetching={purchasesQuery.isFetching}
           />
@@ -961,48 +969,15 @@ export default function AchatsPage() {
               </tbody>
             </table>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 text-sm">
-            <div className="flex items-center gap-2 text-text-muted">
-              <span className="text-xs">Lignes par page&nbsp;:</span>
-              <select
-                value={purchasesLimit}
-                onChange={(e) => { setPurchasesLimit(Number(e.target.value)); setPurchasesPage(1); }}
-                className="h-7 rounded-md border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                {[5, 10, 20, 30, 100].map((l) => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-3 text-text-muted">
-              {(purchasesQuery.data?.total ?? 0) > 0 && (
-                <span className="text-xs">
-                  {(purchasesPage - 1) * purchasesLimit + 1}–{Math.min(purchasesPage * purchasesLimit, purchasesQuery.data?.total ?? 0)} sur {purchasesQuery.data?.total ?? 0}
-                </span>
-              )}
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPurchasesPage((p) => p - 1)}
-                  disabled={purchasesPage <= 1 || purchasesQuery.isFetching}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                  aria-label="Page précédente"
-                >
-                  <ChevronLeft size={13} />
-                </button>
-                <span className="min-w-[80px] text-center text-xs font-medium text-text-primary">
-                  Page {purchasesPage} / {Math.max(purchasesQuery.data?.totalPages ?? 1, 1)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPurchasesPage((p) => p + 1)}
-                  disabled={purchasesPage >= (purchasesQuery.data?.totalPages ?? 1) || purchasesQuery.isFetching}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-white text-text-muted transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                  aria-label="Page suivante"
-                >
-                  <ChevronRight size={13} />
-                </button>
-              </div>
-            </div>
-          </div>
+          <DataTablePagination
+            page={purchasesPage}
+            limit={purchasesLimit}
+            totalItems={purchasesQuery.data?.total ?? 0}
+            totalPages={purchasesQuery.data?.totalPages ?? 0}
+            disabled={purchasesQuery.isFetching}
+            onPageChange={setPurchasesPage}
+            onLimitChange={setPurchasesLimit}
+          />
           </>
         )}
       </div>

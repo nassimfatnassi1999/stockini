@@ -22,7 +22,12 @@ import { toast } from '@/lib/toast';
 import { openPdfInNewTab, pdfOpenErrorMessage } from '@/lib/openPdf';
 import { stockiniApi } from '@/lib/stockini/api';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
-import type { GeneratedDocument, SalesDocumentType } from '@/lib/stockini/types';
+import type {
+  DocumentsListResponse,
+  GeneratedDocument,
+  SalesDocumentType,
+} from '@/lib/stockini/types';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
 
 const DOC_TYPE_LABELS: Record<SalesDocumentType, string> = {
   DEVIS: 'Devis',
@@ -171,10 +176,13 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
   const [open, setOpen] = useState(true);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [sendLinkDoc, setSendLinkDoc] = useState<GeneratedDocument | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
 
-  const docsQuery = useQuery<GeneratedDocument[]>({
-    queryKey: ['generated-documents'],
-    queryFn: () => stockiniApi.generatedDocuments(),
+  const docsQuery = useQuery<DocumentsListResponse>({
+    queryKey: ['generated-documents', page, limit],
+    queryFn: () => stockiniApi.listDocuments({ page, limit }),
+    placeholderData: (previous) => previous,
   });
 
   const deleteMutation = useMutation({
@@ -248,9 +256,10 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
     }
   };
 
-  const docs = docsQuery.data ?? [];
+  const docs = docsQuery.data?.data ?? [];
 
   const tableContent = (
+    <>
     <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-surface">
@@ -375,6 +384,18 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
             </tbody>
           </table>
         </div>
+        {(docsQuery.data?.total ?? 0) > 0 && (
+          <DataTablePagination
+            page={page}
+            limit={limit}
+            totalItems={docsQuery.data?.total ?? 0}
+            totalPages={docsQuery.data?.totalPages ?? 0}
+            disabled={docsQuery.isFetching}
+            onPageChange={setPage}
+            onLimitChange={(next) => { setLimit(next); setPage(1); }}
+          />
+        )}
+    </>
   );
 
   const modal = sendLinkDoc ? (

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-import { CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
+import { AlertQueryDto, CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class AlertsService {
@@ -15,12 +16,31 @@ export class AlertsService {
     return this.prisma.alert.create({ data: dto });
   }
 
-  findAll(isRead?: string) {
-    return this.prisma.alert.findMany({
-      where: isRead === undefined ? undefined : { isRead: isRead === 'true' },
-      include: { product: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(query: AlertQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where = {
+      ...(query.isRead !== undefined && { isRead: query.isRead === 'true' }),
+      ...(query.search && {
+        OR: [
+          { title: { contains: query.search, mode: 'insensitive' as const } },
+          { message: { contains: query.search, mode: 'insensitive' as const } },
+          { reference: { contains: query.search, mode: 'insensitive' as const } },
+          { designation: { contains: query.search, mode: 'insensitive' as const } },
+        ],
+      }),
+    };
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.alert.findMany({
+        where,
+        include: { product: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.alert.count({ where }),
+    ]);
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   markRead(id: string) {

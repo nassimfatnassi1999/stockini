@@ -200,7 +200,9 @@ describe('ProductsService.findAll – filtres avancés', () => {
       count.mockResolvedValue(totalItems);
       const result = await service.findAll({ page: 1, limit: 10 } as ProductQueryDto);
       expect(result.pagination.totalItems).toBe(totalItems);
-      expect(result.pagination.totalPages).toBe(Math.ceil(totalItems / 10));
+      expect(result.pagination.totalPages).toBe(
+        Math.max(Math.ceil(totalItems / 10), 1),
+      );
       expect(result.pagination.hasNextPage).toBe(totalItems > 10);
     },
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Copy,
@@ -35,6 +35,8 @@ import type {
   SalesDocumentType,
 } from '@/lib/stockini/types';
 import { money } from '@/lib/stockini/format';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -451,15 +453,35 @@ export default function DocumentsPage() {
   const { can } = usePermissions();
 
   // Filters
-  const [search, setSearch] = useState('');
-  const [docType, setDocType] = useState<SalesDocumentType | ''>('');
-  const [status, setStatus] = useState<DocumentStatus | ''>('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [minSize, setMinSize] = useState('');
-  const [maxSize, setMaxSize] = useState('');
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(5);
+  const {
+    page,
+    limit,
+    search,
+    setSearch,
+    urlSearch,
+    searchParams,
+    updateParams,
+    setPage,
+    setLimit,
+  } = useUrlPagination();
+  const [docType, setDocType] = useState<SalesDocumentType | ''>(
+    () => (searchParams.get('documentType') as SalesDocumentType | null) ?? '',
+  );
+  const [status, setStatus] = useState<DocumentStatus | ''>(
+    () => (searchParams.get('status') as DocumentStatus | null) ?? '',
+  );
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get('dateFrom') ?? '');
+  const [dateTo, setDateTo] = useState(() => searchParams.get('dateTo') ?? '');
+  const [minSize, setMinSize] = useState(() => searchParams.get('minSize') ?? '');
+  const [maxSize, setMaxSize] = useState(() => searchParams.get('maxSize') ?? '');
+  useEffect(() => {
+    setDocType((searchParams.get('documentType') as SalesDocumentType | null) ?? '');
+    setStatus((searchParams.get('status') as DocumentStatus | null) ?? '');
+    setDateFrom(searchParams.get('dateFrom') ?? '');
+    setDateTo(searchParams.get('dateTo') ?? '');
+    setMinSize(searchParams.get('minSize') ?? '');
+    setMaxSize(searchParams.get('maxSize') ?? '');
+  }, [searchParams]);
 
   // Per-document action loading
   const [viewingId, setViewingId] = useState<string | null>(null);
@@ -473,13 +495,13 @@ export default function DocumentsPage() {
   const [deleteDoc, setDeleteDoc] = useState<GeneratedDocument | null>(null);
   const [emailLogsDoc, setEmailLogsDoc] = useState<GeneratedDocument | null>(null);
 
-  const queryKey = ['documents', { search, docType, status, dateFrom, dateTo, minSize, maxSize, page, limit }];
+  const queryKey = ['documents', { search: urlSearch, docType, status, dateFrom, dateTo, minSize, maxSize, page, limit }];
 
   const docsQuery = useQuery({
     queryKey,
     queryFn: () =>
       stockiniApi.listDocuments({
-        ...(search && { search }),
+        ...(urlSearch && { search: urlSearch }),
         ...(docType && { documentType: docType }),
         ...(status && { status }),
         ...(dateFrom && { dateFrom }),
@@ -573,7 +595,16 @@ export default function DocumentsPage() {
     setDateTo('');
     setMinSize('');
     setMaxSize('');
-    setPage(1);
+    updateParams({
+      search: undefined,
+      documentType: undefined,
+      status: undefined,
+      dateFrom: undefined,
+      dateTo: undefined,
+      minSize: undefined,
+      maxSize: undefined,
+      page: 1,
+    });
   };
 
   const data = docsQuery.data;
@@ -604,7 +635,7 @@ export default function DocumentsPage() {
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
               <Input
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="Numéro, client…"
                 className="pl-8"
               />
@@ -616,7 +647,11 @@ export default function DocumentsPage() {
             <Label>Type</Label>
             <select
               value={docType}
-              onChange={(e) => { setDocType(e.target.value as SalesDocumentType | ''); setPage(1); }}
+              onChange={(e) => {
+                const value = e.target.value as SalesDocumentType | '';
+                setDocType(value);
+                updateParams({ documentType: value || undefined, page: 1 });
+              }}
               className="app-select min-w-[160px]"
             >
               <option value="">Tous les types</option>
@@ -632,7 +667,11 @@ export default function DocumentsPage() {
             <Label>Statut</Label>
             <select
               value={status}
-              onChange={(e) => { setStatus(e.target.value as DocumentStatus | ''); setPage(1); }}
+              onChange={(e) => {
+                const value = e.target.value as DocumentStatus | '';
+                setStatus(value);
+                updateParams({ status: value || undefined, page: 1 });
+              }}
               className="app-select"
             >
               <option value="">Tous</option>
@@ -648,7 +687,7 @@ export default function DocumentsPage() {
             <Input
               type="date"
               value={dateFrom}
-              onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+              onChange={(e) => { setDateFrom(e.target.value); updateParams({ dateFrom: e.target.value || undefined, page: 1 }); }}
               className="w-36"
             />
           </div>
@@ -657,7 +696,7 @@ export default function DocumentsPage() {
             <Input
               type="date"
               value={dateTo}
-              onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+              onChange={(e) => { setDateTo(e.target.value); updateParams({ dateTo: e.target.value || undefined, page: 1 }); }}
               className="w-36"
             />
           </div>
@@ -668,7 +707,7 @@ export default function DocumentsPage() {
             <Input
               type="number"
               value={minSize}
-              onChange={(e) => { setMinSize(e.target.value); setPage(1); }}
+              onChange={(e) => { setMinSize(e.target.value); updateParams({ minSize: e.target.value || undefined, page: 1 }); }}
               placeholder="0"
               className="w-24"
               min={0}
@@ -679,7 +718,7 @@ export default function DocumentsPage() {
             <Input
               type="number"
               value={maxSize}
-              onChange={(e) => { setMaxSize(e.target.value); setPage(1); }}
+              onChange={(e) => { setMaxSize(e.target.value); updateParams({ maxSize: e.target.value || undefined, page: 1 }); }}
               placeholder="∞"
               className="w-24"
               min={0}
@@ -841,41 +880,15 @@ export default function DocumentsPage() {
 
         {/* Pagination */}
         {total > 0 && (
-          <div className="flex items-center justify-between border-t border-border/60 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs text-text-muted">
-              <span>Lignes :</span>
-              <select
-                value={limit}
-                onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
-                className="rounded border border-border/60 bg-background px-1.5 py-0.5 text-xs text-text-primary"
-              >
-                {[5, 10, 20, 30, 100].map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-              <span>
-                {(page - 1) * limit + 1}–{Math.min(page * limit, total)} sur {total} résultat{total !== 1 ? 's' : ''}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                <ChevronLeft size={14} />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                <ChevronRight size={14} />
-              </Button>
-            </div>
-          </div>
+          <DataTablePagination
+            page={page}
+            limit={limit}
+            totalItems={total}
+            totalPages={totalPages}
+            disabled={docsQuery.isFetching}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
+          />
         )}
       </div>
 

@@ -13,6 +13,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { PaymentStatus, PurchaseDocumentType, PurchaseStatus } from '@prisma/client';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export type PurchaseTransformTarget = 'BON_RECEPTION' | 'FACTURE_FOURNISSEUR';
 
@@ -136,20 +137,7 @@ export class PayablePurchaseQueryDto {
   paymentStatus?: PaymentStatus;
 }
 
-export class PurchasePaginationDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
-
+export class PurchasePaginationDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;

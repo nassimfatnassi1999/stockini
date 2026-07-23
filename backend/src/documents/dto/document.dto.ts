@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DocumentType, DocumentStatus } from '@prisma/client';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class GenerateDocumentsDto {
   @IsArray()
@@ -88,7 +89,7 @@ export class UpdateDocumentDto {
   status?: DocumentStatus;
 }
 
-export class ListDocumentsQuery {
+export class ListDocumentsQuery extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(DocumentType)
   documentType?: DocumentType;
@@ -124,19 +125,6 @@ export class ListDocumentsQuery {
   @IsOptional()
   @IsEnum(DocumentStatus)
   status?: DocumentStatus;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
 
   /** legacy filter kept for backward compat (used from ventes page) */
   @IsOptional()

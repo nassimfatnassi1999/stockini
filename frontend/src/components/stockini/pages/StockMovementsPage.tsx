@@ -16,6 +16,7 @@ import { PageHeader } from '../shared/PageHeader';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { cleanPayload, emptyForm, useDropdownOptions } from '../shared/form-utils';
 import type { FieldConfig } from '../shared/form-utils';
+import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 // ─── Reset Inventory Modal ─────────────────────────────────────────────────────
 
@@ -221,8 +222,7 @@ export function StockMovementsPage() {
   const [resetModalOpen, setResetModalOpen] = useState(false);
 
   // Pagination + filters state
-  const [page, setPage]           = useState(1);
-  const [limit, setLimit]         = useState(5);
+  const { page, limit, setPage, setLimit } = useUrlPagination();
   const [search, setSearch]       = useState('');
   const [sortBy, setSortBy]       = useState('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');

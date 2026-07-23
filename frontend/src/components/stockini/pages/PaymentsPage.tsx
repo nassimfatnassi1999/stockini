@@ -262,7 +262,7 @@ export function PaymentsPage() {
 
   // ── Invoices tab state ──────────────────────────────────────────────────────
   const [invPage,    setInvPage]    = useState(1);
-  const [invLimit,   setInvLimit]   = useState(5);
+  const [invLimit,   setInvLimit]   = useState(10);
   const [invSearch,  setInvSearch]  = useState('');
   const [invSort,    setInvSort]    = useState('createdAt');
   const [invOrder,   setInvOrder]   = useState<'asc' | 'desc'>('desc');
@@ -293,7 +293,7 @@ export function PaymentsPage() {
 
   // ── History tab state ───────────────────────────────────────────────────────
   const [histPage,    setHistPage]    = useState(1);
-  const [histLimit,   setHistLimit]   = useState(5);
+  const [histLimit,   setHistLimit]   = useState(10);
   const [histSearch,  setHistSearch]  = useState('');
   const [histSort,    setHistSort]    = useState('date');
   const [histOrder,   setHistOrder]   = useState<'asc' | 'desc'>('desc');

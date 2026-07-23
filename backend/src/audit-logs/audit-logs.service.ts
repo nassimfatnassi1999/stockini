@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 
 export interface AuditParams {
   action: string;
@@ -76,7 +77,7 @@ export class AuditLogsService {
 
   async findAll(query?: AuditFindAllQuery) {
     const page = Math.max(1, query?.page ?? 1);
-    const limit = Math.min(200, Math.max(1, query?.limit ?? 50));
+    const limit = query?.limit ?? 10;
     const skip = (page - 1) * limit;
     const source = query?.source ?? 'active';
 
@@ -118,7 +119,7 @@ export class AuditLogsService {
       ]);
 
       const data = raw.map((r) => ({ ...r, user: null, _source: 'archive' as const }));
-      return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+      return buildPaginatedResponse(data, page, limit, total);
     }
 
     // Default: active AuditLog table
@@ -134,6 +135,6 @@ export class AuditLogsService {
       this.prisma.auditLog.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return buildPaginatedResponse(data, page, limit, total);
   }
 }

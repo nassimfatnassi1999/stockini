@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   getPaginationItems,
   getPaginationDisabledState,
+  getPaginationRange,
   getValidPage,
   normalizeProductLimit,
   normalizeProductPage,
@@ -51,4 +52,16 @@ test('désactive précédent sur la première page et suivant sur la dernière',
 test('revient à la dernière page valide après suppression', () => {
   assert.equal(getValidPage(4, 3), 3);
   assert.equal(getValidPage(1, 0), 1);
+});
+
+test('calcule les intervalles de 74 éléments', () => {
+  assert.deepEqual(getPaginationRange(1, 10, 74), { startItem: 1, endItem: 10 });
+  assert.deepEqual(getPaginationRange(6, 10, 74), { startItem: 51, endItem: 60 });
+  assert.deepEqual(getPaginationRange(8, 10, 74), { startItem: 71, endItem: 74 });
+  assert.deepEqual(getPaginationRange(1, 10, 0), { startItem: 0, endItem: 0 });
+});
+
+test('reste compacte avec plus de 100 pages', () => {
+  const items = getPaginationItems(57, 140);
+  assert.deepEqual(items, [1, 'ellipsis', 55, 56, 57, 58, 59, 'ellipsis', 140]);
 });

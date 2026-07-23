@@ -26,6 +26,7 @@ import type {
   SendEmailLinkDto,
 } from './dto/document.dto';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 
 const DOC_PREFIXES: Record<DocumentType, string> = {
   DEVIS: 'DEVIS',
@@ -251,7 +252,7 @@ export class DocumentsService {
 
   async list(query: ListDocumentsQuery) {
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const where: Prisma.GeneratedDocumentWhereInput = {
@@ -328,7 +329,7 @@ export class DocumentsService {
       }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   // ─── Legacy findAll (kept for backward compat with ventes page) ──────────────

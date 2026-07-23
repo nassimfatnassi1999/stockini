@@ -9,6 +9,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 import {
   ResetInventoryDto,
   StockAdjustmentDto,
@@ -159,7 +160,7 @@ export class StockService {
 
   async history(query?: StockMovementQueryDto) {
     const page = Math.max(1, query?.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
+    const limit = query?.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const andConditions: Prisma.StockMovementWhereInput[] = [];
@@ -215,7 +216,7 @@ export class StockService {
       this.prisma.stockMovement.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return buildPaginatedResponse(data, page, limit, total);
   }
 
   // ─── Reset inventory ──────────────────────────────────────────────────────────

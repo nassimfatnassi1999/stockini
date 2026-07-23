@@ -41,6 +41,7 @@ import {
 } from '../common/utils/commercial-document';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import { allocateCustomerPayment } from '../common/utils/customer-payment';
+import { buildPaginatedResponse } from '../common/utils/pagination.util';
 import {
   CreateSaleDto,
   CreateConsolidationDto,
@@ -1066,7 +1067,7 @@ export class SalesService {
 
   async findAll(query?: SalePaginationDto) {
     const page = Math.max(1, query?.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query?.limit ?? 20));
+    const limit = query?.limit ?? 10;
     const skip = (page - 1) * limit;
 
     // Conditions qui nécessitent un sous-bloc OR sont placées dans AND
@@ -1175,13 +1176,7 @@ export class SalesService {
       activeConsolidation: sale.consolidationMemberships[0]?.consolidatedSale ?? null,
     }));
 
-    return {
-      data: enriched,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return buildPaginatedResponse(enriched, page, limit, total);
   }
 
   findOne(id: string, user?: AuthUser) {

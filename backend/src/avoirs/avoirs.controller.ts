@@ -15,7 +15,7 @@ import { RequirePermissions } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { AvoirsService } from './avoirs.service';
-import { CreateCreditNoteDto } from './dto/avoir.dto';
+import { CreateCreditNoteDto, CreditNoteQueryDto } from './dto/avoir.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('avoirs')
@@ -30,8 +30,11 @@ export class AvoirsController {
 
   @RequirePermissions('sales.view')
   @Get('sales/:saleId/credit-notes')
-  findBySale(@Param('saleId') saleId: string) {
-    return this.avoirsService.findAll(undefined, saleId);
+  findBySale(
+    @Param('saleId') saleId: string,
+    @Query() query: CreditNoteQueryDto,
+  ) {
+    return this.avoirsService.findBySale(saleId, query);
   }
 
   @RequirePermissions('sales.create')
@@ -42,11 +45,8 @@ export class AvoirsController {
 
   @RequirePermissions('sales.view')
   @Get()
-  findAll(
-    @Query('customerId') customerId?: string,
-    @Query('saleId') saleId?: string,
-  ) {
-    return this.avoirsService.findAll(customerId, saleId);
+  findAll(@Query() query: CreditNoteQueryDto) {
+    return this.avoirsService.findAll(query);
   }
 
   @RequirePermissions('sales.view')

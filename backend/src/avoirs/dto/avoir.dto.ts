@@ -10,6 +10,21 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+
+export class CreditNoteQueryDto extends PaginationQueryDto {
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+
+  @IsOptional()
+  @IsString()
+  saleId?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
 
 export type RefundMethod =
   | 'CASH'
