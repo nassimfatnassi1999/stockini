@@ -88,11 +88,13 @@ export function resolveCashDateRange(
 
 const IN_TYPES = [
   CaisseMovementType.ENCAISSEMENT_VENTE,
+  CaisseMovementType.CASH_SURPLUS_IN,
   CaisseMovementType.DEPOT_MANUEL,
   CaisseMovementType.ANNULATION_ACHAT,
   CaisseMovementType.ANNULATION_DEPENSE,
 ];
 const OUT_TYPES = [
+  CaisseMovementType.CUSTOMER_CHANGE_OUT,
   CaisseMovementType.DECAISSEMENT_ACHAT,
   CaisseMovementType.DEPENSE_GENERALE,
   CaisseMovementType.RETRAIT_MANUEL,
@@ -227,6 +229,13 @@ export class CaisseService {
     const sortiesBanque = Math.abs(Number(bankOut._sum.montant ?? 0));
     const entrees = entreesCaisse + entreesBanque;
     const sorties = sortiesCaisse + sortiesBanque;
+    const retainedSurplus = await this.prisma.caisseMovement.aggregate({
+      _sum: { montant: true },
+      where: {
+        type: CaisseMovementType.CASH_SURPLUS_IN,
+        createdAt: range,
+      },
+    });
 
     // La marge commerciale est indépendante du compte de trésorerie et réutilise
     // exactement le calcul financier des rapports (snapshots + avoirs).
@@ -254,6 +263,7 @@ export class CaisseService {
       entrees,
       sorties,
       totalClientDebt,
+      retainedSurplus: Number(retainedSurplus?._sum.montant ?? 0),
       profitPeriode: selectedProfit,
       profitSemaine: weekProfit,
       profitMois: monthProfit,
@@ -382,7 +392,7 @@ export class CaisseService {
       direction:
         m.type === CaisseMovementType.CASH_RESET
           ? Number(m.ancienSolde) < 0 ? 'IN' : 'OUT'
-          : (['ENCAISSEMENT_VENTE', 'DEPOT_MANUEL', 'ANNULATION_ACHAT', 'ANNULATION_DEPENSE'] as string[]).includes(m.type)
+          : (['ENCAISSEMENT_VENTE', 'CASH_SURPLUS_IN', 'DEPOT_MANUEL', 'ANNULATION_ACHAT', 'ANNULATION_DEPENSE'] as string[]).includes(m.type)
             ? 'IN'
             : 'OUT',
       reference: m.referenceDoc ?? null,

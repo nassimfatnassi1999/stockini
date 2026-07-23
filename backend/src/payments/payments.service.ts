@@ -7,6 +7,7 @@ import {
   Prisma,
   PurchaseDocumentType,
   SaleStatus,
+  SurplusDisposition,
 } from '@prisma/client';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CaisseService } from '../caisse/caisse.service';
@@ -28,6 +29,7 @@ import {
   serializePaymentSummary,
   syncPurchasePaymentState,
 } from '../common/services/purchase-payment-state';
+import { allocateCustomerPayment, tnd } from '../common/utils/customer-payment';
 
 @Injectable()
 export class PaymentsService {
@@ -154,14 +156,55 @@ export class PaymentsService {
       // Reverse caisse if this payment actually hit the caisse — use same account as original payment
       if (payment.cashImpactDone) {
         if (payment.type === PaymentType.CUSTOMER_PAYMENT) {
+          const received = new Prisma.Decimal(
+            payment.amountReceived ?? payment.amount,
+          );
+          const changeReturned = new Prisma.Decimal(
+            payment.changeReturned ?? 0,
+          );
+          const retainedSurplus = new Prisma.Decimal(
+            payment.retainedSurplus ?? 0,
+          );
+          const customerCredit = new Prisma.Decimal(
+            payment.customerCreditCreated ?? 0,
+          );
+          const mainReceipt = retainedSurplus.gt(0)
+            ? new Prisma.Decimal(payment.amountApplied ?? payment.amount)
+            : received;
           await this.caisseService.recordMovement(tx, {
             type: CaisseMovementType.ANNULATION_VENTE,
-            montant: -Number(payment.amount),
+            montant: mainReceipt.negated().toNumber(),
             motif: `Annulation paiement ${payment.reference}`,
             referenceDoc: payment.reference,
             userId,
             paymentMethod: payment.method,
           });
+          if (changeReturned.gt(0)) {
+            await this.caisseService.recordMovement(tx, {
+              type: CaisseMovementType.ANNULATION_ACHAT,
+              montant: changeReturned.toNumber(),
+              motif: `Annulation monnaie rendue ${payment.reference}`,
+              referenceDoc: `REV-CHANGE-${payment.reference}`,
+              userId,
+              paymentMethod: payment.method,
+            });
+          }
+          if (retainedSurplus.gt(0)) {
+            await this.caisseService.recordMovement(tx, {
+              type: CaisseMovementType.ANNULATION_VENTE,
+              montant: retainedSurplus.negated().toNumber(),
+              motif: `Annulation surplus ${payment.reference}`,
+              referenceDoc: `REV-SURPLUS-${payment.reference}`,
+              userId,
+              paymentMethod: payment.method,
+            });
+          }
+          if (customerCredit.gt(0) && payment.customerId) {
+            await tx.customer.update({
+              where: { id: payment.customerId },
+              data: { creditBalance: { decrement: customerCredit } },
+            });
+          }
         } else if (payment.type === PaymentType.SUPPLIER_PAYMENT) {
           await this.caisseService.recordMovement(tx, {
             type: CaisseMovementType.ANNULATION_ACHAT,
@@ -184,7 +227,7 @@ export class PaymentsService {
       if (payment.saleId && payment.sale) {
         const agg = await tx.payment.aggregate({
           where: { saleId: payment.saleId, deletedAt: null },
-          _sum: { amount: true },
+          _sum: { amountApplied: true },
         });
         let historicalPaid = new Prisma.Decimal(0);
         if (payment.sale.isConsolidated) {
@@ -197,11 +240,15 @@ export class PaymentsService {
                 },
               },
             },
-            _sum: { amount: true },
+            _sum: { amountApplied: true },
           });
-          historicalPaid = new Prisma.Decimal(sourcePayments._sum.amount ?? 0);
+          historicalPaid = new Prisma.Decimal(
+            sourcePayments._sum.amountApplied ?? 0,
+          );
         }
-        const newPaid = historicalPaid.plus(agg._sum.amount ?? 0).toNumber();
+        const newPaid = historicalPaid
+          .plus(agg._sum.amountApplied ?? 0)
+          .toNumber();
         const saleTotal =
           commercialTotalFinal(payment.sale.total, payment.sale.stampDuty) -
           Number(payment.sale.totalRefunded ?? 0);
@@ -271,7 +318,21 @@ export class PaymentsService {
   }
 
   async paySale(saleId: string, dto: PaySaleDto, userId?: string) {
-    const result = await this.prisma.$transaction(async (tx) => {
+    const execute = () => this.prisma.$transaction(async (tx) => {
+      if (dto.idempotencyKey) {
+        const existing = await tx.payment.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+          include: { sale: true, customer: true },
+        });
+        if (existing) {
+          if (existing.saleId !== saleId) {
+            throw new BadRequestException(
+              'Cette clé d’idempotence appartient à un autre document',
+            );
+          }
+          return existing;
+        }
+      }
       // CREDIT cannot be used as a later payment method — no treasury event.
       if (dto.method === 'CREDIT') {
         throw new BadRequestException(
@@ -308,25 +369,42 @@ export class PaymentsService {
         throw new BadRequestException('Impossible de payer un document annulé');
       }
 
-      const remaining = Number(sale.remainingAmount);
-
-      if (dto.amount > remaining + 0.001) {
-        throw new BadRequestException(
-          `Le montant ne peut pas dépasser le reste à payer (${remaining.toFixed(3)} DT)`,
-        );
-      }
-
-      const newPaidAmount = Number(sale.paidAmount) + dto.amount;
       const saleTotalFinal = commercialTotalFinal(sale.total, sale.stampDuty);
-      const netAfterCredits = Math.max(
-        saleTotalFinal - Number(sale.totalRefunded ?? 0),
-        0,
+      const netAfterCredits = tnd(
+        Prisma.Decimal.max(
+          new Prisma.Decimal(saleTotalFinal).minus(sale.totalRefunded ?? 0),
+          0,
+        ),
       );
-      const newRemainingAmount = Math.max(netAfterCredits - newPaidAmount, 0);
-      const newStatus = this.computePaymentStatus(
-        netAfterCredits,
-        newPaidAmount,
+      // Recalculate from active applied payments: cached paid/remaining values may
+      // contain legacy overpayments.
+      const activePayments =
+        typeof tx.payment.aggregate === 'function'
+          ? await tx.payment.aggregate({
+              where: {
+                saleId,
+                deletedAt: null,
+                type: PaymentType.CUSTOMER_PAYMENT,
+              },
+              _sum: { amountApplied: true, amount: true },
+            })
+          : { _sum: { amountApplied: sale.paidAmount, amount: sale.paidAmount } };
+      const appliedBefore = tnd(
+        activePayments._sum.amountApplied ??
+          activePayments._sum.amount ??
+          sale.paidAmount,
       );
+      const remainingBefore = tnd(
+        Prisma.Decimal.max(netAfterCredits.minus(appliedBefore), 0),
+      );
+      const allocation = allocateCustomerPayment({
+        remainingBefore,
+        amountReceived: dto.amountReceived ?? dto.amount ?? 0,
+        method: dto.method,
+        surplusDisposition: dto.surplusDisposition,
+        hasCustomer: Boolean(sale.customerId),
+      });
+      const newPaidAmount = tnd(appliedBefore.plus(allocation.amountApplied));
 
       const payRef = await this.references.generate('PAY', 'payment', tx);
       const payment = await tx.payment.create({
@@ -334,7 +412,17 @@ export class PaymentsService {
           reference: payRef,
           type: PaymentType.CUSTOMER_PAYMENT,
           method: dto.method,
-          amount: dto.amount,
+          amount: allocation.amountApplied.toNumber(),
+          amountReceived: allocation.amountReceived.toNumber(),
+          amountApplied: allocation.amountApplied.toNumber(),
+          changeDue: allocation.changeDue.toNumber(),
+          changeReturned: allocation.changeReturned.toNumber(),
+          retainedSurplus: allocation.retainedSurplus.toNumber(),
+          customerCreditCreated: allocation.customerCreditCreated.toNumber(),
+          remainingBefore: allocation.remainingBefore.toNumber(),
+          remainingAfter: allocation.remainingAfter.toNumber(),
+          surplusDisposition: allocation.surplusDisposition,
+          idempotencyKey: dto.idempotencyKey,
           cashImpactDone: true,
           saleId,
           customerId: sale.customerId ?? undefined,
@@ -346,20 +434,58 @@ export class PaymentsService {
       await tx.sale.update({
         where: { id: saleId },
         data: {
-          paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount,
-          paymentStatus: newStatus,
+          paidAmount: newPaidAmount.toNumber(),
+          remainingAmount: allocation.remainingAfter.toNumber(),
+          paymentStatus: allocation.paymentStatus,
         },
       });
 
+      const isReturned =
+        allocation.surplusDisposition === SurplusDisposition.RETURNED;
+      const isCashSurplus =
+        allocation.surplusDisposition === SurplusDisposition.CASH_SURPLUS;
       await this.caisseService.recordMovement(tx, {
         type: CaisseMovementType.ENCAISSEMENT_VENTE,
-        montant: dto.amount,
+        montant: isReturned
+          ? allocation.amountReceived.toNumber()
+          : isCashSurplus
+            ? allocation.amountApplied.toNumber()
+            : allocation.amountReceived.toNumber(),
         motif: `Encaissement vente ${payment.sale?.invoiceNumber ?? saleId}`,
         referenceDoc: payRef,
         userId,
         paymentMethod: dto.method as string,
       });
+      if (allocation.changeReturned.gt(0)) {
+        await this.caisseService.recordMovement(tx, {
+          type: CaisseMovementType.CUSTOMER_CHANGE_OUT,
+          montant: allocation.changeReturned.negated().toNumber(),
+          motif: `Monnaie rendue pour ${payment.sale?.invoiceNumber ?? saleId}`,
+          referenceDoc: `CHANGE-${payRef}`,
+          userId,
+          paymentMethod: dto.method,
+        });
+      }
+      if (allocation.retainedSurplus.gt(0)) {
+        await this.caisseService.recordMovement(tx, {
+          type: CaisseMovementType.CASH_SURPLUS_IN,
+          montant: allocation.retainedSurplus.toNumber(),
+          motif: `Surplus non rendu pour ${payment.sale?.invoiceNumber ?? saleId}`,
+          referenceDoc: `SURPLUS-${payRef}`,
+          userId,
+          paymentMethod: dto.method,
+        });
+      }
+      if (allocation.customerCreditCreated.gt(0) && sale.customerId) {
+        await tx.customer.update({
+          where: { id: sale.customerId },
+          data: {
+            creditBalance: {
+              increment: allocation.customerCreditCreated,
+            },
+          },
+        });
+      }
 
       await this.auditLogs.audit(
         {
@@ -370,14 +496,20 @@ export class PaymentsService {
           newValue: {
             id: payment.id,
             reference: payRef,
-            amount: dto.amount,
+            amountReceived: allocation.amountReceived.toNumber(),
+            amountApplied: allocation.amountApplied.toNumber(),
+            changeReturned: allocation.changeReturned.toNumber(),
+            retainedSurplus: allocation.retainedSurplus.toNumber(),
+            customerCreditCreated: allocation.customerCreditCreated.toNumber(),
             method: dto.method,
             type: PaymentType.CUSTOMER_PAYMENT,
           },
           metadata: {
             paymentId: payment.id,
             reference: payRef,
-            amount: dto.amount,
+            amountReceived: allocation.amountReceived.toNumber(),
+            amountApplied: allocation.amountApplied.toNumber(),
+            surplusDisposition: allocation.surplusDisposition,
             method: dto.method,
             saleId,
             invoiceNumber: payment.sale?.invoiceNumber ?? null,
@@ -388,6 +520,19 @@ export class PaymentsService {
       );
 
       return payment;
+    });
+    const result = await execute().catch(async (error: unknown) => {
+      const isDuplicateIdempotencyKey =
+        dto.idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002';
+      if (!isDuplicateIdempotencyKey) throw error;
+      const existing = await this.prisma.payment.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey },
+        include: { sale: true, customer: true },
+      });
+      if (!existing || existing.saleId !== saleId) throw error;
+      return existing;
     });
 
     // Recalcule verrouillage après paiement (la dette peut être soldée)

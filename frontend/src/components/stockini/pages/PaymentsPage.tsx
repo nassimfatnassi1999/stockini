@@ -11,6 +11,10 @@ import { DataTable, type ColumnDef, type FilterConfig } from '@/components/ui/Da
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { stockiniApi } from '@/lib/stockini/api';
+import {
+  calculateCustomerPayment,
+  type SurplusDisposition,
+} from '@/lib/stockini/customer-payment';
 import { dateTime, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
 import type { Payment, PaymentsQueryParams, Sale } from '@/lib/stockini/types';
@@ -167,10 +171,26 @@ function historyColumns(onViewSale: (id: string) => void): ColumnDef<Payment>[] 
     },
     {
       key: 'amount',
-      label: 'Montant',
+      label: 'Reçu / appliqué',
       sortable: true,
       className: 'text-right',
-      render: (row) => <span className="font-mono font-semibold text-emerald-600">{money(row.amount)}</span>,
+      render: (row) => (
+        <div className="text-right font-mono">
+          <div className="font-semibold text-emerald-600">{money(row.amountReceived ?? row.amount)}</div>
+          {Number(row.amountReceived ?? row.amount) !== Number(row.amountApplied ?? row.amount) && (
+            <div className="text-xs text-text-muted">appliqué {money(row.amountApplied ?? row.amount)}</div>
+          )}
+          {Number(row.changeReturned ?? 0) > 0 && (
+            <div className="text-xs text-blue-600">monnaie rendue {money(row.changeReturned)}</div>
+          )}
+          {Number(row.customerCreditCreated ?? 0) > 0 && (
+            <div className="text-xs text-violet-600">crédit {money(row.customerCreditCreated)}</div>
+          )}
+          {Number(row.retainedSurplus ?? 0) > 0 && (
+            <div className="text-xs text-fuchsia-600">écart {money(row.retainedSurplus)}</div>
+          )}
+        </div>
+      ),
     },
     {
       key: 'method',
@@ -211,7 +231,15 @@ export function PaymentsPage() {
   const payFormId = useId();
   const [activeTab, setActiveTab] = useState<'invoices' | 'history'>('invoices');
   const [payTarget, setPayTarget] = useState<Sale | null>(null);
-  const [payForm, setPayForm] = useState({ amount: '', method: 'CASH', note: '' });
+  const [payForm, setPayForm] = useState({
+    amountReceived: '',
+    method: 'CASH',
+    note: '',
+    idempotencyKey: '',
+  });
+  const [confirmOverpayment, setConfirmOverpayment] = useState(false);
+  const [surplusDisposition, setSurplusDisposition] =
+    useState<SurplusDisposition>('NONE');
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const paymentMethodOptions = useDropdownOptions('payment_methods');
 
@@ -295,12 +323,19 @@ export function PaymentsPage() {
 
   // ── Pay mutation ────────────────────────────────────────────────────────────
   const payMutation = useMutation({
-    mutationFn: () =>
-      stockiniApi.paySale(payTarget!.id, {
-        amount: Number(payForm.amount),
+    mutationFn: (overrideDisposition?: SurplusDisposition) => {
+      const selectedDisposition = overrideDisposition ?? surplusDisposition;
+      const disposition =
+        selectedDisposition === 'NONE' ? undefined : selectedDisposition;
+      return stockiniApi.paySale(payTarget!.id, {
+        amountReceived: Number(payForm.amountReceived),
         method: payForm.method,
+        surplusDisposition:
+          paymentPreview.changeDue.gt(0) ? disposition : undefined,
+        idempotencyKey: payForm.idempotencyKey,
         note: payForm.note || undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-sales'] });
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
@@ -309,7 +344,9 @@ export function PaymentsPage() {
       queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
       setPayTarget(null);
-      setPayForm({ amount: '', method: 'CASH', note: '' });
+      setPayForm({ amountReceived: '', method: 'CASH', note: '', idempotencyKey: '' });
+      setConfirmOverpayment(false);
+      setSurplusDisposition('NONE');
       toast.success('Paiement enregistré avec succès');
     },
     onError: (error: unknown) => {
@@ -319,8 +356,17 @@ export function PaymentsPage() {
   });
 
   const remaining  = payTarget ? Number(payTarget.remainingAmount) : 0;
-  const amountNum  = Number(payForm.amount);
-  const amountValid = amountNum > 0 && amountNum <= remaining + 0.001;
+  const amountNum  = Number(payForm.amountReceived);
+  const paymentPreview = calculateCustomerPayment(
+    remaining.toFixed(3),
+    payForm.amountReceived || '0',
+  );
+  const isOverpayment = paymentPreview.changeDue.gt(0);
+  const nonCashOverpayment = payForm.method !== 'CASH' && isOverpayment;
+  const amountValid =
+    Number.isFinite(amountNum) &&
+    amountNum > 0 &&
+    (!nonCashOverpayment || (Boolean(payTarget?.customer?.id) && surplusDisposition === 'CUSTOMER_CREDIT'));
 
   const unpaidCount = salesQuery.data?.total ?? 0;
 
@@ -365,7 +411,14 @@ export function PaymentsPage() {
           <DataTable<Sale>
             columns={invoicesColumns(canReceivePayment, setSelectedSaleId, (sale) => {
               setPayTarget(sale);
-              setPayForm({ amount: Number(sale.remainingAmount).toFixed(3), method: 'CASH', note: '' });
+              setPayForm({
+                amountReceived: Number(sale.remainingAmount).toFixed(3),
+                method: 'CASH',
+                note: '',
+                idempotencyKey: crypto.randomUUID(),
+              });
+              setConfirmOverpayment(false);
+              setSurplusDisposition(sale.customer?.id ? 'CUSTOMER_CREDIT' : 'CASH_SURPLUS');
             })}
             data={salesData}
             total={salesQuery.data?.total ?? 0}
@@ -455,9 +508,34 @@ export function PaymentsPage() {
         title="Payer"
         subtitle={payTarget?.invoiceNumber}
         open={!!payTarget}
-        onClose={() => setPayTarget(null)}
+        onClose={() => { setPayTarget(null); setConfirmOverpayment(false); }}
         width={480}
         footer={
+          confirmOverpayment ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={() => setConfirmOverpayment(false)}>
+                Retour
+              </Button>
+              {payForm.method === 'CASH' && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={payMutation.isPending}
+                  onClick={() => payMutation.mutate('RETURNED')}
+                >
+                  Rendre {money(paymentPreview.changeDue.toFixed(3))} et confirmer
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                disabled={payMutation.isPending || surplusDisposition === 'NONE' || surplusDisposition === 'RETURNED'}
+                onClick={() => payMutation.mutate(undefined)}
+              >
+                Ne pas rendre et confirmer
+              </Button>
+            </>
+          ) : (
           <>
             <Button type="button" variant="outline" size="sm" onClick={() => setPayTarget(null)}>
               Annuler
@@ -467,6 +545,7 @@ export function PaymentsPage() {
               {payMutation.isPending ? 'Enregistrement...' : 'Confirmer le paiement'}
             </Button>
           </>
+          )
         }
       >
         {payTarget && (
@@ -489,32 +568,72 @@ export function PaymentsPage() {
                 <span className="font-mono font-bold text-red-600">{money(payTarget.remainingAmount)}</span>
               </div>
             </div>
-            <form
+            {confirmOverpayment && (
+              <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-sm">
+                <p className="mb-3 font-semibold text-amber-900">Confirmer le trop-perçu</p>
+                <div className="flex justify-between"><span>Montant reçu</span><strong>{money(paymentPreview.amountReceived.toFixed(3))}</strong></div>
+                <div className="flex justify-between"><span>Montant appliqué</span><strong>{money(paymentPreview.amountApplied.toFixed(3))}</strong></div>
+                <div className="flex justify-between text-amber-800"><span>Monnaie à rendre</span><strong>{money(paymentPreview.changeDue.toFixed(3))}</strong></div>
+                <fieldset className="mt-4 space-y-2 border-t border-amber-200 pt-3">
+                  <legend className="font-medium">Destination du surplus</legend>
+                  {payTarget.customer?.id && (
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="surplus" checked={surplusDisposition === 'CUSTOMER_CREDIT'} onChange={() => setSurplusDisposition('CUSTOMER_CREDIT')} />
+                      Crédit client
+                    </label>
+                  )}
+                  {payForm.method === 'CASH' && (
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="surplus" checked={surplusDisposition === 'CASH_SURPLUS'} onChange={() => setSurplusDisposition('CASH_SURPLUS')} />
+                      Pourboire / écart encaissé
+                    </label>
+                  )}
+                </fieldset>
+              </div>
+            )}
+            {!confirmOverpayment && <form
               id={payFormId}
-              onSubmit={(e) => { e.preventDefault(); if (!amountValid) return; payMutation.mutate(); }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!amountValid) return;
+                if (isOverpayment) setConfirmOverpayment(true);
+                else payMutation.mutate(undefined);
+              }}
               className="space-y-4"
             >
               <div className="space-y-1.5">
-                <Label htmlFor="pay-amount">Montant à payer *</Label>
+                <Label htmlFor="pay-amount">Montant reçu du client *</Label>
                 <Input
                   id="pay-amount"
                   type="number"
                   min="0.001"
-                  max={remaining}
                   step="0.001"
-                  value={payForm.amount}
-                  onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
+                  value={payForm.amountReceived}
+                  onChange={(e) => setPayForm((f) => ({ ...f, amountReceived: e.target.value }))}
                   required
-                  className={payForm.amount && !amountValid ? 'border-red-400' : ''}
+                  className={payForm.amountReceived && !amountValid ? 'border-red-400' : ''}
                 />
-                {payForm.amount && !amountValid && (
+                {payForm.amountReceived && !amountValid && (
                   <p className="text-xs text-red-600">
                     {amountNum <= 0
                       ? 'Le montant doit être supérieur à 0'
-                      : `Le montant ne peut pas dépasser ${money(remaining)}`}
+                      : 'Pour un paiement non espèces, le surplus doit devenir un crédit client.'}
                   </p>
                 )}
               </div>
+              {amountNum > 0 && (
+                <div className="space-y-1 rounded-lg border border-border bg-slate-50 p-3 text-sm">
+                  <div className="flex justify-between"><span>Montant dû</span><span>{money(paymentPreview.remainingBefore.toFixed(3))}</span></div>
+                  <div className="flex justify-between"><span>Montant reçu</span><span>{money(paymentPreview.amountReceived.toFixed(3))}</span></div>
+                  <div className="flex justify-between"><span>Montant encaissé</span><span>{money(paymentPreview.amountApplied.toFixed(3))}</span></div>
+                  <div className="flex justify-between font-semibold"><span>Nouveau reste à payer</span><span>{money(paymentPreview.remainingAfter.toFixed(3))}</span></div>
+                  {isOverpayment && (
+                    <div className="mt-2 flex justify-between rounded border border-amber-300 bg-amber-100 p-2 font-bold text-amber-900">
+                      <span>Monnaie à rendre</span><span>{money(paymentPreview.changeDue.toFixed(3))}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor="pay-method">Mode de paiement *</Label>
                 <select
@@ -539,7 +658,7 @@ export function PaymentsPage() {
                   placeholder="Référence chèque, virement..."
                 />
               </div>
-            </form>
+            </form>}
           </div>
         )}
       </SlideOver>

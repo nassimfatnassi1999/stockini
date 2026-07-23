@@ -278,9 +278,15 @@ export const stockiniApi = {
     api.patch<Expense>(`/expenses/${id}/cancel`, { reason }).then((r) => r.data),
   paySale: (
     saleId: string,
-    data: { amount: number; method: string; note?: string },
+    data: {
+      amountReceived: number;
+      method: string;
+      surplusDisposition?: 'RETURNED' | 'CUSTOMER_CREDIT' | 'CASH_SURPLUS';
+      idempotencyKey?: string;
+      note?: string;
+    },
   ) => {
-    validatePayment(data);
+    validatePayment({ amount: data.amountReceived, method: data.method });
     return api
       .post<Payment>(`/payments/sales/${saleId}/pay`, data)
       .then((r) => r.data);

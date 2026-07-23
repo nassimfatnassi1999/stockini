@@ -21,6 +21,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   SaleStatus,
+  SurplusDisposition,
 } from '@prisma/client';
 
 export const SALES_DOCUMENT_TYPES = [
@@ -147,6 +148,10 @@ export class CreateSaleDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   paymentMethod?: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(SurplusDisposition)
+  surplusDisposition?: SurplusDisposition;
 
   @IsArray()
   @ValidateNested({ each: true })

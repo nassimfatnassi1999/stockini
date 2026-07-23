@@ -34,6 +34,8 @@ interface Props {
 
 const TYPE_LABELS: Record<string, string> = {
   ENCAISSEMENT_VENTE:  'Vente',
+  CUSTOMER_CHANGE_OUT: 'Monnaie client',
+  CASH_SURPLUS_IN:      'Écart encaissé',
   DECAISSEMENT_ACHAT:  'Achat',
   DEPOT_MANUEL:        'Dépôt manuel',
   RETRAIT_MANUEL:      'Retrait manuel',

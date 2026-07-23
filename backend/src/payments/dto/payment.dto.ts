@@ -11,7 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { PaymentMethod, PaymentType } from '@prisma/client';
+import { PaymentMethod, PaymentType, SurplusDisposition } from '@prisma/client';
 
 export class PaymentQueryDto {
   @IsOptional()
@@ -69,13 +69,29 @@ export class PaymentQueryDto {
 }
 
 export class PaySaleDto {
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
-  amount!: number;
+  amountReceived?: number;
+
+  /** @deprecated Utiliser amountReceived. Conservé pour les anciens clients API. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  amount?: number;
 
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(SurplusDisposition)
+  surplusDisposition?: SurplusDisposition;
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 
   @IsOptional()
   @IsString()

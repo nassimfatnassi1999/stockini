@@ -57,6 +57,8 @@ function PaymentMethodLabel({ method }: { method: string }) {
 
 const CAISSE_MOVEMENT_LABELS: Record<CaisseMovementType, string> = {
   ENCAISSEMENT_VENTE: 'Encaissement vente',
+  CUSTOMER_CHANGE_OUT: 'Monnaie client',
+  CASH_SURPLUS_IN: 'Écart encaissé',
   DECAISSEMENT_ACHAT: 'Paiement fournisseur',
   DEPENSE_GENERALE: 'Dépense générale',
   DEPOT_MANUEL: 'Dépôt manuel',
@@ -70,6 +72,8 @@ const CAISSE_MOVEMENT_LABELS: Record<CaisseMovementType, string> = {
 
 const CAISSE_MOVEMENT_COLORS: Record<CaisseMovementType, string> = {
   ENCAISSEMENT_VENTE: 'text-emerald-600',
+  CUSTOMER_CHANGE_OUT: 'text-blue-600',
+  CASH_SURPLUS_IN: 'text-fuchsia-600',
   DECAISSEMENT_ACHAT: 'text-red-600',
   DEPENSE_GENERALE: 'text-red-600',
   DEPOT_MANUEL: 'text-emerald-600',

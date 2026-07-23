@@ -41,9 +41,7 @@ export function calculatePaymentAmounts(
 
   let paymentStatus: PaymentStatus;
   const effectiveTotal = Prisma.Decimal.max(total.minus(credits), 0);
-  if (paid.minus(effectiveTotal).gt(PAYMENT_ROUNDING_TOLERANCE)) {
-    paymentStatus = PaymentStatus.CREDIT_BALANCE;
-  } else if (remaining.lte(PAYMENT_ROUNDING_TOLERANCE)) {
+  if (remaining.lte(PAYMENT_ROUNDING_TOLERANCE)) {
     paymentStatus = PaymentStatus.PAID;
   } else if (paid.gt(0)) {
     paymentStatus = PaymentStatus.PARTIAL;

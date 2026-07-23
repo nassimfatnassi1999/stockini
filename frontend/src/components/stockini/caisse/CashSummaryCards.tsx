@@ -32,6 +32,7 @@ export interface CashSummary {
   entrees:          number;
   sorties:          number;
   totalClientDebt:  number;
+  retainedSurplus:  number;
   profitPeriode:    number;
   profitSemaine:    number;
   profitMois:       number;
@@ -142,6 +143,7 @@ function buildGlobalCards(summary: CashSummary, periodLabel: string): KpiCardPro
     { label: 'Caisse physique', value: summary.soldeCaisse ?? 0, icon: Banknote, color: 'text-amber-600', bg: 'bg-amber-50' },
     { label: 'Banque / Virements', value: summary.soldeBanque ?? 0, icon: Building2, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Dettes clients', value: summary.totalClientDebt ?? 0, icon: AlertCircle, color: (summary.totalClientDebt ?? 0) > 0 ? 'text-orange-600' : 'text-text-muted', bg: (summary.totalClientDebt ?? 0) > 0 ? 'bg-orange-50' : 'bg-slate-50' },
+    { label: `Écarts encaissés — ${periodLabel}`, value: summary.retainedSurplus ?? 0, icon: Banknote, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', tooltip: 'Monnaie non rendue classée en autres revenus, hors marge commerciale.' },
     { label: `Entrées — ${periodLabel}`, value: summary.entrees, icon: ArrowUpCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: `Sorties — ${periodLabel}`, value: summary.sorties, icon: ArrowDownCircle, color: 'text-red-500', bg: 'bg-red-50' },
     { label: `Bénéfice brut réel — ${periodLabel}`, value: summary.sales?.grossProfit ?? summary.profitPeriode, icon: summary.profitPeriode >= 0 ? TrendingUp : TrendingDown, color: summary.profitPeriode >= 0 ? 'text-emerald-600' : 'text-red-500', bg: summary.profitPeriode >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true, description: benefitDescription, tooltip: benefitTooltip },

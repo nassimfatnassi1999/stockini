@@ -17,6 +17,7 @@ import {
   Prisma,
   SaleStatus,
   StockMovementType,
+  SurplusDisposition,
 } from '@prisma/client';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { CaisseService } from '../caisse/caisse.service';
@@ -39,6 +40,7 @@ import {
   DEFAULT_STAMP_DUTY,
 } from '../common/utils/commercial-document';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
+import { allocateCustomerPayment } from '../common/utils/customer-payment';
 import {
   CreateSaleDto,
   CreateConsolidationDto,
@@ -727,21 +729,25 @@ export class SalesService {
       const total = documentCalculation.totalTtc;
       const totalFinal = documentCalculation.totalToPay;
 
-      const rawPaidAmount = acceptsPayment
+      const amountReceived = acceptsPayment
         ? this.round3(dto.paidAmount ?? 0)
         : 0;
       // CREDIT = vente à crédit, aucun encaissement immédiat — paidAmount reste 0.
-      const paidAmount = dto.paymentMethod === 'CREDIT' ? 0 : rawPaidAmount;
-
-      // Guard: paidAmount cannot exceed total
-      if (paidAmount > totalFinal + 0.001) {
-        throw new BadRequestException(
-          `Le montant payé (${paidAmount.toFixed(3)}) dépasse le total à payer (${totalFinal.toFixed(3)})`,
-        );
-      }
+      const hasImmediatePayment =
+        dto.paymentMethod !== 'CREDIT' && amountReceived > 0;
+      const allocation = hasImmediatePayment
+        ? allocateCustomerPayment({
+            remainingBefore: totalFinal,
+            amountReceived,
+            method: dto.paymentMethod!,
+            surplusDisposition: dto.surplusDisposition,
+            hasCustomer: Boolean(resolvedCustomerId),
+          })
+        : null;
+      const paidAmount = allocation?.amountApplied.toNumber() ?? 0;
 
       // paymentMethod is required when a payment is recorded
-      if (paidAmount > 0 && !dto.paymentMethod) {
+      if (amountReceived > 0 && !dto.paymentMethod) {
         throw new BadRequestException(
           'La méthode de paiement est requise lorsque paidAmount > 0',
         );
@@ -832,28 +838,71 @@ export class SalesService {
       }
 
       // Initial payment: create Payment + CaisseMovement atomically
-      if (!isDevis && paidAmount > 0 && dto.paymentMethod) {
+      if (!isDevis && allocation && dto.paymentMethod) {
         const payRef = await this.references.generate('PAY', 'payment', tx);
         await tx.payment.create({
           data: {
             reference: payRef,
             type: PaymentType.CUSTOMER_PAYMENT,
             method: dto.paymentMethod,
-            amount: paidAmount,
+            amount: allocation.amountApplied.toNumber(),
+            amountReceived: allocation.amountReceived.toNumber(),
+            amountApplied: allocation.amountApplied.toNumber(),
+            changeDue: allocation.changeDue.toNumber(),
+            changeReturned: allocation.changeReturned.toNumber(),
+            retainedSurplus: allocation.retainedSurplus.toNumber(),
+            customerCreditCreated:
+              allocation.customerCreditCreated.toNumber(),
+            remainingBefore: allocation.remainingBefore.toNumber(),
+            remainingAfter: allocation.remainingAfter.toNumber(),
+            surplusDisposition: allocation.surplusDisposition,
             cashImpactDone: true,
             saleId: sale.id,
             customerId: resolvedCustomerId,
           },
         });
 
+        const retained = allocation.retainedSurplus.gt(0);
         await this.caisseService.recordMovement(tx, {
           type: CaisseMovementType.ENCAISSEMENT_VENTE,
-          montant: paidAmount,
+          montant: retained
+            ? allocation.amountApplied.toNumber()
+            : allocation.amountReceived.toNumber(),
           motif: `Encaissement vente ${invoiceNumber}`,
           referenceDoc: payRef,
           userId: sellerId,
           paymentMethod: dto.paymentMethod,
         });
+        if (allocation.changeReturned.gt(0)) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.CUSTOMER_CHANGE_OUT,
+            montant: allocation.changeReturned.negated().toNumber(),
+            motif: `Monnaie rendue pour ${invoiceNumber}`,
+            referenceDoc: `CHANGE-${payRef}`,
+            userId: sellerId,
+            paymentMethod: dto.paymentMethod,
+          });
+        }
+        if (allocation.retainedSurplus.gt(0)) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.CASH_SURPLUS_IN,
+            montant: allocation.retainedSurplus.toNumber(),
+            motif: `Surplus non rendu pour ${invoiceNumber}`,
+            referenceDoc: `SURPLUS-${payRef}`,
+            userId: sellerId,
+            paymentMethod: dto.paymentMethod,
+          });
+        }
+        if (allocation.customerCreditCreated.gt(0) && resolvedCustomerId) {
+          await tx.customer.update({
+            where: { id: resolvedCustomerId },
+            data: {
+              creditBalance: {
+                increment: allocation.customerCreditCreated,
+              },
+            },
+          });
+        }
       }
 
       if (LAST_SALE_PRICE_TYPES.has(documentType)) {

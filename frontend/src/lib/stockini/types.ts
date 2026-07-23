@@ -35,6 +35,8 @@ export interface Product {
 
 export type CaisseMovementType =
   | "ENCAISSEMENT_VENTE"
+  | "CUSTOMER_CHANGE_OUT"
+  | "CASH_SURPLUS_IN"
   | "DECAISSEMENT_ACHAT"
   | "DEPENSE_GENERALE"
   | "DEPOT_MANUEL"
@@ -325,6 +327,15 @@ export interface Payment {
   type: string;
   method: string;
   amount: number | string;
+  amountReceived?: number | string;
+  amountApplied?: number | string;
+  changeDue?: number | string;
+  changeReturned?: number | string;
+  retainedSurplus?: number | string;
+  customerCreditCreated?: number | string;
+  remainingBefore?: number | string;
+  remainingAfter?: number | string;
+  surplusDisposition?: string;
   note?: string | null;
   createdAt: string;
   customer?: Customer | null;

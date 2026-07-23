@@ -28,9 +28,9 @@ describe('calculatePaymentAmounts', () => {
     expect(result.remainingAmount.lte('2032.161')).toBe(true);
   });
 
-  it('signale un solde créditeur quand le payé dépasse le total effectif', () => {
+  it('reste payé quand le payé dépasse le total effectif', () => {
     const result = calculatePaymentAmounts('100.000', '80.000', '60.000');
     expect(result.remainingAmount.toNumber()).toBe(0);
-    expect(result.paymentStatus).toBe(PaymentStatus.CREDIT_BALANCE);
+    expect(result.paymentStatus).toBe(PaymentStatus.PAID);
   });
 });

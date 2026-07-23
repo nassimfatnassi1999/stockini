@@ -58,6 +58,10 @@ import {
 } from "@/lib/stockini/register-utils";
 import { getPaymentDisplay, money } from "@/lib/stockini/format";
 import { stockiniApi } from "@/lib/stockini/api";
+import {
+  calculateCustomerPayment,
+  type SurplusDisposition,
+} from "@/lib/stockini/customer-payment";
 import { getSalesSelectionActions } from "@/lib/stockini/sales-selection-actions";
 import { cn } from "@/lib/utils";
 import { HistoryToolbar } from "@/components/stockini/shared/HistoryToolbar";
@@ -493,7 +497,12 @@ interface ValidateDocModalProps {
   totals: DocumentTotals;
   isEditMode?: boolean;
   initialPaidAmount?: number;
-  onConfirm: (paidAmount: number, paymentMethod: string) => void;
+  hasCustomer: boolean;
+  onConfirm: (
+    amountReceived: number,
+    paymentMethod: string,
+    surplusDisposition?: SurplusDisposition,
+  ) => void;
   onCancel: () => void;
 }
 
@@ -504,15 +513,21 @@ function ValidateDocumentModal({
   totals,
   isEditMode = false,
   initialPaidAmount = 0,
+  hasCustomer,
   onConfirm,
   onCancel,
 }: ValidateDocModalProps) {
   const [paidAmount, setPaidAmount] = useState(initialPaidAmount ? String(initialPaidAmount) : "");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [pmtError, setPmtError] = useState("");
+  const [confirmOverpayment, setConfirmOverpayment] = useState(false);
+  const [surplusDisposition, setSurplusDisposition] =
+    useState<SurplusDisposition>(hasCustomer ? "CUSTOMER_CREDIT" : "CASH_SURPLUS");
 
   const paymentAllowed = docType === "FACTURE" || docType === "BON_LIVRAISON";
   const paidAmountNum = Number(paidAmount) || 0;
+  const preview = calculateCustomerPayment(totals.totalFinal, paidAmount || "0");
+  const overpayment = preview.changeDue.gt(0);
 
   const tabCfg = DOC_TAB_CONFIG.find((t) => t.id === docType);
 
@@ -521,9 +536,20 @@ function ValidateDocumentModal({
       setPmtError("Veuillez sélectionner une méthode de paiement");
       return;
     }
+    if (overpayment && paymentMethod !== "CASH" && !hasCustomer) {
+      setPmtError(
+        "Un trop-perçu non espèces nécessite un client identifié pour créer un crédit.",
+      );
+      return;
+    }
+    if (overpayment && !confirmOverpayment) {
+      setConfirmOverpayment(true);
+      return;
+    }
     onConfirm(
       paymentAllowed ? paidAmountNum : 0,
       paymentAllowed && paidAmountNum > 0 ? paymentMethod : "",
+      overpayment ? surplusDisposition : undefined,
     );
   };
 
@@ -544,7 +570,11 @@ function ValidateDocumentModal({
         onClick={handleConfirm}
         disabled={isPending}
       >
-        {isPending ? "Enregistrement…" : "Confirmer"}
+        {isPending
+          ? "Enregistrement…"
+          : confirmOverpayment
+            ? "Ne pas rendre et confirmer"
+            : "Confirmer"}
       </Button>
     </div>
   );
@@ -588,7 +618,7 @@ function ValidateDocumentModal({
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="vm-paid" className="text-xs">
-                Montant payé (DT)
+                Montant reçu du client (DT)
               </Label>
               <Input
                 id="vm-paid"
@@ -605,6 +635,27 @@ function ValidateDocumentModal({
                 className="h-9 text-sm"
               />
             </div>
+            {paidAmountNum > 0 && (
+              <div className="space-y-1 rounded border border-border bg-white p-3 text-xs">
+                <div className="flex justify-between"><span>Montant dû</span><span>{money(preview.remainingBefore.toFixed(3))}</span></div>
+                <div className="flex justify-between"><span>Montant reçu</span><span>{money(preview.amountReceived.toFixed(3))}</span></div>
+                <div className="flex justify-between"><span>Montant encaissé</span><span>{money(preview.amountApplied.toFixed(3))}</span></div>
+                <div className="flex justify-between font-semibold"><span>Nouveau reste</span><span>{money(preview.remainingAfter.toFixed(3))}</span></div>
+                {overpayment && <div className="flex justify-between rounded bg-amber-100 p-2 font-bold text-amber-900"><span>Monnaie à rendre</span><span>{money(preview.changeDue.toFixed(3))}</span></div>}
+              </div>
+            )}
+            {confirmOverpayment && overpayment && (
+              <div className="space-y-2 rounded border-2 border-amber-300 bg-amber-50 p-3 text-xs">
+                <p className="font-semibold">Destination du surplus</p>
+                {paymentMethod === "CASH" && (
+                  <Button type="button" size="sm" className="w-full" onClick={() => onConfirm(paidAmountNum, paymentMethod, "RETURNED")}>
+                    Rendre {money(preview.changeDue.toFixed(3))} et confirmer
+                  </Button>
+                )}
+                {hasCustomer && <label className="flex gap-2"><input type="radio" checked={surplusDisposition === "CUSTOMER_CREDIT"} onChange={() => setSurplusDisposition("CUSTOMER_CREDIT")} />Crédit client</label>}
+                {paymentMethod === "CASH" && <label className="flex gap-2"><input type="radio" checked={surplusDisposition === "CASH_SURPLUS"} onChange={() => setSurplusDisposition("CASH_SURPLUS")} />Pourboire / écart encaissé</label>}
+              </div>
+            )}
             {paidAmountNum > 0 && (
               <div className="space-y-1.5">
                 <Label htmlFor="vm-method" className="text-xs">
@@ -1148,10 +1199,12 @@ export default function VentesPage() {
       docType,
       paid,
       method,
+      surplusDisposition,
     }: {
       docType: SalesDocumentType;
       paid: number;
       method: string;
+      surplusDisposition?: SurplusDisposition;
     }) => {
       if (filledLines.length === 0) {
         throw new Error(
@@ -1188,9 +1241,6 @@ export default function VentesPage() {
       const paymentAllowed =
         docType === "FACTURE" || docType === "BON_LIVRAISON";
       const submittedPaidAmount = paymentAllowed ? round3(paid) : 0;
-      if (submittedPaidAmount > round3(totals.totalFinal) + 0.001) {
-        throw new Error("Le montant payé ne peut pas dépasser le total à payer.");
-      }
       if (submittedPaidAmount > 0 && !method) {
         throw new Error("Veuillez sélectionner une méthode de paiement.");
       }
@@ -1216,6 +1266,7 @@ export default function VentesPage() {
           counterClientNote: counterClientNote.trim() || null,
           paidAmount: submittedPaidAmount,
           paymentMethod: submittedPaidAmount > 0 && method ? method : undefined,
+          surplusDisposition,
           items: filledLines.map((l) => ({
             productId: l.productId!,
             designation: l.designation.trim() || undefined,
@@ -2517,8 +2568,9 @@ export default function VentesPage() {
                 totals={totals}
                 isEditMode={isEditMode}
                 initialPaidAmount={editingPaidAmount}
-                onConfirm={(paid, method) =>
-                  createMutation.mutate({ docType: activeTab, paid, method })
+                hasCustomer={Boolean(customerId)}
+                onConfirm={(paid, method, surplusDisposition) =>
+                  createMutation.mutate({ docType: activeTab, paid, method, surplusDisposition })
                 }
                 onCancel={() => setShowValidateModal(false)}
               />
