@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Sale } from "./types";
-import { getSalesSelectionActions } from "./sales-selection-actions";
+import {
+  calculateSalesSelectionTotal,
+  getSalesSelectionActions,
+  validateSalesConsolidationSelection,
+} from "./sales-selection-actions";
 
 const sale = (overrides: Partial<Sale> = {}): Sale =>
   ({
@@ -75,6 +79,62 @@ test("a consolidation and a compatible normal sale can be reconsolidated", () =>
   assert.equal(actions.showConsolidate, true);
 });
 
+for (const [name, documents] of [
+  ["BL + BL", [sale(), sale({ id: "sale-2" })]],
+  ["BL + Facture", [sale(), sale({ id: "sale-2", documentType: "FACTURE" })]],
+  ["BLG + BL", [
+    sale({ isConsolidated: true, consolidationStatus: "ACTIVE" }),
+    sale({ id: "sale-2" }),
+  ]],
+  ["BLG + Facture", [
+    sale({ isConsolidated: true, consolidationStatus: "ACTIVE" }),
+    sale({ id: "sale-2", documentType: "FACTURE" }),
+  ]],
+  ["BLG + FACG", [
+    sale({ isConsolidated: true, consolidationStatus: "ACTIVE" }),
+    sale({
+      id: "sale-2",
+      documentType: "FACTURE",
+      isConsolidated: true,
+      consolidationStatus: "ACTIVE",
+    }),
+  ]],
+] as const) {
+  test(`${name} is a valid shared consolidation selection`, () => {
+    const withCustomer = documents.map((document) => ({
+      ...document,
+      customer: { id: "c1" } as Sale["customer"],
+    }));
+    assert.equal(validateSalesConsolidationSelection(withCustomer).valid, true);
+    assert.equal(getSalesSelectionActions(withCustomer).showConsolidate, true);
+  });
+}
+
+test("several mixed normal and consolidated documents are valid", () => {
+  const documents = [
+    sale({ customer: { id: "c1" } as Sale["customer"] }),
+    sale({ id: "sale-2", documentType: "FACTURE", customer: { id: "c1" } as Sale["customer"] }),
+    sale({
+      id: "sale-3",
+      isConsolidated: true,
+      consolidationStatus: "ACTIVE",
+      customer: { id: "c1" } as Sale["customer"],
+    }),
+  ];
+  assert.deepEqual(validateSalesConsolidationSelection(documents), {
+    valid: true,
+    error: null,
+  });
+});
+
+test("selection total replaces source stamps with one consolidated stamp", () => {
+  const documents = [
+    sale({ total: 100, stampDuty: 1, totalFinal: 101 }),
+    sale({ id: "sale-2", total: 200, stampDuty: 1, totalFinal: 201 }),
+  ];
+  assert.equal(calculateSalesSelectionTotal(documents), 301);
+});
+
 test("multi-selections do not expose an ambiguous generation action", () => {
   const actions = getSalesSelectionActions([sale(), sale({ id: "sale-2" })]);
 
@@ -100,4 +160,17 @@ test("a consolidation and a sale from another customer are incompatible", () => 
   ]);
   assert.equal(actions.showConsolidate, false);
   assert.match(actions.consolidationError ?? "", /même client/);
+});
+
+test("an inactive consolidation is rejected", () => {
+  const validation = validateSalesConsolidationSelection([
+    sale({
+      isConsolidated: true,
+      consolidationStatus: "REPLACED",
+      customer: { id: "c1" } as Sale["customer"],
+    }),
+    sale({ id: "sale-2", customer: { id: "c1" } as Sale["customer"] }),
+  ]);
+  assert.equal(validation.valid, false);
+  assert.match(validation.error ?? "", /inactive/);
 });

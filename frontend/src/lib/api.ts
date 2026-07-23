@@ -2,6 +2,12 @@ import axios from 'axios';
 import { toast } from './toast';
 import { clearAuthSession, setAuthSession } from './auth';
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    suppressErrorToast?: boolean;
+  }
+}
+
 const apiRoot = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 const apiBaseURL = `${apiRoot}/api`;
 
@@ -125,6 +131,10 @@ api.interceptors.response.use(
       } finally {
         isRefreshing = false;
       }
+    }
+
+    if (originalRequest?.suppressErrorToast) {
+      return Promise.reject(error);
     }
 
     if (status === 403) {

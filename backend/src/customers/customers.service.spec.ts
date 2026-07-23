@@ -163,11 +163,16 @@ describe('CustomersService.findSales', () => {
           id: 'sale-1', invoiceNumber: 'FAC-001', documentType: 'FACTURE', status: 'COMPLETED',
           createdAt: new Date('2026-07-18'), subtotal: new Prisma.Decimal(80), tax: new Prisma.Decimal(20),
           total: new Prisma.Decimal(100), stampDuty: new Prisma.Decimal(1), items: [{ id: 'item-1' }],
+          totalRefunded: new Prisma.Decimal(2),
           payments: [{ amount: new Prisma.Decimal(40) }],
         }]),
         count: jest.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(1),
         aggregate: jest.fn().mockResolvedValue({
-          _sum: { total: new Prisma.Decimal(100), stampDuty: new Prisma.Decimal(1) },
+          _sum: {
+            total: new Prisma.Decimal(100),
+            stampDuty: new Prisma.Decimal(1),
+            totalRefunded: new Prisma.Decimal(2),
+          },
         }),
       },
       payment: {
@@ -190,9 +195,11 @@ describe('CustomersService.findSales', () => {
       id: 'sale-1', itemCount: 1, paymentStatus: 'PARTIAL',
     }));
     expect(result.data[0].paidAmount.toNumber()).toBe(40);
-    expect(result.data[0].remainingAmount.toNumber()).toBe(61);
+    expect(result.data[0].totalTtc.toNumber()).toBe(101);
+    expect(result.data[0].remainingAmount.toNumber()).toBe(59);
     expect(result.pagination).toEqual({ page: 1, limit: 10, total: 1, totalPages: 1 });
-    expect(result.summary.totalRemaining.toNumber()).toBe(61);
+    expect(result.summary.totalRemaining.toNumber()).toBe(59);
+    expect(result.summary.totalRemaining.lte(result.summary.totalTtc)).toBe(true);
   });
 
   it('refuse implicitement un client absent avant de lire ses ventes', async () => {

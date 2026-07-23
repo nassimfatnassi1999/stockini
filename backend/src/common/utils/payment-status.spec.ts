@@ -21,4 +21,10 @@ describe('calculatePaymentAmounts', () => {
     expect(result.paidAmount.toFixed(3)).toBe('100.001');
     expect(result.remainingAmount.toFixed(3)).toBe('195.836');
   });
+
+  it('centralise la formule total TTC moins paiements moins avoirs', () => {
+    const result = calculatePaymentAmounts('2032.161', '100.000', '50.000');
+    expect(result.remainingAmount.toFixed(3)).toBe('1882.161');
+    expect(result.remainingAmount.lte('2032.161')).toBe(true);
+  });
 });

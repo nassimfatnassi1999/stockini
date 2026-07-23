@@ -18,10 +18,8 @@ import {
   ChevronRight,
   ChevronUp,
   ClipboardList,
-  Download,
   Eye,
   FileText,
-  Loader2,
   Mail,
   Pencil,
   Receipt,
@@ -63,10 +61,11 @@ import { stockiniApi } from "@/lib/stockini/api";
 import { getSalesSelectionActions } from "@/lib/stockini/sales-selection-actions";
 import { cn } from "@/lib/utils";
 import { HistoryToolbar } from "@/components/stockini/shared/HistoryToolbar";
-import { BulkActionsBar } from "@/components/stockini/shared/BulkActionsBar";
 import { ConsolidateDocumentsDialog } from "@/components/stockini/sales/ConsolidateDocumentsDialog";
 import { ConsolidatedDocumentBadge } from "@/components/stockini/sales/ConsolidatedDocumentBadge";
 import { DeconsolidateDialog } from "@/components/stockini/sales/DeconsolidateDialog";
+import { SalesDocumentGenerationPanel } from "@/components/stockini/sales/SalesDocumentGenerationPanel";
+import { SalesSelectionActionsBar } from "@/components/stockini/sales/SalesSelectionActionsBar";
 import {
   isSourceOfActiveConsolidation,
   SalePaymentCell,
@@ -126,18 +125,6 @@ const SALES_API_DOCUMENT_TYPES = new Set<SalesDocumentType>([
   "BON_LIVRAISON",
   "FACTURE",
 ]);
-
-// Central config — add new types here without touching any other code
-const GENERATABLE_DOC_TYPES: Array<{ type: SalesDocumentType; label: string }> =
-  [
-    { type: "DEVIS", label: "Générer devis" },
-    { type: "BON_COMMANDE", label: "Générer bon de commande" },
-    { type: "BON_LIVRAISON", label: "Générer bon de livraison" },
-    { type: "FACTURE", label: "Générer facture" },
-    { type: "AVOIR", label: "Générer avoir" },
-  ];
-
-const PDF_ACTIONS = GENERATABLE_DOC_TYPES;
 
 // Types de documents transformables (source)
 const TRANSFORMABLE_TYPES: SalesDocumentType[] = [
@@ -2021,54 +2008,21 @@ export default function VentesPage() {
                 {/* Right side actions */}
                 <div className="px-3 flex items-center gap-2">
                   {activeHistoryTab === "ventes" && (
-                    <>
-                      {selectedInvoiceIds.length > 1 && selectionActions.consolidationError && (
-                        <p className="max-w-64 text-right text-[11px] font-medium leading-tight text-amber-700">
-                          {selectionActions.consolidationError}
-                        </p>
-                      )}
-                      {selectedInvoiceIds.length > 0 && (
-                        <BulkActionsBar
-                          count={selectedInvoiceIds.length}
-                          onEmail={handleEmailClick}
-                          emailLoading={emailPreviewLoading}
-                          onClear={() => { setSelectedInvoiceIds([]); setSelectedInvoiceSales([]); }}
-                          generateButton={selectionActions.showGenerate ? (
-                            <button
-                              type="button"
-                              onClick={handleDownloadClick}
-                              disabled={docMenuGenerating !== null}
-                              className={cn(
-                                "inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl px-4 text-[12px] font-medium",
-                                "border border-orange-200/70 bg-orange-50 text-orange-700",
-                                "transition-all duration-150",
-                                "hover:-translate-y-px hover:border-orange-300 hover:bg-orange-100",
-                                "disabled:cursor-not-allowed disabled:opacity-40",
-                              )}
-                            >
-                              {docMenuGenerating !== null ? (
-                                <Loader2 size={12} className="animate-spin" />
-                              ) : (
-                                <Download size={12} />
-                              )}
-                              {selectionActions.generateLabel}
-                            </button>
-                          ) : null}
-                          transformButton={(() => {
-                            if (selectionActions.showDeconsolidate) {
-                              return canCancelConsolidation ? (
-                                <button type="button" onClick={() => setDeconsolidationTarget(selectedInvoiceSales[0])} className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border border-amber-200 bg-amber-50 px-4 text-[12px] font-medium text-amber-800 hover:bg-amber-100">
-                                  <RotateCcw size={12} /> Déconsolider
-                                </button>
-                              ) : null;
-                            }
-                            if (selectedInvoiceIds.length >= 2 && canConsolidate) {
-                              return (
-                                <button type="button" onClick={openConsolidation} disabled={!selectionActions.showConsolidate} title={selectionActions.consolidationError ?? undefined} className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border border-violet-200 bg-violet-50 px-4 text-[12px] font-medium text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-40">
-                                  <Combine size={12} /> Consolider · {money(selectedInvoiceSales.reduce((sum, sale) => sum + Number(sale.totalFinal ?? Number(sale.total) + Number(sale.stampDuty)), 0))}
-                                </button>
-                              );
-                            }
+                    <SalesSelectionActionsBar
+                      sales={selectedInvoiceSales}
+                      canConsolidate={canConsolidate}
+                      canDeconsolidate={canCancelConsolidation}
+                      onGenerate={handleDownloadClick}
+                      onConsolidate={openConsolidation}
+                      onDeconsolidate={() => setDeconsolidationTarget(selectedInvoiceSales[0])}
+                      onEmail={handleEmailClick}
+                      onClear={() => {
+                        setSelectedInvoiceIds([]);
+                        setSelectedInvoiceSales([]);
+                      }}
+                      generationLoading={docMenuGenerating !== null}
+                      emailLoading={emailPreviewLoading}
+                      fallbackAction={(() => {
                             if (selectedInvoiceIds.length !== 1) return null;
                             const sel = salesList.find(
                               (s) => s.id === selectedInvoiceIds[0],
@@ -2090,10 +2044,8 @@ export default function VentesPage() {
                                 }
                               />
                             );
-                          })()}
-                        />
-                      )}
-                    </>
+                      })()}
+                    />
                   )}
                   {activeHistoryTab === "documents" &&
                     selectedDocumentIds.length > 0 && (
@@ -2489,63 +2441,12 @@ export default function VentesPage() {
 
             {/* Floating document generation panel (opened by Download button) */}
             {isDocMenuOpen && (
-              <div className="fixed bottom-6 right-6 z-40 w-64 rounded-xl border border-border/70 bg-white shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
-                <div className="flex items-center justify-between bg-primary/5 border-b border-border/60 px-4 py-3">
-                  <div>
-                    <p className="text-xs font-semibold text-primary uppercase tracking-wide">
-                      Générer un document
-                    </p>
-                    <p className="text-xs text-text-muted mt-0.5">
-                      {selectedInvoiceIds.length} vente
-                      {selectedInvoiceIds.length > 1 ? "s" : ""} sélectionnée
-                      {selectedInvoiceIds.length > 1 ? "s" : ""}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsDocMenuOpen(false)}
-                    className="rounded-md p-1 text-text-muted hover:bg-muted hover:text-text-primary transition-colors"
-                    aria-label="Fermer"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-
-                <div className="p-3 space-y-1.5">
-                  {PDF_ACTIONS.map((action) => (
-                    <button
-                      key={action.type}
-                      type="button"
-                      disabled={docMenuGenerating !== null}
-                      onClick={() => handleGenerateDocument(action.type)}
-                      className="w-full flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2.5 text-left text-sm font-medium text-text-primary hover:bg-primary/5 hover:border-primary/30 hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {docMenuGenerating === action.type ? (
-                        <Loader2
-                          size={14}
-                          className="shrink-0 animate-spin text-primary"
-                        />
-                      ) : (
-                        <FileText
-                          size={14}
-                          className="shrink-0 text-primary/70"
-                        />
-                      )}
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="border-t border-border/60 px-3 py-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setIsDocMenuOpen(false)}
-                    className="w-full rounded-md py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
-                  >
-                    Annuler
-                  </button>
-                </div>
-              </div>
+              <SalesDocumentGenerationPanel
+                count={selectedInvoiceIds.length}
+                generating={docMenuGenerating}
+                onGenerate={handleGenerateDocument}
+                onClose={() => setIsDocMenuOpen(false)}
+              />
             )}
 
             {/* Email toast — visible when invoices or documents are selected */}

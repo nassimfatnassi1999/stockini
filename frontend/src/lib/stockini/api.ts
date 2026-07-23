@@ -209,7 +209,7 @@ export const stockiniApi = {
       .post<Sale>(`/sales/${id}/transform`, { targetType })
       .then((r) => r.data),
   createSalesConsolidation: (data: { sourceIds: string[]; targetType: 'BON_LIVRAISON' | 'FACTURE'; date: string; note?: string }) =>
-    api.post<Sale>('/sales/consolidations', data).then((r) => r.data),
+    api.post<Sale>('/sales/consolidations', data, { suppressErrorToast: true }).then((r) => r.data),
   salesConsolidation: (id: string) =>
     api.get<SaleDetail>(`/sales/consolidations/${id}`).then((r) => r.data),
   saleConsolidation: (id: string) =>

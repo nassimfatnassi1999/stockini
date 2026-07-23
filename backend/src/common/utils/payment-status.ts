@@ -9,12 +9,13 @@ export interface PaymentAmounts {
 }
 
 /**
- * Source unique pour l'affichage financier d'un document. Les appelants
- * fournissent le total à payer et la somme des paiements encore valides.
+ * Source unique pour l'affichage financier d'un document :
+ * reste = max(total TTC - paiements valides - avoirs valides, 0).
  */
 export function calculatePaymentAmounts(
   totalPayable: Prisma.Decimal.Value,
   validPaidAmount: Prisma.Decimal.Value,
+  validCreditAmount: Prisma.Decimal.Value = 0,
 ): PaymentAmounts {
   const roundTnd = (value: Prisma.Decimal) =>
     value.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
@@ -25,8 +26,14 @@ export function calculatePaymentAmounts(
       new Prisma.Decimal(0),
     ),
   );
+  const credits = roundTnd(
+    Prisma.Decimal.max(
+      new Prisma.Decimal(validCreditAmount ?? 0),
+      new Prisma.Decimal(0),
+    ),
+  );
   const calculatedRemaining = roundTnd(
-    Prisma.Decimal.max(total.minus(paid), new Prisma.Decimal(0)),
+    Prisma.Decimal.max(total.minus(paid).minus(credits), new Prisma.Decimal(0)),
   );
   const remaining = calculatedRemaining.lte(PAYMENT_ROUNDING_TOLERANCE)
     ? new Prisma.Decimal(0)

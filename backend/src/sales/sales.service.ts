@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   CaisseMovementType,
@@ -175,29 +178,42 @@ export class SalesService {
       ))) {
         throw new BadRequestException('Un document sélectionné appartient déjà à un autre regroupement actif');
       }
-      const sourceType = first.documentType;
-      if (sources.some((sale) => sale.documentType !== sourceType)) {
-        throw new BadRequestException('Les bons de livraison et les factures ne peuvent pas être mélangés');
-      }
-      const compatible = sourceType === dto.targetType ||
-        (sourceType === DocumentType.BON_LIVRAISON && dto.targetType === DocumentType.FACTURE);
-      if (!compatible || (sourceType !== DocumentType.BON_LIVRAISON && sourceType !== DocumentType.FACTURE)) {
-        throw new BadRequestException('Types de documents incompatibles avec le regroupement demandé');
+      if (sources.some((sale) =>
+        sale.documentType !== DocumentType.BON_LIVRAISON &&
+        sale.documentType !== DocumentType.FACTURE
+      )) {
+        throw new BadRequestException(
+          'Seuls les bons de livraison et les factures peuvent être regroupés',
+        );
       }
 
       const sum = (values: Array<Prisma.Decimal | number>): Prisma.Decimal =>
         values.reduce<Prisma.Decimal>((total, value) => total.plus(value), new Prisma.Decimal(0));
-      const subtotal = sum(sources.map((sale) => sale.subtotal));
-      const discount = sum(sources.map((sale) => sale.discount));
-      const tax = sum(sources.map((sale) => sale.tax));
-      const total = sum(sources.map((sale) => sale.total));
+      const round3 = (value: Prisma.Decimal): Prisma.Decimal =>
+        value.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+      const subtotal = round3(sum(sources.map((sale) => sale.subtotal)));
+      const discount = round3(sum(sources.map((sale) => sale.discount)));
+      const tax = round3(sum(sources.map((sale) => sale.tax)));
+      const total = round3(sum(sources.map((sale) => sale.total)));
       // Un regroupement est un nouveau document unique : son timbre n'est
       // jamais la somme des timbres historiques des documents sources.
       const stampDuty = new Prisma.Decimal(DEFAULT_STAMP_DUTY);
-      const historicalPaid = sum(sources.flatMap((sale) => sale.payments.map((payment) => payment.amount)));
-      const credits = sum(sources.flatMap((sale) => sale.creditNotes.map((credit) => credit.montantRembourse)));
-      const net = total.plus(stampDuty);
-      const remainingAmount = Prisma.Decimal.max(net.minus(historicalPaid).minus(credits), 0);
+      const historicalPaid = round3(sum(sources.flatMap((sale) => sale.payments.map((payment) => payment.amount))));
+      const credits = round3(sum(sources.flatMap((sale) => sale.creditNotes.map((credit) => credit.montantRembourse))));
+      const net = round3(total.plus(stampDuty));
+      const paymentAmounts = calculatePaymentAmounts(
+        net,
+        historicalPaid,
+        credits,
+      );
+      const remainingAmount = paymentAmounts.remainingAmount;
+      const sourceLinks = sources.map((sale, index) => ({
+        sourceSaleId: sale.id,
+        sourceReference: sale.invoiceNumber,
+        sourceType: sale.documentType,
+        sourceTotal: round3(sale.total.plus(sale.stampDuty)),
+        displayOrder: index,
+      }));
       const invoiceNumber = await this.references.generateConsolidatedSalesDocumentNumber(
         dto.targetType as 'BON_LIVRAISON' | 'FACTURE', first.customer?.name, documentDate, tx,
       );
@@ -216,7 +232,7 @@ export class SalesService {
           paidAmount: historicalPaid,
           remainingAmount,
           totalRefunded: credits,
-          paymentStatus: this.paymentStatus(Number(net.minus(credits)), Number(historicalPaid)),
+          paymentStatus: paymentAmounts.paymentStatus,
           status: SaleStatus.COMPLETED,
           documentType: dto.targetType,
           stockImpactDone: false,
@@ -244,24 +260,29 @@ export class SalesService {
               sourceReference: sale.invoiceNumber,
             }))),
           },
-          consolidationSources: {
-            create: sources.map((sale, index) => ({
-              sourceSaleId: sale.id,
-              sourceReference: sale.invoiceNumber,
-              sourceType: sale.documentType,
-              sourceTotal: sale.total.plus(sale.stampDuty),
-              displayOrder: index,
-            })),
-          },
         },
-        include: { customer: true, items: { include: { product: true } }, consolidationSources: true },
+        include: { customer: true, items: { include: { product: true } } },
       });
+
+      // Une source ne peut avoir qu'une appartenance active. Il faut donc
+      // libérer les sources de l'ancien BLG avant de créer les nouveaux liens.
       if (oldConsolidationIds.length) {
         const replacedAt = new Date();
         await tx.saleConsolidationSource.updateMany({
           where: { consolidatedSaleId: { in: oldConsolidationIds }, active: true },
           data: { active: false, cancelledAt: replacedAt },
         });
+      }
+
+      await tx.saleConsolidationSource.createMany({
+        data: sourceLinks.map((link) => ({
+          consolidatedSaleId: parent.id,
+          ...link,
+        })),
+      });
+
+      if (oldConsolidationIds.length) {
+        const replacedAt = new Date();
         await tx.sale.updateMany({
           where: { id: { in: oldConsolidationIds } },
           data: {
@@ -278,7 +299,17 @@ export class SalesService {
         newValue: { reference: parent.invoiceNumber, total: Number(net), paid: Number(historicalPaid), remaining: Number(remainingAmount) },
         metadata: { selectedIds, sourceIds, replacedConsolidationIds: oldConsolidationIds, sourceReferences: sources.map((sale) => sale.invoiceNumber), targetType: dto.targetType, credits: Number(credits) },
       }, tx);
-      return parent;
+      return tx.sale.findUniqueOrThrow({
+        where: { id: parent.id },
+        include: {
+          customer: true,
+          items: { include: { product: true } },
+          consolidationSources: {
+            where: { active: true },
+            orderBy: { displayOrder: 'asc' },
+          },
+        },
+      });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       await this.auditLogs.audit({
@@ -292,8 +323,36 @@ export class SalesService {
           reason: error instanceof Error ? error.message : String(error),
         },
       }).catch(() => undefined);
-      throw error;
+      throw this.mapConsolidationError(error);
     }
+  }
+
+  private mapConsolidationError(error: unknown): unknown {
+    if (error instanceof HttpException) return error;
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return error;
+
+    if (error.code === 'P2002') {
+      const constraint = JSON.stringify(error.meta ?? {}).toLowerCase();
+      if (constraint.includes('sale_consolidation_sources') || constraint.includes('source_sale_id')) {
+        return new ConflictException(
+          'Une source est déjà liée à une autre consolidation active. Actualisez la liste puis réessayez.',
+        );
+      }
+      return new ConflictException(
+        'Un document avec cette référence existe déjà. Actualisez la liste puis réessayez.',
+      );
+    }
+    if (error.code === 'P2003' || error.code === 'P2025') {
+      return new NotFoundException(
+        'Un document source est introuvable ou a été supprimé pendant la consolidation.',
+      );
+    }
+    if (error.code === 'P2034') {
+      return new ConflictException(
+        'Les documents ont été modifiés pendant la consolidation. Actualisez la liste puis réessayez.',
+      );
+    }
+    return error;
   }
 
   async getConsolidation(id: string) {
@@ -374,16 +433,16 @@ export class SalesService {
           const source = link.sourceSale;
           const paid = source.payments.reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
           const credits = source.creditNotes.reduce((sum, credit) => sum.plus(credit.montantRembourse), new Prisma.Decimal(0));
-          const netAfterCredits = Prisma.Decimal.max(source.total.plus(source.stampDuty).minus(credits), 0);
-          const remaining = Prisma.Decimal.max(netAfterCredits.minus(paid), 0);
+          const totalPayable = source.total.plus(source.stampDuty);
+          const amounts = calculatePaymentAmounts(totalPayable, paid, credits);
           await tx.sale.update({
             where: { id: source.id },
             data: {
               paidAmount: paid,
               totalRefunded: credits,
-              remainingAmount: remaining,
+              remainingAmount: amounts.remainingAmount,
               paymentStatus: PAYMENT_ACCEPTING_TYPES.has(source.documentType)
-                ? this.paymentStatus(Number(netAfterCredits), Number(paid))
+                ? amounts.paymentStatus
                 : null,
             },
           });

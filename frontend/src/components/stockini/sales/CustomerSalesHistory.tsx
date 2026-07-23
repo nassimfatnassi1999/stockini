@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Combine, Eye, Pencil, RotateCcw, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Combine, Eye, Pencil, RotateCcw, Search } from 'lucide-react';
+import { EmailToast } from '@/components/stockini/EmailToast';
 import { SaleDetailsModal } from '@/components/stockini/SaleDetailsModal';
 import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
@@ -10,14 +11,24 @@ import { Input } from '@/components/ui/input';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { money } from '@/lib/stockini/format';
 import { stockiniApi } from '@/lib/stockini/api';
-import type { CustomerSaleHistoryItem, SalesQueryParams } from '@/lib/stockini/types';
+import type {
+  CustomerSaleHistoryItem,
+  EmailPreview,
+  Sale,
+  SalesDocumentType,
+  SalesQueryParams,
+} from '@/lib/stockini/types';
+import {
+  validateSalesConsolidationSelection,
+} from '@/lib/stockini/sales-selection-actions';
 import { PaymentStatusBadge } from './PaymentStatusBadge';
 import { ConsolidateDocumentsDialog } from './ConsolidateDocumentsDialog';
 import { ConsolidatedDocumentBadge } from './ConsolidatedDocumentBadge';
 import { DeconsolidateDialog } from './DeconsolidateDialog';
+import { SalesDocumentGenerationPanel } from './SalesDocumentGenerationPanel';
+import { SalesSelectionActionsBar } from './SalesSelectionActionsBar';
 import { isSourceOfActiveConsolidation, SalePaymentCell } from './SaleConsolidationDisplay';
 import { toast } from '@/lib/toast';
-import type { Sale } from '@/lib/stockini/types';
 
 const DOCUMENT_LABELS: Record<string, string> = {
   DEVIS: 'Devis', BON_COMMANDE: 'BC', BON_LIVRAISON: 'BL', FACTURE: 'Facture', AVOIR: 'Avoir',
@@ -83,6 +94,12 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
   const [selected, setSelected] = useState<CustomerSaleHistoryItem[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deconsolidationTarget, setDeconsolidationTarget] = useState<CustomerSaleHistoryItem | null>(null);
+  const [generationPanelOpen, setGenerationPanelOpen] = useState(false);
+  const [generatingType, setGeneratingType] = useState<SalesDocumentType | null>(null);
+  const [emailPreview, setEmailPreview] = useState<EmailPreview | null>(null);
+  const [emailPreviewLoading, setEmailPreviewLoading] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setSearch(inputSearch.trim()); setPage(1); }, 300);
@@ -106,13 +123,82 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
     onSuccess: (sale) => { toast.success(`Regroupement ${sale.invoiceNumber} créé`); setSelected([]); setDialogOpen(false); void queryClient.invalidateQueries({ queryKey: ['customer-sales', customerId] }); },
     onError: (error: unknown) => toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Impossible de regrouper les documents'),
   });
+  const selectedSales = useMemo(
+    () => selected.map((sale) => ({
+      ...sale,
+      customerId,
+      totalFinal: sale.totalTtc,
+    })),
+    [customerId, selected],
+  );
   const toggle = (sale: CustomerSaleHistoryItem) => setSelected((current) => current.some((item) => item.id === sale.id) ? current.filter((item) => item.id !== sale.id) : [...current, sale]);
   const openConsolidation = () => {
-    const type = selected[0]?.documentType;
     if (selected.length < 2) return;
-    if (!['BON_LIVRAISON', 'FACTURE'].includes(type) || selected.some((sale) => sale.documentType !== type)) return toast.error('Sélectionnez uniquement des BL ou uniquement des factures');
-    if (selected.some((sale) => sale.status === 'CANCELLED' || sale.activeConsolidation || sale.isConsolidated)) return toast.error('La sélection contient un document incompatible');
+    const validation = validateSalesConsolidationSelection(selectedSales);
+    if (validation.error) return toast.error(validation.error);
     setDialogOpen(true);
+  };
+  const generateDocument = async (type: SalesDocumentType) => {
+    setGeneratingType(type);
+    try {
+      const result = await stockiniApi.generateDocuments(
+        selected.map((sale) => String(sale.id)),
+        type,
+      );
+      setGenerationPanelOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
+      void queryClient.invalidateQueries({ queryKey: ['documents'] });
+      toast.success(`${result.documents.length} document(s) généré(s) avec succès`);
+    } catch (error: unknown) {
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur lors de la génération du document');
+    } finally {
+      setGeneratingType(null);
+    }
+  };
+  const openEmail = async () => {
+    setGenerationPanelOpen(false);
+    setEmailPreviewLoading(true);
+    try {
+      const ids = selected.map((sale) => String(sale.id));
+      const documents = (await stockiniApi.generatedDocuments())
+        .filter((document) => ids.includes(String(document.invoiceId)));
+      if (documents.length) {
+        setEmailPreview(await stockiniApi.emailPreview(documents.map((document) => String(document.id))));
+      } else {
+        setEmailPreview({
+          to: '',
+          subject: 'Documents commerciaux',
+          body: 'Bonjour,\n\nVeuillez trouver en pièces jointes les documents demandés.\n\nCordialement.',
+          attachments: [],
+        });
+      }
+      setEmailOpen(true);
+    } catch (error: unknown) {
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur lors de la préparation de l’email');
+    } finally {
+      setEmailPreviewLoading(false);
+    }
+  };
+  const sendEmail = async (payload: { to: string; cc?: string; bcc?: string; subject: string; body: string }) => {
+    const ids = selected.map((sale) => String(sale.id));
+    const documentIds = (await stockiniApi.generatedDocuments())
+      .filter((document) => ids.includes(String(document.invoiceId)))
+      .map((document) => String(document.id));
+    if (!documentIds.length) {
+      toast.info("Aucun document généré à envoyer. Générez d'abord le document.");
+      return;
+    }
+    setEmailSending(true);
+    try {
+      await stockiniApi.sendDocumentEmail({ documentIds, ...payload });
+      toast.success('Email envoyé avec succès.');
+      setEmailOpen(false);
+      setSelected([]);
+    } catch (error: unknown) {
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Échec de l’envoi email');
+    } finally {
+      setEmailSending(false);
+    }
   };
 
   const reset = () => {
@@ -141,7 +227,18 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
           <h2 className="text-base font-semibold text-text-primary">Historique des ventes</h2>
           <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">{pagination?.total ?? 0}</span>
         </div>
-        {selected.length > 0 && <div className="flex items-center gap-2 rounded-xl border bg-white px-2 py-1.5 text-xs shadow-sm"><span>{selected.length} sélectionné{selected.length > 1 ? 's' : ''}</span>{selected.length === 1 && selected[0].isConsolidated && selected[0].consolidationStatus === 'ACTIVE' && can('sales.consolidation.cancel') ? <Button size="sm" variant="outline" onClick={() => setDeconsolidationTarget(selected[0])}><RotateCcw size={14} /> Déconsolider</Button> : selected.length >= 2 && can('sales.consolidate') ? <Button size="sm" onClick={openConsolidation}><Combine size={14} /> Regrouper</Button> : null}<button onClick={() => setSelected([])} aria-label="Annuler la sélection"><X size={14} /></button></div>}
+        <SalesSelectionActionsBar
+          sales={selectedSales}
+          canConsolidate={can('sales.consolidate')}
+          canDeconsolidate={can('sales.consolidation.cancel')}
+          onGenerate={() => setGenerationPanelOpen(true)}
+          onConsolidate={openConsolidation}
+          onDeconsolidate={() => setDeconsolidationTarget(selected[0])}
+          onEmail={openEmail}
+          onClear={() => setSelected([])}
+          generationLoading={generatingType !== null}
+          emailLoading={emailPreviewLoading}
+        />
       </div>
 
       <div className="grid gap-3 border-b border-border/60 bg-slate-50/50 p-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -206,8 +303,10 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
         <div className="flex items-center gap-2"><span>Page {pagination?.page ?? 1} sur {Math.max(1, pagination?.totalPages ?? 1)}</span><Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={14} /></Button><Button size="sm" variant="outline" disabled={page >= (pagination?.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></Button></div>
       </div>
       {detailSaleId && <SaleDetailsModal saleId={detailSaleId} onClose={() => setDetailSaleId(null)} />}
-      {dialogOpen && <ConsolidateDocumentsDialog sales={selected.map((sale) => ({ ...sale, customer: { id: customerId, name: 'Client' } } as unknown as Sale))} onClose={() => setDialogOpen(false)} loading={consolidation.isPending} onConfirm={(value) => consolidation.mutate(value)} />}
-      {deconsolidationTarget && <DeconsolidateDialog sale={{ id: deconsolidationTarget.id, invoiceNumber: deconsolidationTarget.invoiceNumber, total: deconsolidationTarget.totalTtc, stampDuty: 0, totalFinal: deconsolidationTarget.totalTtc }} onClose={() => setDeconsolidationTarget(null)} onSuccess={() => { setSelected([]); setDetailSaleId(null); }} />}
+      {dialogOpen && <ConsolidateDocumentsDialog sales={selectedSales.map((sale) => ({ ...sale, customer: { id: customerId, name: 'Client' } } as unknown as Sale))} onClose={() => setDialogOpen(false)} loading={consolidation.isPending} onConfirm={(value) => consolidation.mutate(value)} />}
+      {deconsolidationTarget && <DeconsolidateDialog sale={{ id: deconsolidationTarget.id, invoiceNumber: deconsolidationTarget.invoiceNumber, total: deconsolidationTarget.total, stampDuty: deconsolidationTarget.stampDuty, totalFinal: deconsolidationTarget.totalTtc }} onClose={() => setDeconsolidationTarget(null)} onSuccess={() => { setSelected([]); setDetailSaleId(null); }} />}
+      {generationPanelOpen && <SalesDocumentGenerationPanel count={selected.length} generating={generatingType} onGenerate={generateDocument} onClose={() => setGenerationPanelOpen(false)} />}
+      {emailOpen && emailPreview && !emailPreviewLoading && <EmailToast preview={emailPreview} isSending={emailSending} onSend={sendEmail} onCancel={() => setEmailOpen(false)} />}
     </section>
   );
 }

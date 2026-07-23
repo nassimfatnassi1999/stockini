@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { DocumentType, PaymentStatus, Prisma, SaleStatus } from '@prisma/client';
 import { SalesService } from './sales.service';
 
@@ -35,13 +35,27 @@ function source(id: string, overrides: Record<string, unknown> = {}) {
 
 function build(sources: ReturnType<typeof source>[]) {
   const created: { data?: any } = {};
+  const linked: { data?: any[] } = {};
   const tx: any = {
     $queryRaw: jest.fn().mockResolvedValue([]),
     sale: {
       findMany: jest.fn().mockResolvedValue(sources),
       create: jest.fn(({ data }: { data: any }) => {
         created.data = data;
-        return Promise.resolve({ id: 'parent-1', ...data, customer: sources[0]?.customer, items: data.items.create, consolidationSources: data.consolidationSources.create });
+        return Promise.resolve({ id: 'parent-1', ...data, customer: sources[0]?.customer, items: data.items.create });
+      }),
+      findUniqueOrThrow: jest.fn(() => Promise.resolve({
+        id: 'parent-1',
+        ...created.data,
+        customer: sources[0]?.customer,
+        items: created.data?.items.create,
+        consolidationSources: linked.data,
+      })),
+    },
+    saleConsolidationSource: {
+      createMany: jest.fn(({ data }: { data: any[] }) => {
+        linked.data = data;
+        return Promise.resolve({ count: data.length });
       }),
     },
   };
@@ -49,11 +63,12 @@ function build(sources: ReturnType<typeof source>[]) {
   const references = { generateConsolidatedSalesDocumentNumber: jest.fn().mockResolvedValue('BLG-CLIENTTEST-18072026-001') };
   const audit = { audit: jest.fn().mockResolvedValue(undefined) };
   const service = new SalesService(prisma, {} as any, references as any, {} as any, {} as any, {} as any, audit as any);
-  return { service, tx, created, audit };
+  return { service, tx, created, linked, audit };
 }
 
 function buildReconsolidation(selected: any[], originals: ReturnType<typeof source>[]) {
   const created: { data?: any } = {};
+  const linked: { data?: any[] } = {};
   const tx: any = {
     $queryRaw: jest.fn().mockResolvedValue([]),
     sale: {
@@ -62,17 +77,30 @@ function buildReconsolidation(selected: any[], originals: ReturnType<typeof sour
         .mockResolvedValueOnce(originals),
       create: jest.fn(({ data }: { data: any }) => {
         created.data = data;
-        return Promise.resolve({ id: 'parent-2', ...data, customer: originals[0]?.customer, items: data.items.create, consolidationSources: data.consolidationSources.create });
+        return Promise.resolve({ id: 'parent-2', ...data, customer: originals[0]?.customer, items: data.items.create });
       }),
+      findUniqueOrThrow: jest.fn(() => Promise.resolve({
+        id: 'parent-2',
+        ...created.data,
+        customer: originals[0]?.customer,
+        items: created.data?.items.create,
+        consolidationSources: linked.data,
+      })),
       updateMany: jest.fn().mockResolvedValue({ count: selected.filter((sale) => sale.isConsolidated).length }),
     },
-    saleConsolidationSource: { updateMany: jest.fn().mockResolvedValue({ count: originals.length }) },
+    saleConsolidationSource: {
+      updateMany: jest.fn().mockResolvedValue({ count: originals.length }),
+      createMany: jest.fn(({ data }: { data: any[] }) => {
+        linked.data = data;
+        return Promise.resolve({ count: data.length });
+      }),
+    },
   };
   const prisma: any = { $transaction: jest.fn((callback: any) => callback(tx)) };
   const references = { generateConsolidatedSalesDocumentNumber: jest.fn().mockResolvedValue('BLG-CLIENTTEST-21072026-002') };
   const audit = { audit: jest.fn().mockResolvedValue(undefined) };
   const service = new SalesService(prisma, {} as any, references as any, {} as any, {} as any, {} as any, audit as any);
-  return { service, tx, created, prisma };
+  return { service, tx, created, linked, prisma };
 }
 
 function consolidation(id: string, sourceIds: string[]) {
@@ -150,11 +178,33 @@ describe('SalesService consolidations', () => {
     await expect(service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.BON_LIVRAISON })).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('refuse le mélange BL/facture et un document déjà regroupé', async () => {
+  it('accepte le mélange BL/facture et refuse un document déjà regroupé ailleurs', async () => {
     const mixed = build([source('1'), source('2', { documentType: DocumentType.FACTURE })]);
-    await expect(mixed.service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.FACTURE })).rejects.toThrow(/mélangés/);
+    await expect(mixed.service.createConsolidation({
+      sourceIds: ['1', '2'],
+      targetType: DocumentType.FACTURE,
+    })).resolves.toBeDefined();
     const grouped = build([source('1'), source('2', { consolidationMemberships: [{ consolidatedSaleId: 'other' }] })]);
     await expect(grouped.service.createConsolidation({ sourceIds: ['1', '2'], targetType: DocumentType.BON_LIVRAISON })).rejects.toThrow(/déjà/);
+  });
+
+  it('accepte un BLG et une facture en conservant les types de chaque source originale', async () => {
+    const originals = [
+      source('bl-1', { consolidationMemberships: [{ consolidatedSaleId: 'group-1' }] }),
+      source('fac-1', { documentType: DocumentType.FACTURE }),
+    ];
+    const { service, linked } = buildReconsolidation(
+      [consolidation('group-1', ['bl-1']), originals[1]],
+      originals,
+    );
+    await service.createConsolidation({
+      sourceIds: ['group-1', 'fac-1'],
+      targetType: DocumentType.BON_LIVRAISON,
+    });
+    expect(linked.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceSaleId: 'bl-1', sourceType: DocumentType.BON_LIVRAISON }),
+      expect.objectContaining({ sourceSaleId: 'fac-1', sourceType: DocumentType.FACTURE }),
+    ]));
   });
 
   it('aplatit une BLG avec un nouveau BL et remplace l’ancienne consolidation', async () => {
@@ -163,30 +213,87 @@ describe('SalesService consolidations', () => {
       source('2', { consolidationMemberships: [{ consolidatedSaleId: 'group-1' }] }),
       source('3'),
     ];
-    const { service, tx, created } = buildReconsolidation(
+    const { service, tx, created, linked } = buildReconsolidation(
       [consolidation('group-1', ['1', '2']), source('3')],
       originals,
     );
     await service.createConsolidation({ sourceIds: ['group-1', '3'], targetType: DocumentType.BON_LIVRAISON });
 
-    expect(created.data.consolidationSources.create.map((link: any) => link.sourceSaleId)).toEqual(['1', '2', '3']);
-    expect(created.data.consolidationSources.create).not.toEqual(expect.arrayContaining([expect.objectContaining({ sourceSaleId: 'group-1' })]));
+    expect(created.data.consolidationSources).toBeUndefined();
+    expect(linked.data?.map((link: any) => link.sourceSaleId)).toEqual(['1', '2', '3']);
+    expect(linked.data).not.toEqual(expect.arrayContaining([expect.objectContaining({ sourceSaleId: 'group-1' })]));
     expect(tx.saleConsolidationSource.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { consolidatedSaleId: { in: ['group-1'] }, active: true } }));
+    expect(tx.saleConsolidationSource.updateMany.mock.invocationCallOrder[0])
+      .toBeLessThan(tx.saleConsolidationSource.createMany.mock.invocationCallOrder[0]);
     expect(tx.sale.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ consolidationStatus: 'REPLACED', replacedByConsolidationId: 'parent-2' }),
     }));
   });
 
-  it('aplatit deux consolidations et supprime les doublons de sources', async () => {
+  it('reproduit le cas LBSOLARCOMPANY avec 23 articles, 2032,161 DT et un seul timbre', async () => {
+    const items = (prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...source(`${prefix}-${index}`).items[0],
+        id: `item-${prefix}-${index}`,
+      }));
+    const oldSources = [
+      source('old-1', {
+        invoiceNumber: 'BL-LBSOLARCOMPANY-18072026-001',
+        total: new Prisma.Decimal('1000.000'),
+        items: items('old-1', 12),
+        consolidationMemberships: [{ consolidatedSaleId: 'group-lbsolar' }],
+      }),
+      source('old-2', {
+        invoiceNumber: 'BL-LBSOLARCOMPANY-19072026-001',
+        total: new Prisma.Decimal('500.000'),
+        items: items('old-2', 10),
+        consolidationMemberships: [{ consolidatedSaleId: 'group-lbsolar' }],
+      }),
+    ];
+    const newBl = source('new-3', {
+      invoiceNumber: 'BL-LBSOLARCOMPANY-22072026-001',
+      total: new Prisma.Decimal('531.161'),
+      items: items('new-3', 1),
+    });
+    const oldBlg = {
+      ...consolidation('group-lbsolar', ['old-1', 'old-2']),
+      invoiceNumber: 'BLG-LBSOLARCOMPANY-20072026-001',
+    };
+    const { service, created, linked } = buildReconsolidation(
+      [oldBlg, newBl],
+      [...oldSources, newBl],
+    );
+
+    await service.createConsolidation({
+      sourceIds: ['group-lbsolar', 'new-3'],
+      targetType: DocumentType.BON_LIVRAISON,
+    });
+
+    expect(created.data.items.create).toHaveLength(23);
+    expect(created.data.total.toFixed(3)).toBe('2031.161');
+    expect(created.data.stampDuty.toFixed(3)).toBe('1.000');
+    expect(created.data.total.plus(created.data.stampDuty).toFixed(3)).toBe('2032.161');
+    expect(linked.data?.map((link) => link.sourceSaleId)).toEqual(['old-1', 'old-2', 'new-3']);
+    expect(linked.data?.some((link) => link.sourceSaleId === 'group-lbsolar')).toBe(false);
+  });
+
+  it('aplatit un BLG et une FACG et supprime les doublons de sources', async () => {
     const originals = ['1', '2', '3', '4'].map((id) => source(id, {
       consolidationMemberships: [{ consolidatedSaleId: Number(id) < 3 ? 'group-1' : 'group-2' }],
+      ...(Number(id) >= 3 && { documentType: DocumentType.FACTURE }),
     }));
-    const { service, created } = buildReconsolidation(
-      [consolidation('group-1', ['1', '2']), consolidation('group-2', ['2', '3', '4'])],
+    const { service, linked } = buildReconsolidation(
+      [
+        consolidation('group-1', ['1', '2']),
+        {
+          ...consolidation('group-2', ['2', '3', '4']),
+          documentType: DocumentType.FACTURE,
+        },
+      ],
       originals,
     );
     await service.createConsolidation({ sourceIds: ['group-1', 'group-2'], targetType: DocumentType.BON_LIVRAISON });
-    expect(created.data.consolidationSources.create.map((link: any) => link.sourceSaleId)).toEqual(['1', '2', '3', '4']);
+    expect(linked.data?.map((link: any) => link.sourceSaleId)).toEqual(['1', '2', '3', '4']);
   });
 
   it('laisse l’ancienne consolidation intacte si la création échoue', async () => {
@@ -196,5 +303,28 @@ describe('SalesService consolidations', () => {
     await expect(service.createConsolidation({ sourceIds: ['group-1', '2'], targetType: DocumentType.BON_LIVRAISON })).rejects.toThrow('database failure');
     expect(tx.saleConsolidationSource.updateMany).not.toHaveBeenCalled();
     expect(tx.sale.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('retourne une erreur métier claire si une source est déjà liée', async () => {
+    const { service, tx } = build([source('1'), source('2')]);
+    tx.saleConsolidationSource.createMany.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '7.8.0',
+        meta: { constraint: 'sale_consolidation_sources_one_active_source' },
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await service.createConsolidation({
+        sourceIds: ['1', '2'],
+        targetType: DocumentType.BON_LIVRAISON,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ConflictException);
+    expect((caught as Error).message).toMatch(/source est déjà liée/);
   });
 });

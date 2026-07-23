@@ -2,7 +2,7 @@ import type { Sale, SalesDocumentType } from "./types";
 
 export type SelectableSale = Partial<Pick<
   Sale,
-  "isConsolidated" | "consolidationStatus" | "status"
+  "isConsolidated" | "consolidationStatus" | "status" | "deletedAt"
 >> & {
   id?: unknown;
   customer?: { id?: unknown } | null;
@@ -13,7 +13,17 @@ export type SelectableSale = Partial<Pick<
   saleType?: unknown;
   sourceSaleIds?: unknown;
   consolidationGroupId?: unknown;
+  total?: unknown;
+  totalTtc?: unknown;
+  totalTTC?: unknown;
+  totalFinal?: unknown;
+  stampDuty?: unknown;
 };
+
+export interface SalesConsolidationSelectionValidation {
+  valid: boolean;
+  error: string | null;
+}
 
 export interface SalesSelectionActions {
   consolidatedDocument: SelectableSale | null;
@@ -75,7 +85,8 @@ export function getSalesSelectionActions(
         singleSale.consolidationGroupId),
   );
   const consolidatedDocument = isSingleConsolidated ? singleSale : null;
-  const consolidationError = getConsolidationCompatibilityError(selectedSales);
+  const consolidationError =
+    validateSalesConsolidationSelection(selectedSales).error;
   const hasAmbiguousConsolidatedSelection = false;
   const consolidatedDocumentType = consolidatedDocument
     ? singleSaleType
@@ -104,28 +115,80 @@ export function getSalesSelectionActions(
 export function getConsolidationCompatibilityError(
   selectedSales: SelectableSale[],
 ): string | null {
-  if (selectedSales.length < 2) return null;
-  if (selectedSales.some((sale) => sale.status === "CANCELLED")) {
-    return "Un document annulé ne peut pas être consolidé.";
+  return validateSalesConsolidationSelection(selectedSales).error;
+}
+
+export function validateSalesConsolidationSelection(
+  selectedSales: SelectableSale[],
+): SalesConsolidationSelectionValidation {
+  if (selectedSales.length < 2) return { valid: false, error: null };
+  if (selectedSales.some((sale) => sale.status === "CANCELLED" || sale.deletedAt)) {
+    return {
+      valid: false,
+      error: "Un document annulé ou supprimé ne peut pas être consolidé.",
+    };
+  }
+  if (
+    selectedSales.some(
+      (sale) =>
+        sale.isConsolidated &&
+        sale.consolidationStatus !== "ACTIVE",
+    )
+  ) {
+    return {
+      valid: false,
+      error: "Une consolidation remplacée ou inactive ne peut pas être regroupée.",
+    };
   }
   if (selectedSales.some((sale) => !sale.isConsolidated && sale.activeConsolidation)) {
-    return "Un document appartient déjà à une autre consolidation active.";
+    return {
+      valid: false,
+      error: "Un document appartient déjà à une autre consolidation active.",
+    };
   }
   const customerIds = selectedSales.map((sale) =>
     String(sale.customer?.id ?? sale.customerId ?? ""),
   );
   if (!customerIds[0] || customerIds.some((id) => id !== customerIds[0])) {
-    return "Les documents sélectionnés doivent appartenir au même client.";
+    return {
+      valid: false,
+      error: "Les documents sélectionnés doivent appartenir au même client.",
+    };
   }
   const types = selectedSales.map((sale) =>
     normalizeSalesDocumentType(sale.documentType ?? sale.type ?? sale.saleType),
   );
   if (
-    !types[0] ||
-    !["BON_LIVRAISON", "FACTURE"].includes(types[0]) ||
-    types.some((type) => type !== types[0])
+    types.some(
+      (type) => type !== "BON_LIVRAISON" && type !== "FACTURE",
+    )
   ) {
-    return "Les documents sélectionnés ne sont pas compatibles. Sélectionnez des documents du même client et du même type.";
+    return {
+      valid: false,
+      error: "Seuls les bons de livraison et les factures peuvent être regroupés.",
+    };
   }
-  return null;
+  return { valid: true, error: null };
+}
+
+export function calculateSalesSelectionTotal(
+  selectedSales: SelectableSale[],
+  consolidatedStamp = 1,
+): number {
+  if (!selectedSales.length) return 0;
+  if (selectedSales.length === 1) {
+    const sale = selectedSales[0];
+    const total = Number(
+      sale.totalFinal ??
+        sale.totalTtc ??
+        sale.totalTTC ??
+        Number(sale.total ?? 0) + Number(sale.stampDuty ?? 0),
+    );
+    return Number.isFinite(total) ? Math.round(total * 1000) / 1000 : 0;
+  }
+  const sourcesTotal = selectedSales.reduce((sum, sale) => {
+    const total = Number(sale.total ?? sale.totalTtc ?? sale.totalTTC ?? 0);
+    return sum + (Number.isFinite(total) ? total : 0);
+  }, 0);
+  return Math.round((sourcesTotal + consolidatedStamp) * 1000) / 1000;
 }

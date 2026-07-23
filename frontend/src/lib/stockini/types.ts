@@ -900,7 +900,11 @@ export interface CustomerSaleHistoryItem {
   status: string;
   createdAt: string;
   itemCount: number;
+  total: number | string;
+  stampDuty: number | string;
   totalTtc: number | string;
+  totalFinal: number | string;
+  totalRefunded: number | string;
   paidAmount: number | string;
   remainingAmount: number | string;
   paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';

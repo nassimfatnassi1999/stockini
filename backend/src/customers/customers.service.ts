@@ -47,16 +47,23 @@ export class CustomersService {
           { documentType: 'BON_LIVRAISON', transformedToId: null },
         ],
       },
-      select: { total: true, paidAmount: true },
+      select: {
+        total: true,
+        stampDuty: true,
+        paidAmount: true,
+        totalRefunded: true,
+      },
     });
 
     let debtAmount = new Prisma.Decimal(0);
     let unpaidInvoicesCount = 0;
 
     for (const inv of invoices) {
-      const total = new Prisma.Decimal(inv.total ?? 0);
-      const paid = new Prisma.Decimal(inv.paidAmount ?? 0);
-      const remaining = Prisma.Decimal.max(total.minus(paid), new Prisma.Decimal(0));
+      const remaining = calculatePaymentAmounts(
+        new Prisma.Decimal(inv.total ?? 0).plus(inv.stampDuty ?? 0),
+        inv.paidAmount ?? 0,
+        inv.totalRefunded ?? 0,
+      ).remainingAmount;
       if (remaining.greaterThan(0)) {
         debtAmount = debtAmount.plus(remaining);
         unpaidInvoicesCount++;
@@ -79,15 +86,21 @@ export class CustomersService {
           { documentType: 'BON_LIVRAISON', transformedToId: null },
         ],
       },
-      select: { total: true, paidAmount: true },
+      select: {
+        total: true,
+        stampDuty: true,
+        paidAmount: true,
+        totalRefunded: true,
+      },
     });
 
     let total = new Prisma.Decimal(0);
     for (const inv of invoices) {
-      const remaining = Prisma.Decimal.max(
-        new Prisma.Decimal(inv.total ?? 0).minus(new Prisma.Decimal(inv.paidAmount ?? 0)),
-        new Prisma.Decimal(0),
-      );
+      const remaining = calculatePaymentAmounts(
+        new Prisma.Decimal(inv.total ?? 0).plus(inv.stampDuty ?? 0),
+        inv.paidAmount ?? 0,
+        inv.totalRefunded ?? 0,
+      ).remainingAmount;
       if (remaining.greaterThan(0)) {
         total = total.plus(remaining);
       }
@@ -122,16 +135,23 @@ export class CustomersService {
           { documentType: 'BON_LIVRAISON', transformedToId: null },
         ],
       },
-      select: { customerId: true, total: true, paidAmount: true },
+      select: {
+        customerId: true,
+        total: true,
+        stampDuty: true,
+        paidAmount: true,
+        totalRefunded: true,
+      },
     });
 
     const debtMap = new Map<string, { debtAmount: Prisma.Decimal; unpaidInvoicesCount: number }>();
     for (const inv of invoices) {
       if (!inv.customerId) continue;
-      const remaining = Prisma.Decimal.max(
-        new Prisma.Decimal(inv.total ?? 0).minus(new Prisma.Decimal(inv.paidAmount ?? 0)),
-        new Prisma.Decimal(0),
-      );
+      const remaining = calculatePaymentAmounts(
+        new Prisma.Decimal(inv.total ?? 0).plus(inv.stampDuty ?? 0),
+        inv.paidAmount ?? 0,
+        inv.totalRefunded ?? 0,
+      ).remainingAmount;
       if (remaining.greaterThan(0)) {
         const entry = debtMap.get(inv.customerId) ?? { debtAmount: new Prisma.Decimal(0), unpaidInvoicesCount: 0 };
         entry.debtAmount = entry.debtAmount.plus(remaining);
@@ -255,7 +275,10 @@ export class CustomersService {
         },
       }),
       this.prisma.sale.count({ where }),
-      this.prisma.sale.aggregate({ where: financialWhere, _sum: { total: true, stampDuty: true } }),
+      this.prisma.sale.aggregate({
+        where: financialWhere,
+        _sum: { total: true, stampDuty: true, totalRefunded: true },
+      }),
       this.prisma.payment.aggregate({
         where: {
           deletedAt: null,
@@ -276,11 +299,16 @@ export class CustomersService {
         (sum, payment) => sum.plus(payment.amount),
         new Prisma.Decimal(0),
       );
-      const amounts = calculatePaymentAmounts(totalPayable, paid);
+      const amounts = calculatePaymentAmounts(
+        totalPayable,
+        paid,
+        sale.totalRefunded ?? 0,
+      );
       return {
         ...sale,
         itemCount: items.length,
-        totalTtc: new Prisma.Decimal(sale.total),
+        totalTtc: totalPayable,
+        totalFinal: totalPayable,
         paidAmount: amounts.paidAmount,
         remainingAmount: amounts.remainingAmount,
         paymentStatus: amounts.paymentStatus,
@@ -291,16 +319,23 @@ export class CustomersService {
 
     const totalTtc = new Prisma.Decimal(totals._sum.total ?? 0);
     const totalStampDuty = new Prisma.Decimal(totals._sum.stampDuty ?? 0);
+    const totalCredits = new Prisma.Decimal(totals._sum.totalRefunded ?? 0);
+    const totalPayable = totalTtc.plus(totalStampDuty);
     const totalPaid = new Prisma.Decimal(validPayments._sum.amount ?? 0);
     const totalRemaining = Prisma.Decimal.max(
-      totalTtc.plus(totalStampDuty).minus(totalPaid),
+      totalPayable.minus(totalPaid).minus(totalCredits),
       new Prisma.Decimal(0),
     );
 
     return {
       data,
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-      summary: { totalTtc, totalPaid, totalRemaining, unpaidCount },
+      summary: {
+        totalTtc: totalPayable,
+        totalPaid,
+        totalRemaining,
+        unpaidCount,
+      },
     };
   }
 
