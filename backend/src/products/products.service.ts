@@ -87,20 +87,39 @@ export class ProductsService {
     if (query.stockStatus === 'available') {
       where.quantity = { gt: 0 };
     }
-
-    const products = await this.prisma.product.findMany({
-      where,
-      include: this.includeRelations(),
-      orderBy: { createdAt: 'desc' },
-    });
-
     if (query.stockStatus === 'low') {
-      return products.filter(
-        (p) => p.quantity > 0 && p.quantity <= p.minStock,
-      );
+      where.quantity = {
+        gt: 0,
+        lte: this.prisma.product.fields.minStock,
+      };
     }
 
-    return products;
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+    const [products, totalItems] = await this.prisma.$transaction([
+      this.prisma.product.findMany({
+        where,
+        skip,
+        take: limit,
+        include: this.includeRelations(),
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.product.count({ where }),
+    ]);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      data: products,
+      pagination: {
+        page,
+        limit,
+        totalItems,
+        totalPages,
+        hasPreviousPage: page > 1,
+        hasNextPage: page < totalPages,
+      },
+    };
   }
 
   findOne(id: string) {

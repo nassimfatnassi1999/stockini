@@ -28,6 +28,7 @@ import type {
   ReportOverviewQuery,
   ReportFilterOption,
   PaginatedResponse,
+  PaginatedApiResponse,
   PayablePurchasesResponse,
   PayablePurchasesQueryParams,
   PurchasesQueryParams,
@@ -67,6 +68,8 @@ type ProductUpdatePayload = Omit<Partial<Product>, "quantity"> & {
 };
 
 export interface ProductsQueryParams {
+  page?: number;
+  limit?: number;
   search?: string;
   categoryId?: string;
   brandId?: string;
@@ -137,10 +140,46 @@ export const stockiniApi = {
       .get<{ purchaseValue: number; saleValue: number }>("/reports/stock-value")
       .then((r) => r.data),
   topSelling: () => api.get("/reports/top-selling").then((r) => r.data),
-  products: (params?: ProductsQueryParams) =>
+  productPage: (params?: ProductsQueryParams, signal?: AbortSignal) =>
     api
-      .get<Product[]>("/products", { params: cleanQueryParams(params) })
+      .get<PaginatedApiResponse<Product>>("/products", {
+        params: cleanQueryParams(params),
+        signal,
+      })
       .then((r) => r.data),
+  products: async (params?: ProductsQueryParams, signal?: AbortSignal) => {
+    const requestedPage = params?.page;
+    const compatibilityLimit = params?.limit ?? 100;
+    const first = await api
+      .get<PaginatedApiResponse<Product>>("/products", {
+        params: cleanQueryParams({
+          ...params,
+          page: requestedPage ?? 1,
+          limit: compatibilityLimit,
+        }),
+        signal,
+      })
+      .then((r) => r.data);
+    if (requestedPage !== undefined || !first.pagination.hasNextPage) return first.data;
+
+    const remainingPages = await Promise.all(
+      Array.from(
+        { length: first.pagination.totalPages - 1 },
+        (_, index) =>
+          api
+            .get<PaginatedApiResponse<Product>>("/products", {
+              params: cleanQueryParams({
+                ...params,
+                page: index + 2,
+                limit: compatibilityLimit,
+              }),
+              signal,
+            })
+            .then((r) => r.data.data),
+      ),
+    );
+    return first.data.concat(...remainingPages);
+  },
   product: (id: string) =>
     api.get<Product>(`/products/${id}`).then((r) => r.data),
   createProduct: (

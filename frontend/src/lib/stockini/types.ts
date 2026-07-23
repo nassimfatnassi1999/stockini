@@ -906,6 +906,20 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
+export interface PaginationMetadata {
+  page: number;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+}
+
+export interface PaginatedApiResponse<T> {
+  data: T[];
+  pagination: PaginationMetadata;
+}
+
 export interface SalesQueryParams {
   page?: number;
   limit?: number;

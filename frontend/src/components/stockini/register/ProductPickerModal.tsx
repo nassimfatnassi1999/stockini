@@ -6,7 +6,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Search, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Product } from '@/lib/stockini/types';
+import type { PaginatedApiResponse, Product } from '@/lib/stockini/types';
 
 export type SearchMode = 'REFERENCE' | 'DESIGNATION';
 
@@ -113,10 +113,13 @@ export function ProductPickerModal({
 
   const { data: results = [], isFetching } = useQuery<Product[]>({
     queryKey: ['product-picker-search', trimmed, searchMode],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api
-        .get<Product[]>('/products', { params: { search: trimmed, searchMode } })
-        .then((response) => response.data),
+        .get<PaginatedApiResponse<Product>>('/products', {
+          params: { search: trimmed, searchMode, page: 1, limit: 100 },
+          signal,
+        })
+        .then((response) => response.data.data),
     enabled: open && canSearch,
     staleTime: 30_000,
     placeholderData: [],

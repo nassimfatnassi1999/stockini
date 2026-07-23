@@ -31,11 +31,16 @@ describe('ProductsService.findAll – filtres avancés', () => {
 
   function buildService(products: unknown[] = [makeProduct()]) {
     const findMany = jest.fn().mockResolvedValue(products);
+    const count = jest.fn().mockResolvedValue(products.length);
+    const minStockField = { modelName: 'Product', name: 'minStock' };
     const prisma = {
-      product: { findMany },
+      product: { findMany, count, fields: { minStock: minStockField } },
+      $transaction: jest.fn((operations: Array<Promise<unknown>>) =>
+        Promise.all(operations),
+      ),
     } as never;
     const service = new ProductsService(prisma, {} as never);
-    return { service, findMany };
+    return { service, findMany, count, minStockField };
   }
 
   async function captureWhere(query: Partial<ProductQueryDto>) {
@@ -84,16 +89,13 @@ describe('ProductsService.findAll – filtres avancés', () => {
     expect(where.quantity).toEqual({ gt: 0 });
   });
 
-  it('filtre stock "low" — filtrage post-query côté service', async () => {
-    const products = [
-      { ...makeProduct(), quantity: 3, minStock: 5 },   // stock bas (3 <= 5)
-      { ...makeProduct(), id: 'p2', quantity: 10, minStock: 5 }, // OK
-      { ...makeProduct(), id: 'p3', quantity: 0, minStock: 5 },  // rupture — exclu (0 n'est pas > 0)
-    ];
-    const { service } = buildService(products);
-    const result = await service.findAll({ stockStatus: 'low' } as ProductQueryDto);
-    expect(result).toHaveLength(1);
-    expect((result[0] as { id: string }).id).toBe('p1');
+  it('filtre stock "low" directement en base avant pagination', async () => {
+    const { service, findMany, minStockField } = buildService();
+    await service.findAll({ stockStatus: 'low' } as ProductQueryDto);
+    expect(findMany.mock.calls[0][0].where.quantity).toEqual({
+      gt: 0,
+      lte: minStockField,
+    });
   });
 
   it('filtre prix achat min/max', async () => {
@@ -146,4 +148,60 @@ describe('ProductsService.findAll – filtres avancés', () => {
     expect(withReset.categoryId).toBeUndefined();
     expect(withFilters.categoryId).toBe('cat-1');
   });
+
+  it('retourne la première page de 10 éléments par défaut', async () => {
+    const products = Array.from({ length: 10 }, (_, index) =>
+      makeProduct({ id: `p${index + 1}` }),
+    );
+    const { service, findMany } = buildService(products);
+    const result = await service.findAll({} as ProductQueryDto);
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 10 }),
+    );
+    expect(result.data).toHaveLength(10);
+    expect(result.pagination).toEqual({
+      page: 1,
+      limit: 10,
+      totalItems: 10,
+      totalPages: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    });
+  });
+
+  it('applique skip=20 et take=20 pour la page 2', async () => {
+    const { service, findMany, count } = buildService(
+      Array.from({ length: 20 }, (_, index) =>
+        makeProduct({ id: `p${index + 21}` }),
+      ),
+    );
+    count.mockResolvedValue(100);
+    const result = await service.findAll({ page: 2, limit: 20 } as ProductQueryDto);
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 20, take: 20 }),
+    );
+    expect(result.pagination).toEqual(
+      expect.objectContaining({
+        page: 2,
+        totalItems: 100,
+        totalPages: 5,
+        hasPreviousPage: true,
+        hasNextPage: true,
+      }),
+    );
+  });
+
+  it.each([0, 1, 10, 11, 100])(
+    'calcule les métadonnées pour %i produit(s)',
+    async (totalItems) => {
+      const { service, count } = buildService([]);
+      count.mockResolvedValue(totalItems);
+      const result = await service.findAll({ page: 1, limit: 10 } as ProductQueryDto);
+      expect(result.pagination.totalItems).toBe(totalItems);
+      expect(result.pagination.totalPages).toBe(Math.ceil(totalItems / 10));
+      expect(result.pagination.hasNextPage).toBe(totalItems > 10);
+    },
+  );
 });

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -148,6 +149,18 @@ export class UpdateProductDto {
 }
 
 export class ProductQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([10, 20, 30, 50, 100])
+  limit: number = 10;
+
   @IsOptional()
   @IsString()
   search?: string;

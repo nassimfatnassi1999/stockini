@@ -270,6 +270,8 @@ model Product {
   @@index([idProduct])
   @@index([reference])
   @@index([deletedAt])
+  @@index([isActive])
+  @@index([createdAt])
 }
 
 model Category {

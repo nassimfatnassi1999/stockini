@@ -1,7 +1,8 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
@@ -12,6 +13,7 @@ import { usePermissions } from '@/lib/hooks/usePermissions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataTablePagination } from '@/components/ui/DataTablePagination';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -23,6 +25,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { stockiniApi, type ProductsQueryParams } from '@/lib/stockini/api';
+import {
+  getValidPage,
+  normalizeProductLimit,
+  normalizeProductPage,
+} from '@/lib/data-table-pagination';
 import { dateTime, money } from '@/lib/stockini/format';
 import { calcPurchasePriceTtc, calcSalePrice, roundPrice } from '@/lib/stockini/pricing';
 import { toast } from '@/lib/toast';
@@ -48,7 +55,7 @@ interface ProductFormState {
   location: string;
 }
 
-type ActiveFilters = Omit<ProductsQueryParams, 'search'>;
+type ActiveFilters = Omit<ProductsQueryParams, 'search' | 'page' | 'limit'>;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -112,6 +119,31 @@ function lastSaleTooltip(product: Product): string | undefined {
 
 function countActiveFilters(f: ActiveFilters): number {
   return Object.values(f).filter((v) => v !== undefined && v !== '').length;
+}
+
+function optionalNumber(value: string | null): number | undefined {
+  if (value === null || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function filtersFromUrl(params: URLSearchParams): ActiveFilters {
+  const status = params.get('status');
+  const stockStatus = params.get('stockStatus');
+  return {
+    categoryId: params.get('categoryId') || undefined,
+    brandId: params.get('brandId') || undefined,
+    supplierId: params.get('supplierId') || undefined,
+    status: status === 'active' || status === 'inactive' ? status : undefined,
+    stockStatus:
+      stockStatus === 'low' || stockStatus === 'out' || stockStatus === 'available'
+        ? stockStatus
+        : undefined,
+    purchasePriceMin: optionalNumber(params.get('purchasePriceMin')),
+    purchasePriceMax: optionalNumber(params.get('purchasePriceMax')),
+    salePriceMin: optionalNumber(params.get('salePriceMin')),
+    salePriceMax: optionalNumber(params.get('salePriceMax')),
+  };
 }
 
 // ─── ProductModal ────────────────────────────────────────────────────────────
@@ -592,37 +624,120 @@ function FilterBadges({
 export function ProductsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
-  const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState<ActiveFilters>(EMPTY_FILTERS);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const paramsKey = searchParams.toString();
+  const page = normalizeProductPage(searchParams.get('page'));
+  const limit = normalizeProductLimit(searchParams.get('limit'));
+  const urlSearch = searchParams.get('search') ?? '';
+  const filters = useMemo(
+    () => filtersFromUrl(new URLSearchParams(paramsKey)),
+    [paramsKey],
+  );
+  const [search, setSearch] = useState(urlSearch);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [trashTarget, setTrashTarget] = useState<{ id: string; name: string } | null>(null);
 
-  const queryParams: ProductsQueryParams = { search: search || undefined, ...filters };
+  const updateUrl = useCallback((
+    updates: Record<string, string | number | undefined>,
+    mode: 'push' | 'replace' = 'push',
+  ) => {
+    const next = new URLSearchParams(paramsKey);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === undefined || value === '') next.delete(key);
+      else next.set(key, String(value));
+    });
+    const href = `${pathname}${next.size > 0 ? `?${next.toString()}` : ''}`;
+    router[mode](href, { scroll: false });
+  }, [paramsKey, pathname, router]);
+
+  useEffect(() => {
+    setSearch(urlSearch);
+  }, [urlSearch]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const normalized = search.trim();
+      if (normalized !== urlSearch) {
+        updateUrl({ search: normalized || undefined, page: 1 }, 'replace');
+      }
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [search, updateUrl, urlSearch]);
+
+  useEffect(() => {
+    const rawPage = searchParams.get('page');
+    const rawLimit = searchParams.get('limit');
+    if (
+      (rawPage !== null && String(page) !== rawPage) ||
+      (rawLimit !== null && String(limit) !== rawLimit)
+    ) {
+      updateUrl({ page, limit }, 'replace');
+    }
+  }, [limit, page, searchParams, updateUrl]);
+
+  const queryParams: ProductsQueryParams = {
+    page,
+    limit,
+    search: urlSearch || undefined,
+    ...filters,
+  };
 
   const query = useQuery({
     queryKey: ['stockini-products', queryParams],
-    queryFn: () => stockiniApi.products(queryParams),
+    queryFn: ({ signal }) => stockiniApi.productPage(queryParams, signal),
+    placeholderData: (previous) => previous,
   });
   const categories = useQuery({ queryKey: ['stockini-categories'], queryFn: stockiniApi.categories });
   const brands = useQuery({ queryKey: ['stockini-brands'], queryFn: stockiniApi.brands });
   const suppliers = useQuery({ queryKey: ['stockini-suppliers'], queryFn: stockiniApi.suppliers });
 
-  const data = query.data ?? [];
+  const data = query.data?.data ?? [];
+  const pagination = query.data?.pagination ?? {
+    page,
+    limit,
+    totalItems: 0,
+    totalPages: 0,
+    hasPreviousPage: page > 1,
+    hasNextPage: false,
+  };
   const categoryOptions = (categories.data ?? []).map((item) => ({ value: item.id, label: item.name }));
   const brandOptions = (brands.data ?? []).map((item) => ({ value: item.id, label: item.name }));
   const supplierOptions = (suppliers.data ?? []).map((item) => ({ value: item.id, label: item.name }));
 
-  const activeFilterCount = countActiveFilters(filters) + (search ? 1 : 0);
+  const activeFilterCount = countActiveFilters(filters) + (urlSearch ? 1 : 0);
+
+  useEffect(() => {
+    if (!query.isFetching && query.data && page > Math.max(query.data.pagination.totalPages, 1)) {
+      updateUrl(
+        { page: getValidPage(page, query.data.pagination.totalPages) },
+        'replace',
+      );
+    }
+  }, [page, query.data, query.isFetching, updateUrl]);
 
   const handleResetAll = () => {
     setSearch('');
-    setFilters(EMPTY_FILTERS);
+    updateUrl({
+      ...Object.fromEntries(Object.keys(EMPTY_FILTERS).map((key) => [key, undefined])),
+      search: undefined,
+      page: 1,
+    });
   };
 
   const handleRemoveFilter = (key: keyof ActiveFilters) =>
-    setFilters((prev) => ({ ...prev, [key]: undefined }));
+    updateUrl({ [key]: undefined, page: 1 });
+
+  const handleFiltersChange = (next: ActiveFilters) => {
+    const updates: Record<string, string | number | undefined> = { page: 1 };
+    Object.keys(EMPTY_FILTERS).forEach((key) => {
+      updates[key] = next[key as keyof ActiveFilters];
+    });
+    updateUrl(updates);
+  };
 
   const createMutation = useMutation({
     mutationFn: (form: ProductFormState) =>
@@ -738,8 +853,8 @@ export function ProductsPage() {
           <div className="overflow-hidden">
             <AdvancedFilters
               filters={filters}
-              onChange={setFilters}
-              onReset={() => setFilters(EMPTY_FILTERS)}
+              onChange={handleFiltersChange}
+              onReset={() => handleFiltersChange(EMPTY_FILTERS)}
               categoryOptions={categoryOptions}
               brandOptions={brandOptions}
               supplierOptions={supplierOptions}
@@ -750,19 +865,31 @@ export function ProductsPage() {
 
         {/* ── Badges filtres actifs ── */}
         <FilterBadges
-          search={search}
+          search={urlSearch}
           filters={filters}
           categoryOptions={categoryOptions}
           brandOptions={brandOptions}
           supplierOptions={supplierOptions}
-          onRemoveSearch={() => setSearch('')}
+          onRemoveSearch={() => {
+            setSearch('');
+            updateUrl({ search: undefined, page: 1 });
+          }}
           onRemoveFilter={handleRemoveFilter}
           onReset={handleResetAll}
         />
 
         {/* ── Tableau ── */}
         <CardContent className="p-0">
-          <Table>
+          {query.isError && (
+            <div className="flex items-center justify-between gap-3 border-t border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <span>Impossible de charger les produits.</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => query.refetch()}>
+                Réessayer
+              </Button>
+            </div>
+          )}
+          <div className={query.isFetching && data.length > 0 ? 'opacity-60 transition-opacity' : undefined}>
+          <Table aria-busy={query.isFetching}>
             <TableHeader>
               <TableRow>
                 <TableHead>Référence</TableHead>
@@ -779,13 +906,15 @@ export function ProductsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {query.isLoading || query.error ? (
+              {query.isPending && data.length === 0 ? (
                 <StateRows
-                  loading={query.isLoading}
-                  error={query.error}
+                  loading={true}
+                  error={null}
                   empty={false}
                   colSpan={11}
                 />
+              ) : query.isError && data.length === 0 ? (
+                <StateRows loading={false} error={query.error} empty={false} colSpan={11} />
               ) : data.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-10 text-center text-text-secondary">
@@ -837,6 +966,18 @@ export function ProductsPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
+          {pagination.totalItems > 0 && (
+            <DataTablePagination
+              page={page}
+              limit={limit}
+              totalItems={pagination.totalItems}
+              totalPages={pagination.totalPages}
+              onPageChange={(nextPage) => updateUrl({ page: nextPage })}
+              onLimitChange={(nextLimit) => updateUrl({ limit: nextLimit, page: 1 })}
+              disabled={query.isFetching || deleteMutation.isPending}
+            />
+          )}
         </CardContent>
       </Card>
 
