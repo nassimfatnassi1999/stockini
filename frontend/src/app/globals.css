@@ -83,6 +83,9 @@
 
   html {
     font-family: var(--font-sans, var(--fn));
+    min-width: 320px;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   body {
@@ -90,6 +93,10 @@
     color: theme('colors.text-primary');
     font-family: var(--font-sans, var(--fn));
     -webkit-font-smoothing: antialiased;
+    min-width: 320px;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-wrap: anywhere;
   }
 
   /* Subtle global transitions */
@@ -109,12 +116,19 @@
   select,
   textarea {
     font-size: 0.875rem;
+    max-width: 100%;
+  }
+
+  img,
+  svg,
+  canvas {
+    max-width: 100%;
   }
 }
 
 @layer components {
   .app-page-title {
-    @apply text-xl font-semibold tracking-tight text-text-primary;
+    @apply break-words text-xl font-semibold tracking-tight text-text-primary sm:text-2xl lg:text-3xl;
   }
 
   .app-page-subtitle {
@@ -127,6 +141,38 @@
 
   .app-action-button {
     @apply inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-text-muted outline-none transition-colors hover:bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .responsive-table-viewport {
+    scrollbar-color: var(--color-border) transparent;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .responsive-table-viewport::-webkit-scrollbar,
+  .overflow-x-auto::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .responsive-table-viewport::-webkit-scrollbar-thumb,
+  .overflow-x-auto::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--color-border);
+    background-clip: padding-box;
+  }
+
+  @media (max-width: 639px) {
+    .app-action-button {
+      min-height: 40px;
+      min-width: 40px;
+    }
+
+    table th,
+    table td {
+      padding-left: 0.75rem;
+      padding-right: 0.75rem;
+    }
   }
 
   .app-action-button svg {

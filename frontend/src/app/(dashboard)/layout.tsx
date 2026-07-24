@@ -40,7 +40,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (!authChecked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-surface text-sm text-text-secondary">
+      <div className="flex min-h-dvh items-center justify-center bg-surface px-4 text-center text-sm text-text-secondary">
         Vérification de la session...
       </div>
     );
@@ -49,13 +49,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <SidebarProvider>
       <BreadcrumbProvider>
-        <div className="relative flex h-screen overflow-hidden bg-surface">
+        <div className="relative flex h-dvh min-w-0 overflow-hidden bg-surface">
           <AppSidebar />
 
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <AppTopbar />
 
-            <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 lg:p-6">
+            <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 md:px-6 lg:px-8">
               {children}
             </main>
           </div>

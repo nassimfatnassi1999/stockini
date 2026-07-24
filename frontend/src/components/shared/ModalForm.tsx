@@ -1,6 +1,16 @@
 'use client';
 
-import { useRef, useState, useEffect, type ReactNode, type CSSProperties } from 'react';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useRef,
+  useState,
+  useEffect,
+  type ReactElement,
+  type ReactNode,
+  type CSSProperties,
+} from 'react';
 
 function useContainerCols() {
   const ref = useRef<HTMLDivElement>(null);
@@ -35,6 +45,13 @@ interface ModalFormGridProps {
  */
 export function ModalFormGrid({ children, className = '', style }: ModalFormGridProps) {
   const { ref, cols } = useContainerCols();
+  const responsiveChildren = Children.map(children, (child) => {
+    if (cols !== 1 || !isValidElement(child)) return child;
+    const element = child as ReactElement<{ style?: CSSProperties }>;
+    return cloneElement(element, {
+      style: { ...element.props.style, gridColumn: '1 / -1', minWidth: 0 },
+    });
+  });
 
   return (
     <div
@@ -48,7 +65,7 @@ export function ModalFormGrid({ children, className = '', style }: ModalFormGrid
         ...style,
       }}
     >
-      {children}
+      {responsiveChildren}
     </div>
   );
 }

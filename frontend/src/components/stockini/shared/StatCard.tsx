@@ -19,9 +19,9 @@ export function StatCard({ icon: Icon, label, value, tone = 'primary' }: {
         <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${toneClass}`}>
           <Icon size={18} />
         </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted">{label}</p>
-          <p className="mt-1 truncate font-mono text-xl font-bold text-text-primary">{value}</p>
+        <div className="min-w-0 flex-1">
+          <p className="break-words text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted">{label}</p>
+          <p className="mt-1 break-words font-mono text-lg font-bold leading-tight text-text-primary sm:text-xl">{value}</p>
         </div>
       </CardContent>
     </Card>

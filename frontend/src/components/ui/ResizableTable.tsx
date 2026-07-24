@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
+import { ResponsiveTableContainer } from './ResponsiveTableContainer';
 
 interface ResizableTableProps {
   children: React.ReactNode;
@@ -194,9 +195,12 @@ export function ResizableTable({ children, className, style, tableId }: Resizabl
   });
 
   return (
-    <div className={`resizable-table-container ${className || ''}`}>
+    <ResponsiveTableContainer
+      className={`resizable-table-container ${className || ''}`}
+      aria-label="Tableau à colonnes redimensionnables"
+    >
       {enhancedChildren}
-    </div>
+    </ResponsiveTableContainer>
   );
 }
 

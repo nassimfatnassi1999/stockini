@@ -78,8 +78,8 @@ interface LockDialogProps {
 function LockDialog({ customer, onConfirm, onCancel, isPending }: LockDialogProps) {
   const [reason, setReason] = useState('');
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-3" role="dialog" aria-modal="true">
+      <div className="max-h-[calc(100dvh-24px)] w-full max-w-md overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:p-6">
         <h2 className="mb-2 text-base font-semibold">Verrouiller le client</h2>
         <p className="mb-4 text-sm text-text-secondary">
           Voulez-vous verrouiller <strong>{customer.name}</strong> ? Il ne pourra plus créer de factures ou BL.
@@ -94,7 +94,7 @@ function LockDialog({ customer, onConfirm, onCancel, isPending }: LockDialogProp
             autoFocus
           />
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" size="sm" onClick={onCancel} disabled={isPending}>Annuler</Button>
           <Button size="sm" variant="destructive" onClick={() => onConfirm(reason)} disabled={isPending}>
             {isPending ? 'Verrouillage…' : 'Verrouiller'}
@@ -114,8 +114,8 @@ interface UnlockDialogProps {
 }
 function UnlockDialog({ customer, onConfirm, onCancel, isPending }: UnlockDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-3" role="dialog" aria-modal="true">
+      <div className="max-h-[calc(100dvh-24px)] w-full max-w-md overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:p-6">
         <h2 className="mb-2 text-base font-semibold">Déverrouiller le client</h2>
         <p className="mb-4 text-sm text-text-secondary">
           Voulez-vous déverrouiller <strong>{customer.name}</strong> et lui permettre de créer des factures et BL à nouveau ?
@@ -125,7 +125,7 @@ function UnlockDialog({ customer, onConfirm, onCancel, isPending }: UnlockDialog
             Raison du verrouillage : {customer.lockedReason}
           </p>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" size="sm" onClick={onCancel} disabled={isPending}>Annuler</Button>
           <Button size="sm" onClick={onConfirm} disabled={isPending}>
             {isPending ? 'Déverrouillage…' : 'Déverrouiller'}

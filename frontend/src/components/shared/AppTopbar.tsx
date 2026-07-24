@@ -108,7 +108,7 @@ export function AppTopbar() {
 
   return (
     <header
-      className="sticky top-0 z-30 flex h-[52px] flex-shrink-0 items-center gap-2 border-b border-border bg-white px-3 shadow-topbar sm:px-4 lg:px-6"
+      className="sticky top-0 z-30 flex h-[52px] min-w-0 flex-shrink-0 items-center gap-2 border-b border-border bg-white px-3 shadow-topbar sm:px-4 lg:px-6"
     >
       <button
         type="button"
@@ -154,7 +154,7 @@ export function AppTopbar() {
         ))}
       </nav>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1 sm:gap-2">
         <NotificationsDropdown />
         <UserDropdown initials={initials} identity={identity} />
       </div>

@@ -75,7 +75,7 @@ export function Toaster() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed right-5 top-5 z-[9999] flex w-full max-w-[400px] flex-col gap-2">
+    <div className="pointer-events-none fixed inset-x-3 top-3 z-[9999] flex max-w-[400px] flex-col gap-2 sm:left-auto sm:right-5 sm:top-5 sm:w-full">
       {toasts.map((t) => (
         <ToastCard key={t.id} t={t} />
       ))}

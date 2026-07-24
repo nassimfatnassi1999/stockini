@@ -22,7 +22,7 @@ export function ColorThemeSelector({ onClose }: ColorThemeSelectorProps) {
     <div
       role="dialog"
       aria-label="Sélecteur de thème de couleur"
-      className="w-[300px] rounded-lg border border-border bg-white p-3 shadow-card-hover"
+      className="w-[min(300px,calc(100vw-24px))] rounded-lg border border-border bg-white p-3 shadow-card-hover"
     >
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">

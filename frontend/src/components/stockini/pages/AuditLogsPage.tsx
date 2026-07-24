@@ -105,7 +105,7 @@ function AuditDetailPanel({ log, onClose }: { log: AuditLog; onClose: () => void
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg bg-surface border-l border-border shadow-xl flex flex-col">
+      <div className="relative z-10 flex h-dvh w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-3">
             <Badge variant={actionVariant(log.action)}>{actionLabel(log.action)}</Badge>
@@ -114,7 +114,7 @@ function AuditDetailPanel({ log, onClose }: { log: AuditLog; onClose: () => void
           <button onClick={onClose} className="text-text-muted hover:text-text-primary text-lg leading-none">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 gap-4 text-sm min-[380px]:grid-cols-2">
             <div>
               <p className="text-xs text-text-secondary uppercase tracking-wide mb-1">Date</p>
               <p className="font-medium">{dateTime(log.createdAt)}</p>

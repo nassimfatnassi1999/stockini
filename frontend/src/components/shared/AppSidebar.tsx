@@ -291,13 +291,14 @@ export function AppSidebar() {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex h-screen max-w-[85vw] flex-col overflow-hidden',
+          'fixed inset-y-0 left-0 z-40 flex h-dvh max-w-[85vw] flex-col overflow-hidden',
           'border-r border-white/[0.07] bg-sidebar-bg shadow-card transition-all duration-200 ease-out',
           'lg:static lg:z-20 lg:max-w-none lg:shadow-none',
           isCollapsedDesktop ? 'lg:w-[62px]' : 'lg:w-[232px]',
           isMobile ? (mobileOpen ? 'translate-x-0' : '-translate-x-full') : 'translate-x-0',
-          'w-[268px]',
+          'w-[min(268px,85vw)] lg:w-auto',
         )}
+        aria-label="Navigation principale"
       >
         {/* Header */}
         <div className="flex h-[60px] flex-shrink-0 items-center border-b border-white/[0.07] px-3">

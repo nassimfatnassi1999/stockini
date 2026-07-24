@@ -50,8 +50,8 @@ export function CashManualOpModal({ type, onClose, defaultAccount = 'PHYSICAL_CA
   const valid = !!montant && parseFloat(montant) > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-3 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="relative max-h-[calc(100dvh-24px)] w-full max-w-sm overflow-y-auto rounded-2xl border border-border bg-card p-4 shadow-2xl sm:p-6">
         {/* Header */}
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">

@@ -37,7 +37,7 @@ export function ClearHistoryModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-3" role="dialog" aria-modal="true">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50"
@@ -46,7 +46,7 @@ export function ClearHistoryModal({
       />
 
       {/* Modal */}
-      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-white p-6 shadow-xl">
+      <div className="relative z-10 max-h-[calc(100dvh-24px)] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-white p-4 shadow-xl sm:p-6">
         {/* Icon + Title */}
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100">

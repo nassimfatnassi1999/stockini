@@ -1,12 +1,13 @@
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
+import { ResponsiveTableContainer } from './ResponsiveTableContainer';
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="w-full overflow-auto">
-      <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
-    </div>
+    <ResponsiveTableContainer>
+      <table ref={ref} className={cn('w-full min-w-max caption-bottom text-sm', className)} {...props} />
+    </ResponsiveTableContainer>
   ),
 );
 Table.displayName = 'Table';

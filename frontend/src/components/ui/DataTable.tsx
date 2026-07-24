@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { HistoryToolbar } from '@/components/stockini/shared/HistoryToolbar';
 import { DataTablePagination } from './DataTablePagination';
+import { ResponsiveTableContainer } from './ResponsiveTableContainer';
 import type { ToolbarFilter } from '@/components/stockini/shared/HistoryToolbar';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -153,7 +154,7 @@ export function DataTable<T = Record<string, unknown>>({
     Object.values(filterValues).some((v) => v !== '');
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+    <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
       {/* ── Toolbar ── */}
       {(onSearchChange || (filters && filters.length > 0)) && (
         <HistoryToolbar
@@ -178,9 +179,9 @@ export function DataTable<T = Record<string, unknown>>({
       )}
 
       {/* ── Tableau ── */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-surface">
+      <ResponsiveTableContainer>
+        <table className="w-full min-w-[720px] text-sm">
+          <thead className="sticky top-0 z-10 bg-surface">
             <tr className="border-b border-border/60">
               {columns.map((col) => (
                 <th
@@ -246,7 +247,7 @@ export function DataTable<T = Record<string, unknown>>({
             )}
           </tbody>
         </table>
-      </div>
+      </ResponsiveTableContainer>
 
       {/* ── Pagination ── */}
       <DataTablePagination

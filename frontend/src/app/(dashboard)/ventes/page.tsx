@@ -416,12 +416,12 @@ function TransformConfirmModal({
     targetType === "BON_LIVRAISON" || targetType === "FACTURE";
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-3" role="dialog" aria-modal="true">
       <div
         className="absolute inset-0 bg-black/30 backdrop-blur-sm"
         onClick={!isPending ? onCancel : undefined}
       />
-      <div className="relative bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-sm mx-4 p-6">
+      <div className="relative max-h-[calc(100dvh-24px)] w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-orange-100">
             <ArrowRightLeft size={18} className="text-orange-600" />
