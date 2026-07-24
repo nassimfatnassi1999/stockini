@@ -474,11 +474,10 @@ function BackupsTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold text-text-primary">
-            Sauvegardes de la base
+            Sauvegardes complètes
           </h2>
           <p className="text-xs text-text-secondary">
-            Créez et gérez les sauvegardes PostgreSQL de votre ERP. Les PDF et
-            fichiers générés ne sont pas inclus.
+            Sauvegardez PostgreSQL et tous les documents stockés dans MinIO.
           </p>
         </div>
         <div className="flex gap-2">
@@ -505,7 +504,7 @@ function BackupsTab() {
               ) : (
                 <Plus size={13} className="mr-1.5" />
               )}
-              {creating ? "Création..." : "Sauvegarder la base"}
+              {creating ? "Création..." : "Créer un backup complet"}
             </Button>
           </Can>
         </div>
@@ -523,9 +522,8 @@ function BackupsTab() {
                 Restaurer depuis un fichier
               </p>
               <p className="text-xs text-text-secondary">
-                Restaure toutes les données métier depuis PostgreSQL. Les
-                fichiers et PDF ne sont pas restaurés et pourront être régénérés
-                manuellement.
+                Restaure les données PostgreSQL et les documents MinIO inclus
+                dans l&apos;archive.
               </p>
             </div>
             <input
@@ -568,10 +566,10 @@ function BackupsTab() {
             </p>
           </div>
           <div>
-            <p className="mb-1 font-semibold text-text-primary">Non inclus</p>
+            <p className="mb-1 font-semibold text-text-primary">Inclus</p>
             <p className="text-text-secondary">
-              PDF, images, documents MinIO, fichiers exportés et fichiers
-              temporaires.
+              Tous les objets du bucket MinIO, notamment les PDF et documents
+              générés, avec leurs chemins relatifs.
             </p>
           </div>
         </CardContent>
@@ -699,7 +697,7 @@ function BackupsTab() {
       <ConfirmDialog
         open={confirm?.type === "restore-file"}
         title="Restaurer depuis un fichier ?"
-        message="Cette opération remplacera les données actuelles par celles de la sauvegarde. Une sauvegarde de sécurité sera créée automatiquement avant la restauration. Cette action est irréversible."
+        message="Cette opération remplacera PostgreSQL et le contenu MinIO par ceux de la sauvegarde. Des sauvegardes de sécurité sont créées avant toute modification."
         confirmText="Restaurer"
         confirmKeyword="RESTAURER"
         dangerous
@@ -716,7 +714,7 @@ function BackupsTab() {
       <ConfirmDialog
         open={confirm?.type === "restore-server"}
         title="Restaurer cette sauvegarde ?"
-        message="Cette action remplacera uniquement la base PostgreSQL. Les fichiers MinIO actuels ne seront ni supprimés ni remplacés."
+        message="Cette action remplacera PostgreSQL et les fichiers MinIO par le contenu validé de la sauvegarde. Un rollback automatique est tenté en cas d’échec."
         confirmText="Restaurer"
         confirmKeyword="RESTAURER"
         dangerous

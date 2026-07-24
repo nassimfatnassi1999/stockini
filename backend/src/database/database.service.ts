@@ -21,26 +21,39 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { BackupStorageService } from './backup-storage.service';
 
 export const MAX_BACKUPS = 3;
-export const DATABASE_BACKUP_VERSION = 3;
-export const DATABASE_BACKUP_TYPE = 'DATABASE_ONLY' as const;
+export const DATABASE_BACKUP_VERSION = 4;
+export const DATABASE_BACKUP_TYPE = 'FULL_SYSTEM' as const;
 
 interface DatabaseBackupManifest {
-  backupVersion: 3;
+  backupVersion: 4;
   type: typeof DATABASE_BACKUP_TYPE;
   createdAt: string;
   applicationVersion: string;
   postgresServerVersion: string;
   pgDumpVersion: string;
+  databaseName: string;
   databaseFormat: 'custom';
-  databaseFile: 'database.dump';
+  databaseFile: 'database/postgres.dump';
   containsDatabase: true;
-  containsMinio: false;
-  containsGeneratedDocuments: false;
-  documentsMustBeRegenerated: true;
+  containsMinio: true;
+  containsGeneratedDocuments: true;
+  documentsMustBeRegenerated: false;
+  minioBucket: string;
+  minioPrefix: string;
+  minioFileCount: number;
+  databaseSizeBytes: number;
+  minioSizeBytes: number;
+  totalSizeBytes: number;
   prismaMigrationCount: number;
   schemaFingerprint: string;
   checksumAlgorithm: 'sha256';
-  checksums: { 'database.dump': string };
+  checksums: Record<string, string>;
+}
+
+interface MinioExportResult {
+  fileCount: number;
+  totalSizeBytes: number;
+  checksums: Record<string, string>;
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -50,7 +63,7 @@ export interface BackupInfo {
   size: number;
   createdAt: string;
   createdBy: string;
-  type: typeof DATABASE_BACKUP_TYPE | 'LEGACY';
+  type: typeof DATABASE_BACKUP_TYPE | 'DATABASE_ONLY' | 'LEGACY';
   path: string;
   status: 'valid' | 'invalid' | 'missing-sql';
 }
@@ -110,8 +123,9 @@ export class DatabaseService {
     path: string;
     backupType: typeof DATABASE_BACKUP_TYPE;
     containsDatabase: true;
-    containsMinio: false;
-    documentsMustBeRegenerated: true;
+    containsMinio: true;
+    documentsMustBeRegenerated: false;
+    minioFileCount: number;
   }> {
     if (this.restoreInProgress)
       throw new ConflictException('Une restauration est en cours');
@@ -124,29 +138,50 @@ export class DatabaseService {
     const stamp = this.dateStamp(now);
     const tmpDir = path.join(os.tmpdir(), `backup-${stamp}-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
+    let temporaryZipPath: string | null = null;
 
     try {
-      this.logger.log(`[BACKUP] Starting DATABASE_ONLY backup: ${stamp}`);
+      this.logger.log('[BACKUP] Préparation...');
       await this.assertDatabaseReachable();
+      await this.assertPostgresToolCompatibility();
       await this.assertBackupDiskSpace();
 
-      const dumpPath = path.join(tmpDir, 'database.dump');
+      const payloadDir = path.join(tmpDir, 'payload');
+      const databaseDir = path.join(payloadDir, 'database');
+      const minioDir = path.join(payloadDir, 'minio', this.minio.bucket);
+      fs.mkdirSync(databaseDir, { recursive: true });
+      fs.mkdirSync(minioDir, { recursive: true });
+
+      this.logger.log('[BACKUP] Dump PostgreSQL...');
+      const dumpPath = path.join(databaseDir, 'postgres.dump');
       this.dumpPostgres(dumpPath);
-      const manifest = await this.createBackupManifest(dumpPath, now);
-      const manifestPath = path.join(tmpDir, 'backup-manifest.json');
+
+      this.logger.log('[BACKUP] Export MinIO...');
+      const minioExport = await this.exportMinio(minioDir);
+
+      this.logger.log('[BACKUP] Création du manifest...');
+      const manifest = await this.createBackupManifest(
+        dumpPath,
+        now,
+        minioExport,
+      );
+      const manifestPath = path.join(payloadDir, 'manifest.json');
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), {
         mode: 0o600,
       });
 
       const zipName = `backup-${stamp}.zip`;
       const zipPath = await this.backupStorage.destination(zipName);
-      const temporaryZipPath = path.join(tmpDir, zipName);
-      this.createDatabaseZip(dumpPath, manifestPath, temporaryZipPath);
+      temporaryZipPath = path.join(
+        path.dirname(zipPath),
+        `.${zipName}.${process.pid}.${Date.now()}.partial`,
+      );
+      this.logger.log('[BACKUP] Compression ZIP...');
+      this.createDatabaseZip(payloadDir, temporaryZipPath);
+      this.logger.log('[BACKUP] Vérification...');
       this.validateDatabaseZip(temporaryZipPath);
       fs.renameSync(temporaryZipPath, zipPath);
-      this.logger.log(
-        `[BACKUP] DATABASE_ONLY ZIP validated and moved atomically`,
-      );
+      temporaryZipPath = null;
 
       const size = fs.statSync(zipPath).size;
       if (size === 0) {
@@ -155,7 +190,7 @@ export class DatabaseService {
           'ZIP créé vide — échec de la compression',
         );
       }
-      this.logger.log(`[BACKUP] ZIP size: ${size} bytes`);
+      this.logger.log(`[BACKUP] Terminé. ${zipName} (${size} octets)`);
 
       await this.audit.create({
         userId: user?.id,
@@ -166,7 +201,8 @@ export class DatabaseService {
           size,
           createdBy: user?.email ?? 'system',
           backupType: DATABASE_BACKUP_TYPE,
-          containsMinio: false,
+          containsMinio: true,
+          minioFileCount: minioExport.fileCount,
         },
       });
 
@@ -181,10 +217,14 @@ export class DatabaseService {
         path: zipPath,
         backupType: DATABASE_BACKUP_TYPE,
         containsDatabase: true,
-        containsMinio: false,
-        documentsMustBeRegenerated: true,
+        containsMinio: true,
+        documentsMustBeRegenerated: false,
+        minioFileCount: minioExport.fileCount,
       };
     } finally {
+      if (temporaryZipPath) {
+        fs.rmSync(temporaryZipPath, { force: true });
+      }
       fs.rmSync(tmpDir, { recursive: true, force: true });
       this.backupInProgress = false;
     }
@@ -231,10 +271,10 @@ export class DatabaseService {
     options: RestoreOptions = {},
   ): Promise<{
     restored: string[];
-    backupType: typeof DATABASE_BACKUP_TYPE;
+    backupType: typeof DATABASE_BACKUP_TYPE | 'DATABASE_ONLY' | 'LEGACY';
     containsDatabase: true;
-    containsMinio: false;
-    documentsMustBeRegenerated: true;
+    containsMinio: boolean;
+    documentsMustBeRegenerated: boolean;
     ignoredLegacyFiles: boolean;
   }> {
     if (this.backupInProgress) {
@@ -252,15 +292,17 @@ export class DatabaseService {
       `[RESTORE] Upload received: ${options.uploadedFilename ?? 'server backup'}`,
     );
     this.logger.log(`[RESTORE] File size: ${zipBuffer.length} bytes`);
-    this.logger.log(`[RESTORE] Mode: DATABASE_ONLY`);
     this.logger.log(`[RESTORE] Temporary workspace: ${tmpDir}`);
 
+    let safetyDumpPath: string | null = null;
     try {
-      // 1. Write ZIP to temp dir
+      if (zipBuffer.length === 0) {
+        throw new BadRequestException('Le fichier ZIP est vide');
+      }
+
       const zipPath = path.join(tmpDir, 'restore.zip');
       fs.writeFileSync(zipPath, zipBuffer);
 
-      // 2. Validate ZIP integrity with AdmZip (no external binary dependency)
       this.logger.log(`[RESTORE] Validating ZIP...`);
       let zip: AdmZip;
       try {
@@ -272,59 +314,68 @@ export class DatabaseService {
         );
       }
 
-      if (zipBuffer.length === 0) {
-        throw new BadRequestException('Le fichier ZIP est vide');
-      }
-
       this.assertSafeBackupEntries(zip);
-      this.logger.log(
-        `[RESTORE] ZIP entries (${zip.getEntries().length}): ${zip
-          .getEntries()
-          .map((entry) => entry.entryName)
-          .join(', ')}`,
-      );
-
-      // Read only the PostgreSQL payload. Legacy object folders are deliberately
-      // never extracted, read, deleted or copied.
       const extractDir = path.join(tmpDir, 'extracted');
-      fs.mkdirSync(extractDir, { recursive: true });
+      this.extractSafeBackup(zip, extractDir);
+
       const dumpEntry = this.findDatabaseDumpEntry(zip);
       if (!dumpEntry) {
         throw new BadRequestException(
-          'Dump PostgreSQL absent (attendu : database.dump, dump.sql ou database/dump.*)',
+          'Dump PostgreSQL absent (attendu : database/postgres.dump ou format historique)',
         );
       }
       const dumpPath = path.join(
         extractDir,
-        dumpEntry.entryName.toLowerCase().endsWith('.sql')
-          ? 'dump.sql'
-          : 'database.dump',
+        dumpEntry.entryName.replace(/\//g, path.sep),
       );
-      fs.writeFileSync(dumpPath, dumpEntry.getData(), { mode: 0o600 });
 
-      const manifestEntry = zip.getEntry('backup-manifest.json');
+      const manifestEntry =
+        zip.getEntry('manifest.json') ?? zip.getEntry('metadata.json');
+      const databaseOnlyManifestEntry = zip.getEntry('backup-manifest.json');
+      let manifest: DatabaseBackupManifest | null = null;
+      let backupType: typeof DATABASE_BACKUP_TYPE | 'DATABASE_ONLY' | 'LEGACY' =
+        'LEGACY';
+      let containsMinio = false;
+      let minioSourceDir: string | null = null;
+
       if (manifestEntry) {
-        this.validateBackupManifest(
-          manifestEntry.getData().toString('utf8'),
+        const raw = manifestEntry.getData().toString('utf8');
+        const parsed = this.parseManifest(raw);
+        if (parsed.backupVersion === DATABASE_BACKUP_VERSION) {
+          manifest = this.validateBackupManifest(raw, extractDir);
+          await this.assertRestoreCompatibility(manifest);
+          backupType = DATABASE_BACKUP_TYPE;
+          containsMinio = true;
+          minioSourceDir = path.join(extractDir, 'minio', manifest.minioBucket);
+        } else {
+          this.validateLegacyManifest(parsed);
+          containsMinio = true;
+          minioSourceDir = path.join(extractDir, 'minio', this.minio.bucket);
+        }
+      } else if (databaseOnlyManifestEntry) {
+        this.validateDatabaseOnlyManifest(
+          databaseOnlyManifestEntry.getData().toString('utf8'),
           dumpPath,
         );
+        backupType = 'DATABASE_ONLY';
+        this.logger.warn(
+          '[RESTORE] Ancienne sauvegarde DATABASE_ONLY : aucun objet MinIO à restaurer.',
+        );
       } else {
-        this.logger.warn(
-          '[RESTORE] Legacy backup detected. Database content will be restored. Embedded MinIO files will be ignored according to DATABASE_ONLY restore policy.',
+        throw new BadRequestException(
+          'Manifest absent (manifest.json ou backup-manifest.json attendu)',
         );
       }
-      const ignoredLegacyFiles = zip
-        .getEntries()
-        .some((entry) =>
-          /^(minio|documents|uploads|pdf|exports|files)\//i.test(
-            entry.entryName,
-          ),
-        );
-      if (ignoredLegacyFiles) {
-        this.logger.warn(
-          '[RESTORE] Legacy file payload detected and ignored; the active MinIO storage will not be modified.',
+
+      if (
+        containsMinio &&
+        (!minioSourceDir || !fs.existsSync(minioSourceDir))
+      ) {
+        throw new BadRequestException(
+          `Dossier MinIO absent : minio/${this.minio.bucket}/`,
         );
       }
+
       const dumpStat = fs.statSync(dumpPath);
       if (dumpStat.size === 0)
         throw new BadRequestException(
@@ -343,13 +394,20 @@ export class DatabaseService {
       this.logger.log(
         `[RESTORE] Dump detected: ${path.basename(dumpPath)} (${dumpStat.size} bytes)`,
       );
-      this.logger.log(`[RESTORE] ZIP validated`);
+      this.logger.log(
+        `[RESTORE] ZIP validated (${backupType}, MinIO=${containsMinio ? 'oui' : 'non'})`,
+      );
 
       const restored: string[] = [];
+      const minioSafetyDir = path.join(tmpDir, 'minio-safety');
+      if (containsMinio) {
+        await this.minio.ensureBucketOrThrow(this.minio.bucket);
+        this.logger.log('[RESTORE] Creating MinIO safety snapshot');
+        await this.exportMinio(minioSafetyDir);
+      }
 
-      // 6. Restore SQL
       this.logger.log(`[RESTORE][STEP=postgres] Restore started`);
-      const safetyDumpPath = path.join(
+      safetyDumpPath = path.join(
         this.backupStorage.directory,
         `pre-restore-${stamp}.dump`,
       );
@@ -404,11 +462,42 @@ export class DatabaseService {
       }
       restored.push('prisma-schema');
 
+      if (containsMinio && minioSourceDir) {
+        this.logger.log(
+          `[RESTORE][STEP=minio] Replacing bucket ${this.minio.bucket}`,
+        );
+        try {
+          const restoredObjects = await this.importMinio(minioSourceDir, true);
+          if (manifest) {
+            await this.verifyMinioManifest(manifest);
+          } else {
+            const actualObjects = await this.minio.listAllObjects(
+              this.minio.bucket,
+            );
+            if (actualObjects.length !== restoredObjects) {
+              throw new InternalServerErrorException(
+                `Vérification MinIO échouée : ${restoredObjects} objets attendus, ${actualObjects.length} trouvés`,
+              );
+            }
+          }
+          restored.push(`minio/${this.minio.bucket}/`);
+          this.logger.log(
+            `[RESTORE][STEP=minio] ${restoredObjects} objet(s) restauré(s)`,
+          );
+        } catch (minioError) {
+          this.logger.error(
+            `[RESTORE] Échec MinIO; rollback PostgreSQL et MinIO: ${(minioError as Error).message}`,
+          );
+          await this.rollbackRestore(safetyDumpPath, minioSafetyDir);
+          throw minioError;
+        }
+      }
+
       await this.validateRestoredDatabase();
       fs.rmSync(safetyDumpPath, { force: true });
-      this.logger.log(`[RESTORE] Final PostgreSQL health check passed`);
+      safetyDumpPath = null;
+      this.logger.log(`[RESTORE] Final PostgreSQL + MinIO health check passed`);
 
-      // 8. Audit log
       await this.audit.create({
         userId: user?.id,
         action: 'database.backup.restored',
@@ -421,11 +510,11 @@ export class DatabaseService {
       );
       return {
         restored,
-        backupType: DATABASE_BACKUP_TYPE,
+        backupType,
         containsDatabase: true,
-        containsMinio: false,
-        documentsMustBeRegenerated: true,
-        ignoredLegacyFiles,
+        containsMinio,
+        documentsMustBeRegenerated: !containsMinio,
+        ignoredLegacyFiles: false,
       };
     } catch (err) {
       this.logger.error(
@@ -434,7 +523,6 @@ export class DatabaseService {
       );
       throw err;
     } finally {
-      // 9. Cleanup temp dir
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       } catch {
@@ -1062,6 +1150,16 @@ export class DatabaseService {
       const zip = new AdmZip(zipPath);
       const entryNames = zip.getEntries().map((e) => e.entryName);
 
+      if (entryNames.includes('manifest.json')) {
+        const manifest = this.parseManifest(
+          zip.getEntry('manifest.json')!.getData().toString('utf8'),
+        );
+        if (manifest.backupVersion === DATABASE_BACKUP_VERSION) {
+          this.validateDatabaseZip(zipPath);
+          return 'valid';
+        }
+      }
+
       if (
         !entryNames.includes('backup-manifest.json') &&
         !entryNames.includes('manifest.json') &&
@@ -1324,10 +1422,13 @@ export class DatabaseService {
     for (const entry of zip.getEntries()) {
       const normalized = entry.entryName.replace(/\\/g, '/');
       const isUnsafePath =
+        normalized.includes('\0') ||
         normalized.startsWith('/') ||
+        normalized.startsWith('\\') ||
         normalized.split('/').includes('..') ||
         path.isAbsolute(normalized);
       const isDatabasePayload = [
+        'database/postgres.dump',
         'database.dump',
         'database.sql',
         'dump.sql',
@@ -1341,31 +1442,56 @@ export class DatabaseService {
         'metadata.json',
         'version.json',
       ].includes(normalized);
-      const isLegacyIgnoredPayload =
+      const isObjectPayload =
         /^(minio|documents|uploads|pdf|exports|files)(\/|$)/i.test(normalized);
       const isAllowed =
         isDatabasePayload ||
         isMetadata ||
         normalized === 'database' ||
         normalized === 'database/' ||
-        isLegacyIgnoredPayload;
+        isObjectPayload;
 
       if (isUnsafePath || !isAllowed) {
         this.logger.warn(
           `[RESTORE] Rejected unsafe/out-of-scope ZIP entry: ${normalized}`,
         );
         throw new BadRequestException(
-          `Archive hors périmètre : ${normalized}. Seuls le dump PostgreSQL, les métadonnées et les anciens dossiers de fichiers ignorés sont autorisés.`,
+          `Archive hors périmètre : ${normalized}. Seuls le dump PostgreSQL, le manifest et les objets MinIO sont autorisés.`,
         );
       }
     }
-    this.logger.log(
-      `[RESTORE] Archive scope validated: PostgreSQL only; legacy file payloads will be ignored`,
-    );
+    this.logger.log(`[RESTORE] Archive scope validated: PostgreSQL + MinIO`);
+  }
+
+  private extractSafeBackup(zip: AdmZip, extractDir: string): void {
+    fs.mkdirSync(extractDir, { recursive: true, mode: 0o700 });
+    for (const entry of zip.getEntries()) {
+      const relative = entry.entryName.replace(/\\/g, '/').replace(/\/$/, '');
+      if (!relative) continue;
+      const destination = path.resolve(
+        extractDir,
+        relative.replace(/\//g, path.sep),
+      );
+      if (!destination.startsWith(`${path.resolve(extractDir)}${path.sep}`)) {
+        throw new BadRequestException(
+          `Chemin ZIP dangereux refusé : ${entry.entryName}`,
+        );
+      }
+      if (entry.isDirectory) {
+        fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+      } else {
+        fs.mkdirSync(path.dirname(destination), {
+          recursive: true,
+          mode: 0o700,
+        });
+        fs.writeFileSync(destination, entry.getData(), { mode: 0o600 });
+      }
+    }
   }
 
   private findDatabaseDumpEntry(zip: AdmZip) {
     for (const name of [
+      'database/postgres.dump',
       'database.dump',
       'database.sql',
       'dump.sql',
@@ -1379,42 +1505,141 @@ export class DatabaseService {
     return null;
   }
 
-  private validateBackupManifest(rawManifest: string, dumpPath: string): void {
-    let manifest: DatabaseBackupManifest;
+  private parseManifest(rawManifest: string): Record<string, unknown> {
     try {
-      manifest = JSON.parse(rawManifest) as DatabaseBackupManifest;
+      const parsed = JSON.parse(rawManifest) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('objet JSON attendu');
+      }
+      return parsed as Record<string, unknown>;
     } catch (error) {
       throw new BadRequestException(
-        `backup-manifest.json invalide : ${(error as Error).message}`,
+        `manifest.json invalide : ${(error as Error).message}`,
       );
     }
+  }
+
+  private validateBackupManifest(
+    rawManifest: string,
+    extractDir: string,
+  ): DatabaseBackupManifest {
+    const manifest = this.parseManifest(
+      rawManifest,
+    ) as unknown as DatabaseBackupManifest;
+    const expectedPrefix = `minio/${this.minio.bucket}/`;
     if (
       manifest.backupVersion !== DATABASE_BACKUP_VERSION ||
       manifest.type !== DATABASE_BACKUP_TYPE ||
-      manifest.databaseFile !== 'database.dump' ||
+      manifest.databaseFile !== 'database/postgres.dump' ||
       manifest.databaseFormat !== 'custom' ||
       manifest.containsDatabase !== true ||
-      manifest.containsMinio !== false ||
-      manifest.containsGeneratedDocuments !== false ||
-      manifest.documentsMustBeRegenerated !== true ||
+      manifest.containsMinio !== true ||
+      manifest.containsGeneratedDocuments !== true ||
+      manifest.documentsMustBeRegenerated !== false ||
+      manifest.minioBucket !== this.minio.bucket ||
+      manifest.minioPrefix !== expectedPrefix ||
+      !Number.isInteger(manifest.minioFileCount) ||
+      manifest.minioFileCount < 0 ||
+      typeof manifest.databaseName !== 'string' ||
+      !manifest.databaseName ||
+      typeof manifest.databaseSizeBytes !== 'number' ||
+      typeof manifest.minioSizeBytes !== 'number' ||
+      typeof manifest.totalSizeBytes !== 'number' ||
       manifest.checksumAlgorithm !== 'sha256' ||
-      typeof manifest.checksums?.['database.dump'] !== 'string'
+      !manifest.checksums ||
+      typeof manifest.checksums['database/postgres.dump'] !== 'string'
     ) {
       throw new BadRequestException(
-        'backup-manifest.json invalide ou incompatible avec la politique DATABASE_ONLY',
+        'manifest.json invalide ou incompatible avec le format FULL_SYSTEM',
       );
     }
-    const actualChecksum = this.sha256File(dumpPath);
-    if (actualChecksum !== manifest.checksums['database.dump']) {
+
+    const files = this.walkFiles(extractDir);
+    const payloadFiles = files
+      .map((file) => path.relative(extractDir, file).replace(/\\/g, '/'))
+      .filter((file) => file !== 'manifest.json')
+      .sort();
+    const expectedFiles = Object.keys(manifest.checksums).sort();
+    if (JSON.stringify(payloadFiles) !== JSON.stringify(expectedFiles)) {
       throw new BadRequestException(
-        'Checksum SHA-256 invalide pour database.dump',
+        `Contenu du ZIP différent du manifest : ${payloadFiles.join(', ')}`,
       );
+    }
+
+    let totalSizeBytes = 0;
+    let minioSizeBytes = 0;
+    let minioFileCount = 0;
+    for (const relative of payloadFiles) {
+      const filePath = path.join(extractDir, relative.replace(/\//g, path.sep));
+      const size = fs.statSync(filePath).size;
+      totalSizeBytes += size;
+      if (relative.startsWith(expectedPrefix)) {
+        minioFileCount += 1;
+        minioSizeBytes += size;
+      }
+      if (this.sha256File(filePath) !== manifest.checksums[relative]) {
+        throw new BadRequestException(
+          `Checksum SHA-256 invalide pour ${relative}`,
+        );
+      }
+    }
+    const databaseSizeBytes = fs.statSync(
+      path.join(extractDir, 'database', 'postgres.dump'),
+    ).size;
+    if (
+      databaseSizeBytes === 0 ||
+      databaseSizeBytes !== manifest.databaseSizeBytes ||
+      minioFileCount !== manifest.minioFileCount ||
+      minioSizeBytes !== manifest.minioSizeBytes ||
+      totalSizeBytes !== manifest.totalSizeBytes
+    ) {
+      throw new BadRequestException(
+        'Tailles ou nombre de fichiers incohérents dans manifest.json',
+      );
+    }
+    return manifest;
+  }
+
+  private validateDatabaseOnlyManifest(
+    rawManifest: string,
+    dumpPath: string,
+  ): void {
+    const manifest = this.parseManifest(rawManifest);
+    const checksum = (
+      manifest.checksums as Record<string, unknown> | undefined
+    )?.['database.dump'];
+    if (
+      manifest.backupVersion !== 3 ||
+      manifest.type !== 'DATABASE_ONLY' ||
+      manifest.containsDatabase !== true ||
+      manifest.containsMinio !== false ||
+      manifest.databaseFile !== 'database.dump' ||
+      typeof checksum !== 'string' ||
+      checksum !== this.sha256File(dumpPath)
+    ) {
+      throw new BadRequestException(
+        'Ancien backup-manifest.json DATABASE_ONLY invalide',
+      );
+    }
+  }
+
+  private validateLegacyManifest(manifest: Record<string, unknown>): void {
+    if (
+      manifest.backupVersion !== 1 ||
+      manifest.app !== 'Stockini' ||
+      manifest.database !== 'postgresql' ||
+      manifest.storage !== 'minio' ||
+      manifest.bucket !== this.minio.bucket ||
+      typeof manifest.createdAt !== 'string'
+    ) {
+      throw new BadRequestException('Ancien manifest.json invalide');
     }
   }
 
   private async createBackupManifest(
     dumpPath: string,
     createdAt: Date,
+    minioExport: MinioExportResult,
   ): Promise<DatabaseBackupManifest> {
     const pgDumpVersion = this.commandVersion('pg_dump');
     const serverVersionRows = await this.prisma.$queryRawUnsafe<
@@ -1449,17 +1674,38 @@ export class DatabaseService {
           : (process.env.npm_package_version ?? 'unknown'),
       postgresServerVersion: serverVersionRows[0]?.server_version ?? 'unknown',
       pgDumpVersion,
+      databaseName: this.getPostgresConnection().database,
       databaseFormat: 'custom',
-      databaseFile: 'database.dump',
+      databaseFile: 'database/postgres.dump',
       containsDatabase: true,
-      containsMinio: false,
-      containsGeneratedDocuments: false,
-      documentsMustBeRegenerated: true,
+      containsMinio: true,
+      containsGeneratedDocuments: true,
+      documentsMustBeRegenerated: false,
+      minioBucket: this.minio.bucket,
+      minioPrefix: `minio/${this.minio.bucket}/`,
+      minioFileCount: minioExport.fileCount,
+      databaseSizeBytes: fs.statSync(dumpPath).size,
+      minioSizeBytes: minioExport.totalSizeBytes,
+      totalSizeBytes: fs.statSync(dumpPath).size + minioExport.totalSizeBytes,
       prismaMigrationCount,
       schemaFingerprint,
       checksumAlgorithm: 'sha256',
-      checksums: { 'database.dump': this.sha256File(dumpPath) },
+      checksums: {
+        'database/postgres.dump': this.sha256File(dumpPath),
+        ...minioExport.checksums,
+      },
     };
+  }
+
+  private walkFiles(directory: string): string[] {
+    if (!fs.existsSync(directory)) return [];
+    const files: string[] = [];
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) files.push(...this.walkFiles(full));
+      else if (entry.isFile()) files.push(full);
+    }
+    return files;
   }
 
   private commandVersion(command: string): string {
@@ -1481,6 +1727,52 @@ export class DatabaseService {
         `PostgreSQL inaccessible : ${(error as Error).message}`,
       );
     }
+  }
+
+  private async assertPostgresToolCompatibility(): Promise<void> {
+    const serverVersionRows = await this.prisma.$queryRawUnsafe<
+      Array<{ server_version: string }>
+    >('SHOW server_version');
+    const serverVersion = serverVersionRows[0]?.server_version ?? 'unknown';
+    const pgDumpVersion = this.commandVersion('pg_dump');
+    const serverMajor = this.postgresMajor(serverVersion);
+    const clientMajor = this.postgresMajor(pgDumpVersion);
+    if (
+      serverMajor !== null &&
+      clientMajor !== null &&
+      serverMajor !== clientMajor
+    ) {
+      throw new InternalServerErrorException(
+        `Versions PostgreSQL incompatibles : serveur ${serverMajor}, pg_dump ${clientMajor}. Installer le client PostgreSQL ${serverMajor}.`,
+      );
+    }
+  }
+
+  private async assertRestoreCompatibility(
+    manifest: DatabaseBackupManifest,
+  ): Promise<void> {
+    const serverVersionRows = await this.prisma.$queryRawUnsafe<
+      Array<{ server_version: string }>
+    >('SHOW server_version');
+    const targetMajor = this.postgresMajor(
+      serverVersionRows[0]?.server_version ?? 'unknown',
+    );
+    const dumpMajor = this.postgresMajor(manifest.pgDumpVersion);
+    const restoreMajor = this.postgresMajor(this.commandVersion('pg_restore'));
+    if (
+      targetMajor !== null &&
+      ((dumpMajor !== null && dumpMajor !== targetMajor) ||
+        (restoreMajor !== null && restoreMajor !== targetMajor))
+    ) {
+      throw new BadRequestException(
+        `Versions PostgreSQL incompatibles pour la restauration : cible ${targetMajor}, dump ${dumpMajor ?? 'inconnue'}, pg_restore ${restoreMajor ?? 'inconnue'}.`,
+      );
+    }
+  }
+
+  private postgresMajor(version: string): number | null {
+    const match = version.match(/(?:PostgreSQL\)?\s+)?(\d+)(?:\.\d+)?/i);
+    return match ? Number(match[1]) : null;
   }
 
   private async assertBackupDiskSpace(): Promise<void> {
@@ -1809,59 +2101,206 @@ export class DatabaseService {
     this.logger.log(`[RESTORE] PostgreSQL restore completed successfully`);
   }
 
-  private createDatabaseZip(
-    dumpPath: string,
-    manifestPath: string,
-    destPath: string,
-  ): void {
+  private async exportMinio(targetDir: string): Promise<MinioExportResult> {
+    let keys: string[];
+    try {
+      if (!(await this.minio.bucketExists(this.minio.bucket))) {
+        throw new Error(`bucket "${this.minio.bucket}" absent`);
+      }
+      keys = await this.minio.listAllObjects(this.minio.bucket);
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `Sauvegarde MinIO impossible : ${(error as Error).message}`,
+      );
+    }
+
+    fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+    const checksums: Record<string, string> = {};
+    let totalSizeBytes = 0;
+    for (const key of keys.sort()) {
+      const normalized = key.replace(/\\/g, '/');
+      if (
+        !normalized ||
+        key.includes('\\') ||
+        normalized.startsWith('/') ||
+        normalized.includes('\0') ||
+        normalized.split('/').includes('..')
+      ) {
+        throw new InternalServerErrorException(
+          `Clé MinIO hors périmètre : ${key}`,
+        );
+      }
+      const targetRoot = path.resolve(targetDir);
+      const destination = path.resolve(
+        targetRoot,
+        normalized.replace(/\//g, path.sep),
+      );
+      if (!destination.startsWith(`${targetRoot}${path.sep}`)) {
+        throw new InternalServerErrorException(
+          `Clé MinIO hors périmètre : ${key}`,
+        );
+      }
+      try {
+        const buffer = await this.minio.getObject(this.minio.bucket, key);
+        fs.mkdirSync(path.dirname(destination), {
+          recursive: true,
+          mode: 0o700,
+        });
+        fs.writeFileSync(destination, buffer, { mode: 0o600 });
+        totalSizeBytes += buffer.length;
+        checksums[`minio/${this.minio.bucket}/${normalized}`] = createHash(
+          'sha256',
+        )
+          .update(buffer)
+          .digest('hex');
+      } catch (error) {
+        throw new InternalServerErrorException(
+          `Sauvegarde MinIO impossible pour "${key}" : ${(error as Error).message}`,
+        );
+      }
+    }
+    this.logger.log(`[BACKUP] MinIO: ${keys.length} objet(s) exporté(s)`);
+    return { fileCount: keys.length, totalSizeBytes, checksums };
+  }
+
+  private async importMinio(
+    sourceDir: string,
+    clearExisting = false,
+  ): Promise<number> {
+    const sourceRoot = path.resolve(sourceDir);
+    const objects = this.walkFiles(sourceRoot).map((filePath) => ({
+      key: path.relative(sourceRoot, filePath).replace(/\\/g, '/'),
+      buffer: fs.readFileSync(filePath),
+    }));
+
+    await this.minio.ensureBucketOrThrow(this.minio.bucket);
+    if (clearExisting) {
+      const existingKeys = await this.minio.listAllObjects(this.minio.bucket);
+      for (const key of existingKeys) {
+        await this.minio.removeObject(this.minio.bucket, key);
+      }
+      this.logger.log(
+        `[RESTORE] MinIO: ${existingKeys.length} ancien(s) objet(s) supprimé(s)`,
+      );
+    }
+    for (const object of objects) {
+      await this.minio.putObject(
+        this.minio.bucket,
+        object.key,
+        object.buffer,
+        'application/octet-stream',
+      );
+    }
+    return objects.length;
+  }
+
+  private async verifyMinioManifest(
+    manifest: DatabaseBackupManifest,
+  ): Promise<void> {
+    const keys = (await this.minio.listAllObjects(this.minio.bucket)).sort();
+    const expectedKeys = Object.keys(manifest.checksums)
+      .filter((name) => name.startsWith(manifest.minioPrefix))
+      .map((name) => name.slice(manifest.minioPrefix.length))
+      .sort();
+    if (
+      keys.length !== manifest.minioFileCount ||
+      JSON.stringify(keys) !== JSON.stringify(expectedKeys)
+    ) {
+      throw new InternalServerErrorException(
+        `Vérification MinIO échouée : ${manifest.minioFileCount} objets attendus, ${keys.length} trouvés`,
+      );
+    }
+    for (const key of keys) {
+      const buffer = await this.minio.getObject(this.minio.bucket, key);
+      const checksum = createHash('sha256').update(buffer).digest('hex');
+      if (checksum !== manifest.checksums[`${manifest.minioPrefix}${key}`]) {
+        throw new InternalServerErrorException(
+          `Vérification MinIO échouée pour "${key}"`,
+        );
+      }
+    }
+  }
+
+  private async rollbackRestore(
+    safetyDumpPath: string,
+    minioSafetyDir: string,
+  ): Promise<void> {
+    const failures: string[] = [];
+    await this.prisma.$disconnect();
+    try {
+      this.preparePostgresForRestore();
+      this.restorePostgres(safetyDumpPath);
+    } catch (error) {
+      failures.push(`PostgreSQL: ${(error as Error).message}`);
+    } finally {
+      await this.prisma.$connect();
+    }
+    try {
+      await this.importMinio(minioSafetyDir, true);
+    } catch (error) {
+      failures.push(`MinIO: ${(error as Error).message}`);
+    }
+    if (failures.length) {
+      throw new InternalServerErrorException(
+        `Rollback incomplet (${failures.join('; ')}). Dump de sécurité conservé : ${safetyDumpPath}`,
+      );
+    }
+  }
+
+  private createDatabaseZip(payloadDir: string, destPath: string): void {
     const zip = new AdmZip();
-    zip.addLocalFile(dumpPath, '', 'database.dump');
-    zip.addLocalFile(manifestPath, '', 'backup-manifest.json');
+    zip.addLocalFolder(payloadDir, '');
+    const minioDirectory = `minio/${this.minio.bucket}/`;
+    if (!zip.getEntry(minioDirectory)) {
+      zip.addFile(minioDirectory, Buffer.alloc(0));
+    }
     zip.writeZip(destPath);
   }
 
   private validateDatabaseZip(zipPath: string): void {
-    const zip = new AdmZip(zipPath);
-    const names = zip
-      .getEntries()
-      .filter((entry) => !entry.isDirectory)
-      .map((entry) => entry.entryName)
-      .sort();
-    if (
-      names.length !== 2 ||
-      names[0] !== 'backup-manifest.json' ||
-      names[1] !== 'database.dump'
-    ) {
-      throw new InternalServerErrorException(
-        `Contenu ZIP DATABASE_ONLY invalide : ${names.join(', ')}`,
-      );
-    }
-    const dumpEntry = zip.getEntry('database.dump');
-    if (!dumpEntry || dumpEntry.getData().length === 0) {
-      throw new InternalServerErrorException('database.dump absent ou vide');
-    }
-    this.validateBackupManifest(
-      zip.getEntry('backup-manifest.json')!.getData().toString('utf8'),
-      (() => {
-        const checkPath = path.join(
-          path.dirname(zipPath),
-          'database.dump.check',
-        );
-        fs.writeFileSync(checkPath, dumpEntry.getData(), { mode: 0o600 });
-        return checkPath;
-      })(),
+    const verifyDir = path.join(
+      path.dirname(zipPath),
+      `verify-${path.basename(zipPath, '.zip')}`,
     );
-    fs.rmSync(path.join(path.dirname(zipPath), 'database.dump.check'), {
-      force: true,
-    });
+    try {
+      const zip = new AdmZip(zipPath);
+      zip.getEntries();
+      this.assertSafeBackupEntries(zip);
+      const manifestEntry = zip.getEntry('manifest.json');
+      const dumpEntry = zip.getEntry('database/postgres.dump');
+      if (!manifestEntry || !dumpEntry || dumpEntry.header.size === 0) {
+        throw new Error(
+          'manifest.json ou database/postgres.dump absent ou vide',
+        );
+      }
+      this.extractSafeBackup(zip, verifyDir);
+      this.validateBackupManifest(
+        manifestEntry.getData().toString('utf8'),
+        verifyDir,
+      );
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `Vérification du ZIP échouée : ${(error as Error).message}`,
+      );
+    } finally {
+      fs.rmSync(verifyDir, { recursive: true, force: true });
+    }
   }
 
   private readBackupType(zipPath: string): BackupInfo['type'] {
     try {
       const zip = new AdmZip(zipPath);
-      return zip.getEntry('backup-manifest.json')
-        ? DATABASE_BACKUP_TYPE
-        : 'LEGACY';
+      const manifestEntry = zip.getEntry('manifest.json');
+      if (manifestEntry) {
+        const manifest = JSON.parse(
+          manifestEntry.getData().toString('utf8'),
+        ) as { backupVersion?: number };
+        return manifest.backupVersion === DATABASE_BACKUP_VERSION
+          ? DATABASE_BACKUP_TYPE
+          : 'LEGACY';
+      }
+      if (zip.getEntry('backup-manifest.json')) return 'DATABASE_ONLY';
+      return 'LEGACY';
     } catch {
       return 'LEGACY';
     }

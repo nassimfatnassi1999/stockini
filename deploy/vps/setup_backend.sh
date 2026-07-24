@@ -116,6 +116,26 @@ validate_env_setup() {
 
 validate_env_setup "$ENV_FILE"
 
+# ── 0c. Validate backup tools and directory permissions ───
+if ! command -v pg_dump >/dev/null 2>&1 || ! command -v pg_restore >/dev/null 2>&1; then
+  log_err "pg_dump/pg_restore missing. Install postgresql-client-16 first."
+  exit 1
+fi
+
+BACKUP_DIR_VALUE=$(grep -E '^BACKUP_DIRECTORY=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')
+BACKUP_DIR_VALUE=${BACKUP_DIR_VALUE:-/opt/stockini/backups}
+if [[ "$BACKUP_DIR_VALUE" != /* ]]; then
+  log_err "BACKUP_DIRECTORY must be an absolute path: $BACKUP_DIR_VALUE"
+  exit 1
+fi
+log_info "Preparing backup directory: $BACKUP_DIR_VALUE"
+sudo install -d -m 0750 -o "$USER" -g "$(id -gn)" "$BACKUP_DIR_VALUE"
+if [ ! -r "$BACKUP_DIR_VALUE" ] || [ ! -w "$BACKUP_DIR_VALUE" ] || [ ! -x "$BACKUP_DIR_VALUE" ]; then
+  log_err "Backup directory is not readable/writable by $USER: $BACKUP_DIR_VALUE"
+  exit 1
+fi
+log_ok "Backup tools and directory permissions verified"
+
 # ── 1. Install nvm + Node 20 ───────────────────────────────
 export NVM_DIR="$HOME/.nvm"
 

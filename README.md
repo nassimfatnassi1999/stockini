@@ -121,7 +121,7 @@ The frontend source lives in `frontend/src/app`, with shared UI components in `f
 
 ### Recovering missing Next.js static chunks
 
-Database restore never restores or deletes MinIO objects, `frontend/.next`, `frontend/public`, source files, or runtime files. If HTML was served from an old Next.js process while its build changed, stop every frontend instance and rebuild the cache:
+Database restore never modifies `frontend/.next`, `frontend/public`, source files, or other runtime files. If HTML was served from an old Next.js process while its build changed, stop every frontend instance and rebuild the cache:
 
 ```bash
 # Development
@@ -142,13 +142,16 @@ Do not run `next dev` and PM2 on the same port. A `200` response for a page toge
 
 ### Backup and restore scope
 
-Admin backups are strictly database-only. A new archive contains exactly
-`database.dump` (PostgreSQL custom format) and `backup-manifest.json`; MinIO,
-PDFs, images, exports and runtime files are never included. Legacy archives
-remain readable, but their `minio/`, `documents/` and `uploads/` payloads are
-ignored without modifying the active object storage. After PostgreSQL restore,
-the backend runs `prisma migrate deploy` and validates the critical tables.
-Missing generated PDFs can be regenerated manually from restored business data.
+Admin backups use the `FULL_SYSTEM` v4 format. Each ZIP contains
+`database/postgres.dump` (PostgreSQL custom format), `manifest.json`, and every
+object from `minio/<bucket>/` with its relative path preserved. The manifest
+records counts, sizes, versions, and SHA-256 checksums. The ZIP is validated
+before being moved atomically into the backup directory.
+
+Restore validates paths and checksums before changing data, creates PostgreSQL
+and MinIO safety snapshots, restores PostgreSQL, runs `prisma migrate deploy`,
+then replaces and verifies MinIO. Historical full v1 archives and PostgreSQL-only
+v3 archives remain readable.
 
 Useful frontend commands:
 

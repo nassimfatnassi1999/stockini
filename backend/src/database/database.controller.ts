@@ -82,6 +82,7 @@ export class DatabaseController {
         backupType: result.backupType,
         containsDatabase: result.containsDatabase,
         containsMinio: result.containsMinio,
+        minioFileCount: result.minioFileCount,
         documentsMustBeRegenerated: result.documentsMustBeRegenerated,
       };
     } catch (error) {

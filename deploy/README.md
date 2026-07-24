@@ -433,11 +433,13 @@ bash deploy/vps/setup_frontend.sh
 pm2 status
 ```
 
-La sauvegarde et la restauration depuis l'interface admin sont strictement
-limitées à PostgreSQL. Le ZIP contient uniquement `database.dump` et
-`backup-manifest.json`. Les fichiers MinIO, PDF, images et exports ne sont
-jamais sauvegardés ni restaurés. Dans un ancien ZIP, les dossiers de fichiers
-sont acceptés mais ignorés, sans suppression ni remplacement du MinIO actif.
+La sauvegarde depuis l'interface admin produit un ZIP `FULL_SYSTEM` contenant
+`database/postgres.dump`, `manifest.json` et tous les objets du bucket dans
+`minio/<bucket>/`. Les chemins relatifs, tailles, compteurs et checksums SHA-256
+sont vérifiés avant publication. La restauration valide entièrement l'archive,
+crée des sauvegardes de sécurité PostgreSQL et MinIO, puis restaure et vérifie
+les deux stockages. Les anciens ZIP complets v1 et PostgreSQL-seul v3 restent
+lisibles.
 
 ---
 
