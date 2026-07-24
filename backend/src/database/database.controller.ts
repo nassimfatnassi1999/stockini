@@ -18,7 +18,6 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import type { Multer } from 'multer';
 import { RequirePermissions, Roles } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -55,17 +54,36 @@ export class DatabaseController {
   @RequirePermissions('database.view')
   @Get('backups')
   async listBackups() {
-    return (await this.db.listBackups()).map(({ path: _path, ...backup }) => backup);
+    return (await this.db.listBackups()).map(
+      ({ path: _path, ...backup }) => backup,
+    );
   }
 
   @RequirePermissions('database.backup')
+  @Post('backups')
+  async createDatabaseBackup(@CurrentUser() user: AuthUser) {
+    return this.createBackupResponse(user);
+  }
+
+  /** Legacy route retained for deployed frontends. */
+  @RequirePermissions('database.backup')
   @Post('backups/create')
-  async createBackup(
-    @CurrentUser() user: AuthUser,
-  ) {
+  createBackup(@CurrentUser() user: AuthUser) {
+    return this.createBackupResponse(user);
+  }
+
+  private async createBackupResponse(user: AuthUser) {
     try {
-      const result = await this.db.createBackup(user);
-      return { success: true, filename: result.filename, size: result.size };
+      const result = await this.db.createDatabaseBackup(user);
+      return {
+        success: true,
+        filename: result.filename,
+        size: result.size,
+        backupType: result.backupType,
+        containsDatabase: result.containsDatabase,
+        containsMinio: result.containsMinio,
+        documentsMustBeRegenerated: result.documentsMustBeRegenerated,
+      };
     } catch (error) {
       this.throwStructuredError(error, 'Backup creation failed');
     }
@@ -73,7 +91,10 @@ export class DatabaseController {
 
   @RequirePermissions('database.backup')
   @Get('backups/:filename/download')
-  async downloadBackup(@Param('filename') filename: string, @Res() res: Response) {
+  async downloadBackup(
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
     this.logger.log(`[DOWNLOAD] Backup requested: ${filename}`);
     try {
       const stat = await this.backupStorage.fileStat(filename);
@@ -84,7 +105,9 @@ export class DatabaseController {
         return;
       }
 
-      this.logger.log(`[DOWNLOAD] File exists: ${filename} (${stat.size} bytes)`);
+      this.logger.log(
+        `[DOWNLOAD] File exists: ${filename} (${stat.size} bytes)`,
+      );
       res.set({
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${filename}"`,
@@ -93,21 +116,35 @@ export class DatabaseController {
 
       const stream = await this.backupStorage.openReadStream(filename);
       stream.on('error', (err) => {
-        this.logger.error(`[DOWNLOAD] Stream error for ${filename}: ${err.message}`);
+        this.logger.error(
+          `[DOWNLOAD] Stream error for ${filename}: ${err.message}`,
+        );
         if (!res.headersSent) {
-          res.status(500).json({ success: false, message: 'Download failed', details: err.message });
+          res.status(500).json({
+            success: false,
+            message: 'Download failed',
+            details: err.message,
+          });
         }
       });
       stream.pipe(res);
       this.logger.log(`[DOWNLOAD] Sending ZIP: ${filename}`);
     } catch (err) {
-      this.logger.error(`[DOWNLOAD] Error for ${filename}: ${(err as Error).message}`);
+      this.logger.error(
+        `[DOWNLOAD] Error for ${filename}: ${(err as Error).message}`,
+      );
       if (!res.headersSent) {
         const status =
-          err instanceof NotFoundException ? 404
-          : err instanceof BadRequestException ? 400
-          : 500;
-        res.status(status).json({ success: false, message: 'Download failed', details: (err as Error).message });
+          err instanceof NotFoundException
+            ? 404
+            : err instanceof BadRequestException
+              ? 400
+              : 500;
+        res.status(status).json({
+          success: false,
+          message: 'Download failed',
+          details: (err as Error).message,
+        });
       }
     }
   }
@@ -125,6 +162,11 @@ export class DatabaseController {
         message: 'Restauration terminée avec succès. Reconnexion requise.',
         requiresReLogin: true,
         restored: result.restored,
+        backupType: result.backupType,
+        containsDatabase: result.containsDatabase,
+        containsMinio: result.containsMinio,
+        documentsMustBeRegenerated: result.documentsMustBeRegenerated,
+        ignoredLegacyFiles: result.ignoredLegacyFiles,
       };
     } catch (error) {
       this.throwStructuredError(error, 'Restore failed');
@@ -177,7 +219,9 @@ export class DatabaseController {
       throw new BadRequestException('Le fichier ZIP est vide');
     }
 
-    this.logger.log(`[RESTORE] File received: ${file.originalname} (${file.size} bytes, mime: ${file.mimetype})`);
+    this.logger.log(
+      `[RESTORE] File received: ${file.originalname} (${file.size} bytes, mime: ${file.mimetype})`,
+    );
 
     try {
       const result = await this.db.restoreBackup(file.buffer, user, {
@@ -188,6 +232,11 @@ export class DatabaseController {
         message: 'Restauration terminée avec succès. Reconnexion requise.',
         requiresReLogin: true,
         restored: result.restored,
+        backupType: result.backupType,
+        containsDatabase: result.containsDatabase,
+        containsMinio: result.containsMinio,
+        documentsMustBeRegenerated: result.documentsMustBeRegenerated,
+        ignoredLegacyFiles: result.ignoredLegacyFiles,
       };
     } catch (error) {
       this.throwStructuredError(error, 'Restore failed');
@@ -195,15 +244,26 @@ export class DatabaseController {
   }
 
   private throwStructuredError(error: unknown, message: string): never {
-    const status = error instanceof HttpException ? error.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
-    const response = error instanceof HttpException ? error.getResponse() : undefined;
-    const detail = typeof response === 'string'
-      ? response
-      : response && typeof response === 'object' && 'message' in response
-        ? (response as { message: string | string[] }).message
-        : error instanceof Error ? error.message : String(error);
+    const status =
+      error instanceof HttpException
+        ? error.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+    const response =
+      error instanceof HttpException ? error.getResponse() : undefined;
+    const detail =
+      typeof response === 'string'
+        ? response
+        : response && typeof response === 'object' && 'message' in response
+          ? (response as { message: string | string[] }).message
+          : error instanceof Error
+            ? error.message
+            : String(error);
     throw new HttpException(
-      { success: false, message, details: Array.isArray(detail) ? detail.join(', ') : detail },
+      {
+        success: false,
+        message,
+        details: Array.isArray(detail) ? detail.join(', ') : detail,
+      },
       status,
     );
   }
@@ -241,7 +301,9 @@ export class DatabaseController {
       const ext = extensions[format] ?? '';
       const mime = mimeTypes[format] ?? 'application/octet-stream';
 
-      this.logger.log(`[EXPORT] Sending ${entity}${ext} (${buffer.length} bytes)`);
+      this.logger.log(
+        `[EXPORT] Sending ${entity}${ext} (${buffer.length} bytes)`,
+      );
       res.set({
         'Content-Type': mime,
         'Content-Disposition': `attachment; filename="${entity}-export${ext}"`,
@@ -249,7 +311,9 @@ export class DatabaseController {
       });
       res.end(buffer);
     } catch (err) {
-      this.logger.error(`[EXPORT] Error for ${entity}.${format}: ${(err as Error).message}`);
+      this.logger.error(
+        `[EXPORT] Error for ${entity}.${format}: ${(err as Error).message}`,
+      );
       if (!res.headersSent) {
         const status = err instanceof BadRequestException ? 400 : 500;
         res.status(status).json({ message: (err as Error).message });
@@ -278,7 +342,8 @@ export class DatabaseController {
     @UploadedFile() file: MulterFile,
     @CurrentUser() user: AuthUser,
   ) {
-    if (!file) return { inserted: 0, errors: ['Aucun fichier fourni'], duplicates: 0 };
+    if (!file)
+      return { inserted: 0, errors: ['Aucun fichier fourni'], duplicates: 0 };
     return this.db.importEntity(entity, file.buffer, file.mimetype, user);
   }
 

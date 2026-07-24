@@ -81,12 +81,17 @@ export class DocumentsService {
           customer: true,
           items: { include: { product: true } },
           seller: { select: { fullName: true } },
-          consolidationSources: { where: { active: true }, orderBy: { displayOrder: 'asc' } },
+          consolidationSources: {
+            where: { active: true },
+            orderBy: { displayOrder: 'asc' },
+          },
         },
       });
       if (!sale) throw new NotFoundException(`Sale ${invoiceId} not found`);
       if (sale.isConsolidated && sale.consolidationStatus !== 'ACTIVE') {
-        throw new BadRequestException('Impossible de générer un document pour un regroupement inactif');
+        throw new BadRequestException(
+          'Impossible de générer un document pour un regroupement inactif',
+        );
       }
       const existing = await this.prisma.generatedDocument.findFirst({
         where: {
@@ -108,11 +113,11 @@ export class DocumentsService {
       const companySettings = await this.getCompanySettings();
       // Keep the sale reference for its native type; prefix alternate outputs
       // so each generated type retains a globally unique document number.
-      const documentNumber = existing?.documentNumber ?? (
-        dto.documentType === sale.documentType
+      const documentNumber =
+        existing?.documentNumber ??
+        (dto.documentType === sale.documentType
           ? sale.invoiceNumber
-          : `${DOC_PREFIXES[dto.documentType]}-${sale.invoiceNumber}`
-      );
+          : `${DOC_PREFIXES[dto.documentType]}-${sale.invoiceNumber}`);
       const fileName = existing?.fileName ?? `${documentNumber}.pdf`;
       const clientId = sale.customerId ?? undefined;
       const clientName =
@@ -138,13 +143,21 @@ export class DocumentsService {
           timbreFiscal: Number(sale.stampDuty),
           paidAmount: Number(sale.paidAmount),
           remainingAmount: Number(sale.remainingAmount),
-          sourceReferences: (sale.consolidationSources ?? []).map((source) => source.sourceReference),
+          sourceReferences: (sale.consolidationSources ?? []).map(
+            (source) => source.sourceReference,
+          ),
           customerName: clientName,
           isCounterClient: isComptoir,
-          customerAddress: sale.counterClientAddress ?? sale.customer?.address ?? null,
-          customerPhone: sale.counterClientPhone ?? sale.customer?.phone ?? null,
+          customerAddress:
+            sale.counterClientAddress ?? sale.customer?.address ?? null,
+          customerPhone:
+            sale.counterClientPhone ?? sale.customer?.phone ?? null,
           customerEmail: isComptoir ? null : (sale.customer?.email ?? null),
-          customerTaxId: sale.counterClientTaxId ?? (sale.customer as { taxNumber?: string | null } | null)?.taxNumber ?? null,
+          customerTaxId:
+            sale.counterClientTaxId ??
+            (sale.customer as { taxNumber?: string | null } | null)
+              ?.taxNumber ??
+            null,
           customerNote: sale.counterClientNote ?? null,
           representant: (sale as any).seller?.fullName ?? null,
           items: sale.items.map((item) => ({
@@ -237,7 +250,9 @@ export class DocumentsService {
             metadata: {
               reference: sale.invoiceNumber,
               documentId: doc.id,
-              sourceReferences: (sale.consolidationSources ?? []).map((source) => source.sourceReference),
+              sourceReferences: (sale.consolidationSources ?? []).map(
+                (source) => source.sourceReference,
+              ),
             },
           },
         });
@@ -303,7 +318,10 @@ export class DocumentsService {
     }
 
     const sortOrder = query.sortOrder ?? 'desc';
-    const allowedSortFields: Record<string, Prisma.GeneratedDocumentOrderByWithRelationInput> = {
+    const allowedSortFields: Record<
+      string,
+      Prisma.GeneratedDocumentOrderByWithRelationInput
+    > = {
       createdAt: { generatedAt: sortOrder },
       generatedAt: { generatedAt: sortOrder },
       date: { generatedAt: sortOrder },
@@ -316,7 +334,9 @@ export class DocumentsService {
       fileSize: { fileSize: sortOrder },
     };
     const orderBy: Prisma.GeneratedDocumentOrderByWithRelationInput =
-      (query.sortBy && allowedSortFields[query.sortBy]) || { generatedAt: 'desc' };
+      (query.sortBy && allowedSortFields[query.sortBy]) || {
+        generatedAt: 'desc',
+      };
 
     const [total, data] = await this.prisma.$transaction([
       this.prisma.generatedDocument.count({ where }),
@@ -377,6 +397,15 @@ export class DocumentsService {
 
   async getPresignedUrl(id: string): Promise<{ url: string }> {
     const doc = await this.findAvailableDocument(id);
+    const exists = await this.minio.objectExists(
+      doc.minioBucket,
+      doc.minioObjectKey,
+    );
+    if (!exists) {
+      throw new NotFoundException(
+        "Le fichier PDF n'est pas disponible après la restauration de la base. Vous pouvez le régénérer à partir des données enregistrées.",
+      );
+    }
     const url = await this.minio.presignedGetUrl(
       doc.minioBucket,
       doc.minioObjectKey,
@@ -390,8 +419,15 @@ export class DocumentsService {
     id: string,
   ): Promise<{ buffer: Buffer; fileName: string }> {
     const doc = await this.findAvailableDocument(id);
-    const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey);
-    if (!exists) throw new NotFoundException('Le document demandé est introuvable.');
+    const exists = await this.minio.objectExists(
+      doc.minioBucket,
+      doc.minioObjectKey,
+    );
+    if (!exists) {
+      throw new NotFoundException(
+        "Le fichier PDF n'est pas disponible après la restauration de la base. Vous pouvez le régénérer à partir des données enregistrées.",
+      );
+    }
     const buffer = await this.minio.getObject(
       doc.minioBucket,
       doc.minioObjectKey,
@@ -403,7 +439,8 @@ export class DocumentsService {
     const doc = await this.prisma.generatedDocument.findFirst({
       where: { id, deletedAt: null },
     });
-    if (!doc) throw new NotFoundException('Le document demandé est introuvable.');
+    if (!doc)
+      throw new NotFoundException('Le document demandé est introuvable.');
     return doc;
   }
 
@@ -638,8 +675,14 @@ export class DocumentsService {
     });
     if (!doc) throw new NotFoundException(`Document ${id} introuvable`);
 
-    const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey);
-    if (!exists) throw new NotFoundException('Fichier PDF introuvable dans le stockage MinIO');
+    const exists = await this.minio.objectExists(
+      doc.minioBucket,
+      doc.minioObjectKey,
+    );
+    if (!exists)
+      throw new NotFoundException(
+        'Fichier PDF introuvable dans le stockage MinIO',
+      );
 
     const expiresInDays = dto.expiresInDays ?? 7;
     const expirySeconds = expiresInDays * 24 * 3600;
@@ -678,8 +721,14 @@ export class DocumentsService {
     });
     if (!doc) throw new NotFoundException(`Document ${id} introuvable`);
 
-    const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey);
-    if (!exists) throw new NotFoundException('Fichier PDF introuvable dans le stockage MinIO');
+    const exists = await this.minio.objectExists(
+      doc.minioBucket,
+      doc.minioObjectKey,
+    );
+    if (!exists)
+      throw new NotFoundException(
+        'Fichier PDF introuvable dans le stockage MinIO',
+      );
 
     const expiresInDays = dto.expiresInDays ?? 7;
     const expirySeconds = expiresInDays * 24 * 3600;
@@ -690,10 +739,8 @@ export class DocumentsService {
     );
     const expiresAt = new Date(Date.now() + expirySeconds * 1000);
 
-    const clientName =
-      doc.clientName ?? doc.sale?.customer?.name ?? 'Client';
-    const docTypeLabel =
-      DOC_PREFIXES[doc.documentType] ?? doc.documentType;
+    const clientName = doc.clientName ?? doc.sale?.customer?.name ?? 'Client';
+    const docTypeLabel = DOC_PREFIXES[doc.documentType] ?? doc.documentType;
     const subject =
       dto.subject ??
       `${docTypeLabel} ${doc.documentNumber} — lien de consultation`;
@@ -801,15 +848,16 @@ export class DocumentsService {
             <td style="color:#1d4ed8;font-size:15px;font-weight:700;text-align:right;">${totalTtc.toFixed(3)} TND</td>
           </tr>`
         : '';
-    const finalRows = totalFinal !== null
-      ? `${ttcRow}<tr>
+    const finalRows =
+      totalFinal !== null
+        ? `${ttcRow}<tr>
           <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Timbre fiscal</td>
           <td style="color:#111827;font-size:13px;text-align:right;">${stampDuty.toFixed(3)} TND</td>
         </tr><tr>
           <td style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;padding-top:6px;">Total à payer</td>
           <td style="color:#1d4ed8;font-size:15px;font-weight:700;text-align:right;">${totalFinal.toFixed(3)} TND</td>
         </tr>`
-      : ttcRow;
+        : ttcRow;
 
     const customMsgHtml = customMessage
       ? `<p style="margin:0 0 24px;color:#374151;font-size:14px;line-height:1.6;">${customMessage}</p>`
@@ -908,7 +956,11 @@ export class DocumentsService {
 
     const trashKey = this.toTrashKey(doc.minioObjectKey);
     try {
-      await this.minio.moveObject(doc.minioBucket, doc.minioObjectKey, trashKey);
+      await this.minio.moveObject(
+        doc.minioBucket,
+        doc.minioObjectKey,
+        trashKey,
+      );
     } catch (err) {
       this.logger.warn(
         `MinIO move to trash failed for document ${id}: ${(err as Error).message}. Proceeding with soft-delete.`,
@@ -972,12 +1024,20 @@ export class DocumentsService {
         total: Number(sale.total),
         timbreFiscal: Number(sale.stampDuty),
         customerName:
-          sale.counterClientFullName ?? sale.customer?.name ?? 'Client comptoir',
+          sale.counterClientFullName ??
+          sale.customer?.name ??
+          'Client comptoir',
         isCounterClient: isRegenerateComptoir,
-        customerAddress: isRegenerateComptoir ? sale.counterClientAddress : sale.customer?.address,
-        customerPhone: isRegenerateComptoir ? sale.counterClientPhone : sale.customer?.phone,
+        customerAddress: isRegenerateComptoir
+          ? sale.counterClientAddress
+          : sale.customer?.address,
+        customerPhone: isRegenerateComptoir
+          ? sale.counterClientPhone
+          : sale.customer?.phone,
         customerEmail: isRegenerateComptoir ? null : sale.customer?.email,
-        customerTaxId: isRegenerateComptoir ? sale.counterClientTaxId : (sale.customer as { taxId?: string | null } | null)?.taxId,
+        customerTaxId: isRegenerateComptoir
+          ? sale.counterClientTaxId
+          : (sale.customer as { taxId?: string | null } | null)?.taxId,
         customerNote: isRegenerateComptoir ? sale.counterClientNote : null,
         representant: (sale as any).seller?.fullName ?? null,
         items: sale.items.map((item) => ({

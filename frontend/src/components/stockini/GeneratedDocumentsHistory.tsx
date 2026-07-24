@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
@@ -12,41 +12,41 @@ import {
   Mail,
   RefreshCw,
   Trash2,
-} from 'lucide-react';
-import { useCallback, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { SlideOver } from '@/components/ui/SlideOver';
-import { toast } from '@/lib/toast';
-import { openPdfInNewTab, pdfOpenErrorMessage } from '@/lib/openPdf';
-import { stockiniApi } from '@/lib/stockini/api';
-import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
+} from "lucide-react";
+import { useCallback, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SlideOver } from "@/components/ui/SlideOver";
+import { toast } from "@/lib/toast";
+import { openPdfInNewTab, pdfOpenErrorMessage } from "@/lib/openPdf";
+import { stockiniApi } from "@/lib/stockini/api";
+import { KebabMenu } from "@/components/stockini/shared/KebabMenu";
 import type {
   DocumentsListResponse,
   GeneratedDocument,
   SalesDocumentType,
-} from '@/lib/stockini/types';
-import { DataTablePagination } from '@/components/ui/DataTablePagination';
+} from "@/lib/stockini/types";
+import { DataTablePagination } from "@/components/ui/DataTablePagination";
 
 const DOC_TYPE_LABELS: Record<SalesDocumentType, string> = {
-  DEVIS: 'Devis',
-  BON_COMMANDE: 'Bon de commande',
-  BON_LIVRAISON: 'Bon de livraison',
-  FACTURE: 'Facture',
-  AVOIR: 'Avoir',
+  DEVIS: "Devis",
+  BON_COMMANDE: "Bon de commande",
+  BON_LIVRAISON: "Bon de livraison",
+  FACTURE: "Facture",
+  AVOIR: "Avoir",
 };
 
 const EMAIL_STATUS_LABELS: Record<string, string> = {
-  PENDING: 'En attente',
-  SENT: 'Envoyé',
-  FAILED: 'Échec',
+  PENDING: "En attente",
+  SENT: "Envoyé",
+  FAILED: "Échec",
 };
 
 const EMAIL_STATUS_COLORS: Record<string, string> = {
-  PENDING: 'border-yellow-200 bg-yellow-50 text-yellow-700',
-  SENT: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  FAILED: 'border-red-200 bg-red-50 text-red-700',
+  PENDING: "border-yellow-200 bg-yellow-50 text-yellow-700",
+  SENT: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  FAILED: "border-red-200 bg-red-50 text-red-700",
 };
 
 interface Props {
@@ -64,8 +64,8 @@ interface SendLinkModalProps {
 }
 
 function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
-  const defaultEmail = doc.sale?.customer?.email ?? '';
-  const defaultName = doc.sale?.customer?.name ?? 'Client';
+  const defaultEmail = doc.sale?.customer?.email ?? "";
+  const defaultName = doc.sale?.customer?.name ?? "Client";
 
   const [to, setTo] = useState(defaultEmail);
   const [subject, setSubject] = useState(
@@ -78,14 +78,20 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
 
   const sendMutation = useMutation({
     mutationFn: () =>
-      stockiniApi.sendEmailLink(doc.id, { to, subject, message, expiresInDays }),
+      stockiniApi.sendEmailLink(doc.id, {
+        to,
+        subject,
+        message,
+        expiresInDays,
+      }),
     onSuccess: () => {
-      toast.success('Lien PDF envoyé avec succès');
+      toast.success("Lien PDF envoyé avec succès");
       onSent();
       onClose();
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const msg = (err as { response?: { data?: { message?: string } } })
+        ?.response?.data?.message;
       toast.error(msg ?? "Échec de l'envoi du lien");
     },
   });
@@ -108,9 +114,15 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
             onClick={() => sendMutation.mutate()}
           >
             {sendMutation.isPending ? (
-              <><Loader2 size={13} className="animate-spin mr-1.5" />Envoi…</>
+              <>
+                <Loader2 size={13} className="animate-spin mr-1.5" />
+                Envoi…
+              </>
             ) : (
-              <><Link size={13} className="mr-1.5" />Envoyer le lien</>
+              <>
+                <Link size={13} className="mr-1.5" />
+                Envoyer le lien
+              </>
             )}
           </Button>
         </>
@@ -151,7 +163,9 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
           <select
             id="hist-link-expiry"
             value={expiresInDays}
-            onChange={(e) => setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)}
+            onChange={(e) =>
+              setExpiresInDays(Number(e.target.value) as 1 | 7 | 30)
+            }
             className="app-select w-full"
           >
             <option value={1}>1 jour</option>
@@ -162,8 +176,8 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
         <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
           <Link size={13} className="mt-0.5 shrink-0" />
           <span>
-            Un lien sécurisé et temporaire sera généré vers le PDF stocké dans MinIO.
-            Aucune pièce jointe ne sera envoyée.
+            Un lien sécurisé et temporaire sera généré vers le PDF stocké dans
+            MinIO. Aucune pièce jointe ne sera envoyée.
           </span>
         </div>
       </div>
@@ -171,16 +185,24 @@ function SendLinkModal({ doc, onClose, onSent }: SendLinkModalProps) {
   );
 }
 
-export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelectionChange, onEmailClick, emailLoading, noHeader }: Props) {
+export function GeneratedDocumentsHistory({
+  selectedDocumentIds,
+  onDocumentSelectionChange,
+  onEmailClick,
+  emailLoading,
+  noHeader,
+}: Props) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(true);
   const [copyingId, setCopyingId] = useState<string | null>(null);
-  const [sendLinkDoc, setSendLinkDoc] = useState<GeneratedDocument | null>(null);
+  const [sendLinkDoc, setSendLinkDoc] = useState<GeneratedDocument | null>(
+    null,
+  );
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
 
   const docsQuery = useQuery<DocumentsListResponse>({
-    queryKey: ['generated-documents', page, limit],
+    queryKey: ["generated-documents", page, limit],
     queryFn: () => stockiniApi.listDocuments({ page, limit }),
     placeholderData: (previous) => previous,
   });
@@ -188,32 +210,37 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
   const deleteMutation = useMutation({
     mutationFn: (id: string) => stockiniApi.deleteGeneratedDocument(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
-      toast.success('Document supprimé');
+      queryClient.invalidateQueries({ queryKey: ["generated-documents"] });
+      toast.success("Document supprimé");
     },
-    onError: () => toast.error('Erreur lors de la suppression'),
+    onError: () => toast.error("Erreur lors de la suppression"),
   });
 
   const regenerateMutation = useMutation({
     mutationFn: (id: string) => stockiniApi.regenerateDocument(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['generated-documents'] });
-      toast.success('Document régénéré');
+      queryClient.invalidateQueries({ queryKey: ["generated-documents"] });
+      toast.success("Document régénéré");
     },
-    onError: () => toast.error('Erreur lors de la régénération'),
+    onError: () => toast.error("Erreur lors de la régénération"),
   });
 
   const handleDownload = async (id: string, fileName: string) => {
     try {
       const blob = await stockiniApi.downloadDocument(id);
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download = fileName;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    } catch {
-      toast.error('Échec du téléchargement');
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })
+        .response?.data?.message;
+      toast.error(
+        message ??
+          "Le fichier PDF n'est pas disponible. Utilisez « Régénérer le PDF ».",
+      );
     }
   };
 
@@ -225,28 +252,31 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
     }
   };
 
-  const handleCopyLink = useCallback(async (id: string) => {
-    if (copyingId) return;
-    setCopyingId(id);
-    try {
-      const { url } = await stockiniApi.documentPresignedUrl(id);
+  const handleCopyLink = useCallback(
+    async (id: string) => {
+      if (copyingId) return;
+      setCopyingId(id);
       try {
-        await navigator.clipboard.writeText(url);
+        const { url } = await stockiniApi.documentPresignedUrl(id);
+        try {
+          await navigator.clipboard.writeText(url);
+        } catch {
+          const input = document.createElement("input");
+          input.value = url;
+          document.body.appendChild(input);
+          input.select();
+          document.execCommand("copy");
+          document.body.removeChild(input);
+        }
+        toast.success("Lien copié dans le presse-papiers");
       } catch {
-        const input = document.createElement('input');
-        input.value = url;
-        document.body.appendChild(input);
-        input.select();
-        document.execCommand('copy');
-        document.body.removeChild(input);
+        toast.error("Impossible de récupérer le lien PDF");
+      } finally {
+        setCopyingId(null);
       }
-      toast.success('Lien copié dans le presse-papiers');
-    } catch {
-      toast.error('Impossible de récupérer le lien PDF');
-    } finally {
-      setCopyingId(null);
-    }
-  }, [copyingId]);
+    },
+    [copyingId],
+  );
 
   const toggleDocSelection = (id: string) => {
     if (selectedDocumentIds.includes(id)) {
@@ -260,141 +290,178 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
 
   const tableContent = (
     <>
-    <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-surface">
-              <tr className="border-b border-border/60">
-                <th className="px-3 py-3 w-10 text-center">
-                  <span className="sr-only">Sélection</span>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-surface">
+            <tr className="border-b border-border/60">
+              <th className="px-3 py-3 w-10 text-center">
+                <span className="sr-only">Sélection</span>
+              </th>
+              {[
+                "Date",
+                "Client",
+                "Facture source",
+                "Type",
+                "Numéro",
+                "Statut email",
+                "Actions",
+              ].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted"
+                >
+                  {h}
                 </th>
-                {['Date', 'Client', 'Facture source', 'Type', 'Numéro', 'Statut email', 'Actions'].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted"
-                  >
-                    {h}
-                  </th>
-                ))}
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/40">
+            {docsQuery.isLoading ? (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-4 py-8 text-center text-sm text-text-muted"
+                >
+                  Chargement…
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40">
-              {docsQuery.isLoading ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-text-muted">
-                    Chargement…
-                  </td>
-                </tr>
-              ) : docs.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-text-muted">
-                    Aucun document généré
-                  </td>
-                </tr>
-              ) : (
-                docs.map((doc) => {
-                  const isSelected = selectedDocumentIds.includes(doc.id);
-                  return (
-                    <tr
-                      key={doc.id}
-                      className={`hover:bg-muted/40 transition-colors ${isSelected ? 'bg-blue-50/60 ring-1 ring-inset ring-blue-200' : ''}`}
-                    >
-                      <td className="px-3 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleDocSelection(doc.id)}
-                          className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
-                          aria-label={`Sélectionner ${doc.documentNumber}`}
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-xs text-text-secondary whitespace-nowrap">
-                        {new Date(doc.generatedAt).toLocaleDateString('fr-TN')}
-                      </td>
-                      <td className="px-4 py-3 text-text-secondary">
-                        {doc.sale?.customer?.name ?? 'Comptoir'}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs font-semibold">
-                        {doc.sale?.invoiceNumber ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 text-text-secondary text-xs">
-                        {DOC_TYPE_LABELS[doc.documentType] ?? doc.documentType}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {doc.documentNumber}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`app-status-badge text-xs ${EMAIL_STATUS_COLORS[doc.emailStatus] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}
-                        >
-                          {EMAIL_STATUS_LABELS[doc.emailStatus] ?? doc.emailStatus}
-                        </span>
-                        {doc.sentTo && (
-                          <p className="text-xs text-text-muted mt-0.5">{doc.sentTo}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <KebabMenu
-                          items={[
-                            {
-                              label: 'Voir le PDF',
-                              icon: <Eye size={14} />,
-                              onClick: () => handleView(doc.id),
-                            },
-                            {
-                              label: 'Télécharger le PDF',
-                              icon: <Download size={14} />,
-                              onClick: () => handleDownload(doc.id, doc.fileName),
-                            },
-                            {
-                              label: copyingId === doc.id ? 'Copie…' : 'Copier le lien',
-                              icon: copyingId === doc.id ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />,
-                              onClick: () => handleCopyLink(doc.id),
-                              disabled: copyingId === doc.id,
-                            },
-                            {
-                              label: 'Envoyer le lien par email',
-                              icon: <Link size={14} />,
-                              onClick: () => setSendLinkDoc(doc),
-                            },
-                            {
-                              label: 'Sélectionner pour email',
-                              icon: <Mail size={14} />,
-                              onClick: () => toggleDocSelection(doc.id),
-                            },
-                            {
-                              label: 'Régénérer le PDF',
-                              icon: <RefreshCw size={14} className={regenerateMutation.isPending ? 'animate-spin' : ''} />,
-                              onClick: () => regenerateMutation.mutate(doc.id),
-                              disabled: regenerateMutation.isPending,
-                            },
-                            {
-                              label: 'Supprimer',
-                              icon: <Trash2 size={14} />,
-                              onClick: () => deleteMutation.mutate(doc.id),
-                              disabled: deleteMutation.isPending,
-                              variant: 'destructive',
-                            },
-                          ]}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        {(docsQuery.data?.total ?? 0) > 0 && (
-          <DataTablePagination
-            page={page}
-            limit={limit}
-            totalItems={docsQuery.data?.total ?? 0}
-            totalPages={docsQuery.data?.totalPages ?? 0}
-            disabled={docsQuery.isFetching}
-            onPageChange={setPage}
-            onLimitChange={(next) => { setLimit(next); setPage(1); }}
-          />
-        )}
+            ) : docs.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-4 py-8 text-center text-sm text-text-muted"
+                >
+                  Aucun document généré
+                </td>
+              </tr>
+            ) : (
+              docs.map((doc) => {
+                const isSelected = selectedDocumentIds.includes(doc.id);
+                return (
+                  <tr
+                    key={doc.id}
+                    className={`hover:bg-muted/40 transition-colors ${isSelected ? "bg-blue-50/60 ring-1 ring-inset ring-blue-200" : ""}`}
+                  >
+                    <td className="px-3 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleDocSelection(doc.id)}
+                        className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                        aria-label={`Sélectionner ${doc.documentNumber}`}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-xs text-text-secondary whitespace-nowrap">
+                      {new Date(doc.generatedAt).toLocaleDateString("fr-TN")}
+                    </td>
+                    <td className="px-4 py-3 text-text-secondary">
+                      {doc.sale?.customer?.name ?? "Comptoir"}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs font-semibold">
+                      {doc.sale?.invoiceNumber ?? "—"}
+                    </td>
+                    <td className="px-4 py-3 text-text-secondary text-xs">
+                      {DOC_TYPE_LABELS[doc.documentType] ?? doc.documentType}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {doc.documentNumber}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`app-status-badge text-xs ${EMAIL_STATUS_COLORS[doc.emailStatus] ?? "border-slate-200 bg-slate-50 text-slate-700"}`}
+                      >
+                        {EMAIL_STATUS_LABELS[doc.emailStatus] ??
+                          doc.emailStatus}
+                      </span>
+                      {doc.sentTo && (
+                        <p className="text-xs text-text-muted mt-0.5">
+                          {doc.sentTo}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <KebabMenu
+                        items={[
+                          {
+                            label: "Voir le PDF",
+                            icon: <Eye size={14} />,
+                            onClick: () => handleView(doc.id),
+                          },
+                          {
+                            label: "Télécharger le PDF",
+                            icon: <Download size={14} />,
+                            onClick: () => handleDownload(doc.id, doc.fileName),
+                          },
+                          {
+                            label:
+                              copyingId === doc.id
+                                ? "Copie…"
+                                : "Copier le lien",
+                            icon:
+                              copyingId === doc.id ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <Copy size={14} />
+                              ),
+                            onClick: () => handleCopyLink(doc.id),
+                            disabled: copyingId === doc.id,
+                          },
+                          {
+                            label: "Envoyer le lien par email",
+                            icon: <Link size={14} />,
+                            onClick: () => setSendLinkDoc(doc),
+                          },
+                          {
+                            label: "Sélectionner pour email",
+                            icon: <Mail size={14} />,
+                            onClick: () => toggleDocSelection(doc.id),
+                          },
+                          {
+                            label: "Régénérer le PDF",
+                            icon: (
+                              <RefreshCw
+                                size={14}
+                                className={
+                                  regenerateMutation.isPending
+                                    ? "animate-spin"
+                                    : ""
+                                }
+                              />
+                            ),
+                            onClick: () => regenerateMutation.mutate(doc.id),
+                            disabled: regenerateMutation.isPending,
+                          },
+                          {
+                            label: "Supprimer",
+                            icon: <Trash2 size={14} />,
+                            onClick: () => deleteMutation.mutate(doc.id),
+                            disabled: deleteMutation.isPending,
+                            variant: "destructive",
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      {(docsQuery.data?.total ?? 0) > 0 && (
+        <DataTablePagination
+          page={page}
+          limit={limit}
+          totalItems={docsQuery.data?.total ?? 0}
+          totalPages={docsQuery.data?.totalPages ?? 0}
+          disabled={docsQuery.isFetching}
+          onPageChange={setPage}
+          onLimitChange={(next) => {
+            setLimit(next);
+            setPage(1);
+          }}
+        />
+      )}
     </>
   );
 
@@ -402,7 +469,9 @@ export function GeneratedDocumentsHistory({ selectedDocumentIds, onDocumentSelec
     <SendLinkModal
       doc={sendLinkDoc}
       onClose={() => setSendLinkDoc(null)}
-      onSent={() => queryClient.invalidateQueries({ queryKey: ['generated-documents'] })}
+      onSent={() =>
+        queryClient.invalidateQueries({ queryKey: ["generated-documents"] })
+      }
     />
   ) : null;
 

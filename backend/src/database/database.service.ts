@@ -14,12 +14,34 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import AdmZip from 'adm-zip';
 import * as ExcelJS from 'exceljs';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { BackupStorageService } from './backup-storage.service';
 
 export const MAX_BACKUPS = 3;
+export const DATABASE_BACKUP_VERSION = 3;
+export const DATABASE_BACKUP_TYPE = 'DATABASE_ONLY' as const;
+
+interface DatabaseBackupManifest {
+  backupVersion: 3;
+  type: typeof DATABASE_BACKUP_TYPE;
+  createdAt: string;
+  applicationVersion: string;
+  postgresServerVersion: string;
+  pgDumpVersion: string;
+  databaseFormat: 'custom';
+  databaseFile: 'database.dump';
+  containsDatabase: true;
+  containsMinio: false;
+  containsGeneratedDocuments: false;
+  documentsMustBeRegenerated: true;
+  prismaMigrationCount: number;
+  schemaFingerprint: string;
+  checksumAlgorithm: 'sha256';
+  checksums: { 'database.dump': string };
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,7 +50,7 @@ export interface BackupInfo {
   size: number;
   createdAt: string;
   createdBy: string;
-  type: string;
+  type: typeof DATABASE_BACKUP_TYPE | 'LEGACY';
   path: string;
   status: 'valid' | 'invalid' | 'missing-sql';
 }
@@ -82,9 +104,19 @@ export class DatabaseService {
   // BACKUP
   // ════════════════════════════════════════════════════════════
 
-  async createBackup(user?: AuthUser): Promise<{ filename: string; size: number; path: string }> {
-    if (this.restoreInProgress) throw new ConflictException('Une restauration est en cours');
-    if (this.backupInProgress) throw new ConflictException('Une sauvegarde est déjà en cours');
+  async createDatabaseBackup(user?: AuthUser): Promise<{
+    filename: string;
+    size: number;
+    path: string;
+    backupType: typeof DATABASE_BACKUP_TYPE;
+    containsDatabase: true;
+    containsMinio: false;
+    documentsMustBeRegenerated: true;
+  }> {
+    if (this.restoreInProgress)
+      throw new ConflictException('Une restauration est en cours');
+    if (this.backupInProgress)
+      throw new ConflictException('Une sauvegarde est déjà en cours');
     this.backupInProgress = true;
     await this.backupStorage.ensureAccessible();
 
@@ -94,41 +126,34 @@ export class DatabaseService {
     fs.mkdirSync(tmpDir, { recursive: true });
 
     try {
-      this.logger.log(`[BACKUP] Starting backup: ${stamp}`);
+      this.logger.log(`[BACKUP] Starting DATABASE_ONLY backup: ${stamp}`);
+      await this.assertDatabaseReachable();
+      await this.assertBackupDiskSpace();
 
-      // 1. SQL dump
-      const databaseDir = path.join(tmpDir, 'database');
-      fs.mkdirSync(databaseDir, { recursive: true });
-      await this.dumpPostgres(path.join(databaseDir, 'dump.sql'));
-      this.logger.log(`[BACKUP] SQL dump completed`);
+      const dumpPath = path.join(tmpDir, 'database.dump');
+      this.dumpPostgres(dumpPath);
+      const manifest = await this.createBackupManifest(dumpPath, now);
+      const manifestPath = path.join(tmpDir, 'backup-manifest.json');
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), {
+        mode: 0o600,
+      });
 
-      // 2. Full MinIO export, preserving every object key.
-      const minioDir = path.join(tmpDir, 'minio', this.minio.bucket);
-      fs.mkdirSync(minioDir, { recursive: true });
-      await this.exportMinio(minioDir);
-      this.logger.log(`[BACKUP] MinIO export completed`);
-
-      // 3. Metadata
-      const metadata = {
-        app: 'Stockini',
-        createdAt: now.toISOString(),
-        database: 'postgresql',
-        storage: 'minio',
-        bucket: this.minio.bucket,
-        backupVersion: 1,
-      };
-      fs.writeFileSync(path.join(tmpDir, 'manifest.json'), JSON.stringify(metadata, null, 2));
-
-      // 5. Create ZIP
       const zipName = `backup-${stamp}.zip`;
       const zipPath = await this.backupStorage.destination(zipName);
-      this.createZip(tmpDir, zipPath);
-      this.logger.log(`[BACKUP] ZIP created`);
+      const temporaryZipPath = path.join(tmpDir, zipName);
+      this.createDatabaseZip(dumpPath, manifestPath, temporaryZipPath);
+      this.validateDatabaseZip(temporaryZipPath);
+      fs.renameSync(temporaryZipPath, zipPath);
+      this.logger.log(
+        `[BACKUP] DATABASE_ONLY ZIP validated and moved atomically`,
+      );
 
       const size = fs.statSync(zipPath).size;
       if (size === 0) {
         fs.rmSync(zipPath, { force: true });
-        throw new InternalServerErrorException('ZIP créé vide — échec de la compression');
+        throw new InternalServerErrorException(
+          'ZIP créé vide — échec de la compression',
+        );
       }
       this.logger.log(`[BACKUP] ZIP size: ${size} bytes`);
 
@@ -136,7 +161,13 @@ export class DatabaseService {
         userId: user?.id,
         action: 'database.backup.created',
         entity: 'database',
-        metadata: { filename: zipName, size, createdBy: user?.email ?? 'system' },
+        metadata: {
+          filename: zipName,
+          size,
+          createdBy: user?.email ?? 'system',
+          backupType: DATABASE_BACKUP_TYPE,
+          containsMinio: false,
+        },
       });
 
       // Retention runs only after the ZIP and its metadata have been saved.
@@ -144,11 +175,24 @@ export class DatabaseService {
       // backup into a failed one.
       await this.applyBackupRetention();
 
-      return { filename: zipName, size, path: zipPath };
+      return {
+        filename: zipName,
+        size,
+        path: zipPath,
+        backupType: DATABASE_BACKUP_TYPE,
+        containsDatabase: true,
+        containsMinio: false,
+        documentsMustBeRegenerated: true,
+      };
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
       this.backupInProgress = false;
     }
+  }
+
+  /** Backward-compatible name used by the cron and older callers. */
+  async createBackup(user?: AuthUser) {
+    return this.createDatabaseBackup(user);
   }
 
   async listBackups(): Promise<BackupInfo[]> {
@@ -160,12 +204,15 @@ export class DatabaseService {
           size,
           createdAt,
           createdBy: 'system',
-          type: 'full',
+          type: this.readBackupType(full),
           path: full,
           status: this.inspectBackupStatus(full),
         };
       })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
   }
 
   async deleteBackup(filename: string, user?: AuthUser): Promise<void> {
@@ -178,7 +225,18 @@ export class DatabaseService {
     });
   }
 
-  async restoreBackup(zipBuffer: Buffer, user?: AuthUser, options: RestoreOptions = {}): Promise<{ restored: string[] }> {
+  async restoreDatabaseBackup(
+    zipBuffer: Buffer,
+    user?: AuthUser,
+    options: RestoreOptions = {},
+  ): Promise<{
+    restored: string[];
+    backupType: typeof DATABASE_BACKUP_TYPE;
+    containsDatabase: true;
+    containsMinio: false;
+    documentsMustBeRegenerated: true;
+    ignoredLegacyFiles: boolean;
+  }> {
     if (this.backupInProgress) {
       throw new ConflictException('Une sauvegarde est en cours');
     }
@@ -190,9 +248,11 @@ export class DatabaseService {
     const tmpDir = path.join(os.tmpdir(), `restore-${stamp}-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
 
-    this.logger.log(`[RESTORE] Upload received: ${options.uploadedFilename ?? 'server backup'}`);
+    this.logger.log(
+      `[RESTORE] Upload received: ${options.uploadedFilename ?? 'server backup'}`,
+    );
     this.logger.log(`[RESTORE] File size: ${zipBuffer.length} bytes`);
-    this.logger.log(`[RESTORE] Mode: full database + MinIO`);
+    this.logger.log(`[RESTORE] Mode: DATABASE_ONLY`);
     this.logger.log(`[RESTORE] Temporary workspace: ${tmpDir}`);
 
     try {
@@ -207,7 +267,9 @@ export class DatabaseService {
         zip = new AdmZip(zipPath);
         zip.getEntries();
       } catch (error) {
-        throw new BadRequestException(`Archive ZIP invalide ou corrompue : ${(error as Error).message}`);
+        throw new BadRequestException(
+          `Archive ZIP invalide ou corrompue : ${(error as Error).message}`,
+        );
       }
 
       if (zipBuffer.length === 0) {
@@ -216,72 +278,107 @@ export class DatabaseService {
 
       this.assertSafeBackupEntries(zip);
       this.logger.log(
-        `[RESTORE] ZIP entries (${zip.getEntries().length}): ${zip.getEntries().map((entry) => entry.entryName).join(', ')}`,
+        `[RESTORE] ZIP entries (${zip.getEntries().length}): ${zip
+          .getEntries()
+          .map((entry) => entry.entryName)
+          .join(', ')}`,
       );
 
-      // 3. Extract to sub-directory to avoid mixing with restore.zip
+      // Read only the PostgreSQL payload. Legacy object folders are deliberately
+      // never extracted, read, deleted or copied.
       const extractDir = path.join(tmpDir, 'extracted');
       fs.mkdirSync(extractDir, { recursive: true });
-      try {
-        zip.extractAllTo(extractDir, true);
-      } catch (error) {
-        throw new BadRequestException(`Impossible d'extraire le fichier ZIP : ${(error as Error).message}`);
+      const dumpEntry = this.findDatabaseDumpEntry(zip);
+      if (!dumpEntry) {
+        throw new BadRequestException(
+          'Dump PostgreSQL absent (attendu : database.dump, dump.sql ou database/dump.*)',
+        );
       }
-      this.logger.log(`[RESTORE] ZIP validated and extracted to: ${extractDir}`);
+      const dumpPath = path.join(
+        extractDir,
+        dumpEntry.entryName.toLowerCase().endsWith('.sql')
+          ? 'dump.sql'
+          : 'database.dump',
+      );
+      fs.writeFileSync(dumpPath, dumpEntry.getData(), { mode: 0o600 });
 
-      // 4. Validate required files
-      const dumpPath = ['database/dump.sql', 'database/dump.dump', 'database/dump.backup']
-        .map((name) => path.join(extractDir, name))
-        .find((candidate) => fs.existsSync(candidate));
-      // New backups use manifest.json. Keep metadata.json readable so existing
-      // production archives remain restorable after this deployment.
-      const metadataPath = ['manifest.json', 'metadata.json']
-        .map((name) => path.join(extractDir, name))
-        .find((candidate) => fs.existsSync(candidate));
-
-      if (!dumpPath) {
-        throw new BadRequestException('Dump PostgreSQL absent (attendu : database/dump.sql, dump.dump ou dump.backup)');
+      const manifestEntry = zip.getEntry('backup-manifest.json');
+      if (manifestEntry) {
+        this.validateBackupManifest(
+          manifestEntry.getData().toString('utf8'),
+          dumpPath,
+        );
+      } else {
+        this.logger.warn(
+          '[RESTORE] Legacy backup detected. Database content will be restored. Embedded MinIO files will be ignored according to DATABASE_ONLY restore policy.',
+        );
       }
-      if (!metadataPath) {
-        throw new BadRequestException('Métadonnées absentes (manifest.json ou metadata.json)');
-      }
-      try {
-        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as Record<string, unknown>;
-        if (
-          metadata.app !== 'Stockini' ||
-          metadata.database !== 'postgresql' || typeof metadata.createdAt !== 'string' ||
-          metadata.storage !== 'minio' || metadata.bucket !== this.minio.bucket ||
-          metadata.backupVersion !== 1
-        ) {
-          throw new Error('champs requis invalides');
-        }
-      } catch (error) {
-        throw new BadRequestException(`manifest.json invalide : ${(error as Error).message}`);
+      const ignoredLegacyFiles = zip
+        .getEntries()
+        .some((entry) =>
+          /^(minio|documents|uploads|pdf|exports|files)\//i.test(
+            entry.entryName,
+          ),
+        );
+      if (ignoredLegacyFiles) {
+        this.logger.warn(
+          '[RESTORE] Legacy file payload detected and ignored; the active MinIO storage will not be modified.',
+        );
       }
       const dumpStat = fs.statSync(dumpPath);
-      if (dumpStat.size === 0) throw new BadRequestException(`Le dump ${path.basename(dumpPath)} est vide`);
+      if (dumpStat.size === 0)
+        throw new BadRequestException(
+          `Le dump ${path.basename(dumpPath)} est vide`,
+        );
       if (path.extname(dumpPath).toLowerCase() === '.sql') {
         const sqlPreview = fs.readFileSync(dumpPath, 'utf8').slice(0, 4096);
         if (sqlPreview.includes('pg_dump not available')) {
           throw new BadRequestException(
-            'Ce backup ne contient pas de dump SQL valide (pg_dump n\'était pas disponible lors de la création)',
+            "Ce backup ne contient pas de dump SQL valide (pg_dump n'était pas disponible lors de la création)",
           );
         }
       }
 
       this.logger.log(`[RESTORE] Database dump path: ${dumpPath}`);
-      this.logger.log(`[RESTORE] Dump detected: ${path.basename(dumpPath)} (${dumpStat.size} bytes)`);
+      this.logger.log(
+        `[RESTORE] Dump detected: ${path.basename(dumpPath)} (${dumpStat.size} bytes)`,
+      );
       this.logger.log(`[RESTORE] ZIP validated`);
 
       const restored: string[] = [];
 
       // 6. Restore SQL
       this.logger.log(`[RESTORE][STEP=postgres] Restore started`);
+      const safetyDumpPath = path.join(
+        this.backupStorage.directory,
+        `pre-restore-${stamp}.dump`,
+      );
+      await this.backupStorage.ensureAccessible();
+      this.dumpPostgres(safetyDumpPath);
+      this.logger.log(
+        `[RESTORE] Safety database dump created: ${safetyDumpPath}`,
+      );
+
       await this.prisma.$disconnect();
       try {
-        this.preparePostgresForRestore();
-        this.restorePostgres(dumpPath);
-        this.deployCurrentMigrations();
+        try {
+          this.preparePostgresForRestore();
+          this.restorePostgres(dumpPath);
+          this.deployCurrentMigrations();
+        } catch (restoreError) {
+          this.logger.error(
+            `[RESTORE] Database restore failed; rolling back from ${safetyDumpPath}`,
+          );
+          try {
+            this.preparePostgresForRestore();
+            this.restorePostgres(safetyDumpPath);
+          } catch (rollbackError) {
+            throw new InternalServerErrorException(
+              `Restauration échouée et rollback PostgreSQL échoué : ${(rollbackError as Error).message}. Backup de sécurité conservé : ${safetyDumpPath}`,
+            );
+          }
+          throw restoreError;
+        }
       } finally {
         await this.prisma.$connect();
       }
@@ -290,29 +387,26 @@ export class DatabaseService {
 
       // The dump may come from an older release. Reconnect the Prisma pool,
       // apply current migrations, and verify the restored schema before success.
-      await this.validateRestoredDatabase();
+      try {
+        await this.validateRestoredDatabase();
+      } catch (validationError) {
+        this.logger.error(
+          '[RESTORE] Post-restore validation failed; restoring safety dump',
+        );
+        await this.prisma.$disconnect();
+        try {
+          this.preparePostgresForRestore();
+          this.restorePostgres(safetyDumpPath);
+        } finally {
+          await this.prisma.$connect();
+        }
+        throw validationError;
+      }
       restored.push('prisma-schema');
 
-      // 7. Restore MinIO only after the database is healthy.
-      const minioDir = path.join(extractDir, 'minio', this.minio.bucket);
-      if (!fs.existsSync(minioDir)) {
-        throw new BadRequestException(`minio/${this.minio.bucket} not found in backup`);
-      }
-      await this.minio.ensureBucketOrThrow(this.minio.bucket);
-      this.logger.log(`[RESTORE] MinIO restore started; replacing bucket ${this.minio.bucket}`);
-      const expectedObjects = await this.importMinio(minioDir, true);
-      const actualObjects = (await this.minio.listAllObjects(this.minio.bucket)).length;
-      if (actualObjects !== expectedObjects) {
-        throw new InternalServerErrorException(
-          `MinIO health check failed: expected ${expectedObjects} objects, found ${actualObjects}`,
-        );
-      }
-      restored.push(`minio/${this.minio.bucket}/`);
-      this.logger.log(`[RESTORE] MinIO restore completed and verified (${actualObjects} objects)`);
-
-      // Final health check after both restore phases are complete.
       await this.validateRestoredDatabase();
-      this.logger.log(`[RESTORE] Final database + MinIO health check passed`);
+      fs.rmSync(safetyDumpPath, { force: true });
+      this.logger.log(`[RESTORE] Final PostgreSQL health check passed`);
 
       // 8. Audit log
       await this.audit.create({
@@ -322,8 +416,17 @@ export class DatabaseService {
         metadata: { restored, restoredBy: user?.email ?? 'system' },
       });
 
-      this.logger.log(`[RESTORE] Restore completed successfully — restored: ${restored.join(', ')}`);
-      return { restored };
+      this.logger.log(
+        `[RESTORE] Restore completed successfully — restored: ${restored.join(', ')}`,
+      );
+      return {
+        restored,
+        backupType: DATABASE_BACKUP_TYPE,
+        containsDatabase: true,
+        containsMinio: false,
+        documentsMustBeRegenerated: true,
+        ignoredLegacyFiles,
+      };
     } catch (err) {
       this.logger.error(
         `[RESTORE][ERROR] ${(err as Error).message}`,
@@ -341,17 +444,35 @@ export class DatabaseService {
     }
   }
 
-  async restoreBackupByFilename(filename: string, user?: AuthUser, options: RestoreOptions = {}): Promise<{ restored: string[] }> {
+  /** Backward-compatible entry point for existing controller integrations. */
+  async restoreBackup(
+    zipBuffer: Buffer,
+    user?: AuthUser,
+    options: RestoreOptions = {},
+  ) {
+    return this.restoreDatabaseBackup(zipBuffer, user, options);
+  }
+
+  async restoreBackupByFilename(
+    filename: string,
+    user?: AuthUser,
+    options: RestoreOptions = {},
+  ) {
     try {
       this.logger.log(`[RESTORE][SOURCE=local] Backup filename: ${filename}`);
-      this.logger.log(`[RESTORE][SOURCE=local] Backup directory: ${this.backupStorage.directory}`);
+      this.logger.log(
+        `[RESTORE][SOURCE=local] Backup directory: ${this.backupStorage.directory}`,
+      );
       const zipBuffer = await this.backupStorage.read(filename);
       return await this.restoreBackup(zipBuffer, user, {
         ...options,
         uploadedFilename: path.basename(filename),
       });
     } catch (error) {
-      this.logger.error(`[RESTORE][FILENAME=${filename}] ${(error as Error).message}`, (error as Error).stack);
+      this.logger.error(
+        `[RESTORE][FILENAME=${filename}] ${(error as Error).message}`,
+        (error as Error).stack,
+      );
       throw error;
     }
   }
@@ -376,17 +497,28 @@ export class DatabaseService {
   ): Promise<Record<string, unknown>[]> {
     const dateFrom = filters?.dateFrom ? new Date(filters.dateFrom) : undefined;
     const dateTo = filters?.dateTo ? new Date(filters.dateTo) : undefined;
-    const dateFilter = dateFrom || dateTo
-      ? { createdAt: { ...(dateFrom ? { gte: dateFrom } : {}), ...(dateTo ? { lte: dateTo } : {}) } }
-      : {};
+    const dateFilter =
+      dateFrom || dateTo
+        ? {
+            createdAt: {
+              ...(dateFrom ? { gte: dateFrom } : {}),
+              ...(dateTo ? { lte: dateTo } : {}),
+            },
+          }
+        : {};
 
     switch (entity) {
       case 'products':
-        return (await this.prisma.product.findMany({
-          where: { deletedAt: null, ...dateFilter },
-          include: { category: { select: { name: true } }, brand: { select: { name: true } } },
-          orderBy: { createdAt: 'desc' },
-        })).map((p) => ({
+        return (
+          await this.prisma.product.findMany({
+            where: { deletedAt: null, ...dateFilter },
+            include: {
+              category: { select: { name: true } },
+              brand: { select: { name: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).map((p) => ({
           reference: p.reference,
           nom: p.name,
           categorie: p.category?.name ?? '',
@@ -400,10 +532,12 @@ export class DatabaseService {
         }));
 
       case 'customers':
-        return (await this.prisma.customer.findMany({
-          where: { ...dateFilter },
-          orderBy: { createdAt: 'desc' },
-        })).map((c) => ({
+        return (
+          await this.prisma.customer.findMany({
+            where: { ...dateFilter },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).map((c) => ({
           reference: c.reference,
           nom: c.name,
           email: c.email ?? '',
@@ -414,10 +548,12 @@ export class DatabaseService {
         }));
 
       case 'suppliers':
-        return (await this.prisma.supplier.findMany({
-          where: { ...dateFilter },
-          orderBy: { createdAt: 'desc' },
-        })).map((s) => ({
+        return (
+          await this.prisma.supplier.findMany({
+            where: { ...dateFilter },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).map((s) => ({
           nom: s.name,
           email: s.email ?? '',
           telephone: s.phone ?? '',
@@ -426,11 +562,13 @@ export class DatabaseService {
         }));
 
       case 'sales':
-        return (await this.prisma.sale.findMany({
-          where: { deletedAt: null, ...dateFilter },
-          include: { customer: { select: { name: true } } },
-          orderBy: { createdAt: 'desc' },
-        })).map((s) => ({
+        return (
+          await this.prisma.sale.findMany({
+            where: { deletedAt: null, ...dateFilter },
+            include: { customer: { select: { name: true } } },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).map((s) => ({
           numero: s.invoiceNumber ?? '',
           client: s.customer?.name ?? '',
           statut: s.status,
@@ -444,11 +582,13 @@ export class DatabaseService {
         }));
 
       case 'purchases':
-        return (await this.prisma.purchase.findMany({
-          where: { deletedAt: null, ...dateFilter },
-          include: { supplier: { select: { name: true } } },
-          orderBy: { createdAt: 'desc' },
-        })).map((p) => ({
+        return (
+          await this.prisma.purchase.findMany({
+            where: { deletedAt: null, ...dateFilter },
+            include: { supplier: { select: { name: true } } },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).map((p) => ({
           numero: p.orderNumber,
           fournisseur: p.supplier?.name ?? '',
           statut: p.status,
@@ -459,11 +599,13 @@ export class DatabaseService {
         }));
 
       case 'payments':
-        return (await this.prisma.payment.findMany({
-          where: { deletedAt: null, ...dateFilter },
-          include: { customer: { select: { name: true } } },
-          orderBy: { createdAt: 'desc' },
-        })).map((p) => ({
+        return (
+          await this.prisma.payment.findMany({
+            where: { deletedAt: null, ...dateFilter },
+            include: { customer: { select: { name: true } } },
+            orderBy: { createdAt: 'desc' },
+          })
+        ).map((p) => ({
           client: p.customer?.name ?? '',
           montant: Number(p.amount),
           type: p.type,
@@ -473,11 +615,13 @@ export class DatabaseService {
         }));
 
       case 'stock':
-        return (await this.prisma.product.findMany({
-          where: { deletedAt: null, isActive: true },
-          include: { category: { select: { name: true } } },
-          orderBy: { quantity: 'asc' },
-        })).map((p) => ({
+        return (
+          await this.prisma.product.findMany({
+            where: { deletedAt: null, isActive: true },
+            include: { category: { select: { name: true } } },
+            orderBy: { quantity: 'asc' },
+          })
+        ).map((p) => ({
           reference: p.reference,
           nom: p.name,
           categorie: p.category?.name ?? '',
@@ -488,12 +632,14 @@ export class DatabaseService {
         }));
 
       case 'audit_logs':
-        return (await this.prisma.auditLog.findMany({
-          where: { ...dateFilter },
-          include: { user: { select: { fullName: true, email: true } } },
-          orderBy: { createdAt: 'desc' },
-          take: 10000,
-        })).map((l) => ({
+        return (
+          await this.prisma.auditLog.findMany({
+            where: { ...dateFilter },
+            include: { user: { select: { fullName: true, email: true } } },
+            orderBy: { createdAt: 'desc' },
+            take: 10000,
+          })
+        ).map((l) => ({
           utilisateur: l.user?.fullName ?? l.user?.email ?? '',
           action: l.action,
           entite: l.entity,
@@ -506,7 +652,10 @@ export class DatabaseService {
     }
   }
 
-  private async toExcel(rows: Record<string, unknown>[], sheetName: string): Promise<Buffer> {
+  private async toExcel(
+    rows: Record<string, unknown>[],
+    sheetName: string,
+  ): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(sheetName);
 
@@ -517,7 +666,11 @@ export class DatabaseService {
 
     const headers = Object.keys(rows[0]);
     const headerRow = ws.addRow(headers);
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E3A5F' },
+    };
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
 
     for (const row of rows) {
@@ -540,13 +693,29 @@ export class DatabaseService {
         headers
           .map((h) => {
             const v = r[h] ?? '';
-            const s = String(v);
-            return s.includes(';') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+            const s = this.stringifyImportValue(v);
+            return s.includes(';') || s.includes('"')
+              ? `"${s.replace(/"/g, '""')}"`
+              : s;
           })
           .join(';'),
       ),
     ];
-    return Buffer.from('﻿' + lines.join('\n'), 'utf8');
+    return Buffer.from('\uFEFF' + lines.join('\n'), 'utf8');
+  }
+
+  private stringifyImportValue(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      return String(value);
+    }
+    if (value instanceof Date) return value.toISOString();
+    return JSON.stringify(value) ?? '';
   }
 
   // ════════════════════════════════════════════════════════════
@@ -566,7 +735,11 @@ export class DatabaseService {
       userId: user?.id,
       action: `database.import.${entity}`,
       entity: 'database',
-      metadata: { entity, inserted: result.inserted, errors: result.errors.length },
+      metadata: {
+        entity,
+        inserted: result.inserted,
+        errors: result.errors.length,
+      },
     });
 
     return result;
@@ -601,26 +774,28 @@ export class DatabaseService {
       mimeType.includes('text/comma');
 
     if (isCsv) {
-      const text = buffer.toString('utf8').replace(/^﻿/, '');
+      const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length < 2) return [];
       const sep = lines[0].includes(';') ? ';' : ',';
       const headers = lines[0].split(sep).map((h) => h.trim().toLowerCase());
       return lines.slice(1).map((line) => {
         const values = line.split(sep);
-        return Object.fromEntries(headers.map((h, i) => [h, values[i]?.trim() ?? '']));
+        return Object.fromEntries(
+          headers.map((h, i) => [h, values[i]?.trim() ?? '']),
+        );
       });
     }
 
     const wb = new ExcelJS.Workbook();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     await wb.xlsx.load(buffer as any);
     const ws = wb.worksheets[0];
     if (!ws) return [];
 
     const headers: string[] = [];
     ws.getRow(1).eachCell((cell) => {
-      headers.push(String(cell.value ?? '').toLowerCase().trim());
+      headers.push(this.stringifyImportValue(cell.value).toLowerCase().trim());
     });
 
     const rows: Record<string, unknown>[] = [];
@@ -636,7 +811,11 @@ export class DatabaseService {
     return rows;
   }
 
-  private validateRow(entity: string, row: Record<string, unknown>, line: number): string[] {
+  private validateRow(
+    entity: string,
+    row: Record<string, unknown>,
+    line: number,
+  ): string[] {
     const errors: string[] = [];
     const required = this.getRequiredFields(entity);
     for (const field of required) {
@@ -674,14 +853,24 @@ export class DatabaseService {
 
       try {
         if (entity === 'products') {
-          const ref = String(row['reference'] || row['ref'] || '').trim() || `IMP-${Date.now()}-${i}`;
-          const exists = await this.prisma.product.findFirst({ where: { reference: ref } });
-          if (exists) { duplicates++; continue; }
+          const ref =
+            this.stringifyImportValue(
+              row['reference'] || row['ref'] || '',
+            ).trim() || `IMP-${Date.now()}-${i}`;
+          const exists = await this.prisma.product.findFirst({
+            where: { reference: ref },
+          });
+          if (exists) {
+            duplicates++;
+            continue;
+          }
 
           const defaultCategory = await this.prisma.category.findFirst();
           const defaultBrand = await this.prisma.brand.findFirst();
           if (!defaultCategory || !defaultBrand) {
-            errors.push(`Ligne ${i + 2} : aucune catégorie/marque disponible pour l'import`);
+            errors.push(
+              `Ligne ${i + 2} : aucune catégorie/marque disponible pour l'import`,
+            );
             continue;
           }
           const uid = `${Date.now()}-${i}`;
@@ -690,10 +879,12 @@ export class DatabaseService {
               idProduct: uid,
               reference: ref,
               sku: `SKU-${uid}`,
-              name: String(row['nom'] ?? row['name'] ?? ''),
+              name: this.stringifyImportValue(row['nom'] ?? row['name']),
               categoryId: defaultCategory.id,
               brandId: defaultBrand.id,
-              purchasePrice: Number(row['prix_achat'] ?? row['purchase_price'] ?? 0),
+              purchasePrice: Number(
+                row['prix_achat'] ?? row['purchase_price'] ?? 0,
+              ),
               salePrice: Number(row['prix_vente'] ?? row['sale_price'] ?? 0),
               quantity: Number(row['quantite'] ?? row['quantity'] ?? 0),
               minStock: Number(row['stock_min'] ?? row['min_stock'] ?? 0),
@@ -701,36 +892,58 @@ export class DatabaseService {
           });
           inserted++;
         } else if (entity === 'customers') {
-          const email = String(row['email'] ?? '').trim();
+          const email = this.stringifyImportValue(row['email']).trim();
           if (email) {
-            const exists = await this.prisma.customer.findFirst({ where: { email } });
-            if (exists) { duplicates++; continue; }
+            const exists = await this.prisma.customer.findFirst({
+              where: { email },
+            });
+            if (exists) {
+              duplicates++;
+              continue;
+            }
           }
-          const refC = String(row['reference'] ?? row['ref'] ?? '').trim() || `IMP-C-${Date.now()}-${i}`;
+          const refC =
+            this.stringifyImportValue(row['reference'] ?? row['ref']).trim() ||
+            `IMP-C-${Date.now()}-${i}`;
           await this.prisma.customer.create({
             data: {
               reference: refC,
-              name: String(row['nom'] ?? row['name'] ?? ''),
+              name: this.stringifyImportValue(row['nom'] ?? row['name']),
               email: email || undefined,
-              phone: String(row['telephone'] ?? row['phone'] ?? '') || undefined,
-              address: String(row['adresse'] ?? row['address'] ?? '') || undefined,
+              phone:
+                this.stringifyImportValue(row['telephone'] ?? row['phone']) ||
+                undefined,
+              address:
+                this.stringifyImportValue(row['adresse'] ?? row['address']) ||
+                undefined,
             },
           });
           inserted++;
         } else if (entity === 'suppliers') {
-          const email = String(row['email'] ?? '').trim();
+          const email = this.stringifyImportValue(row['email']).trim();
           if (email) {
-            const exists = await this.prisma.supplier.findFirst({ where: { email } });
-            if (exists) { duplicates++; continue; }
+            const exists = await this.prisma.supplier.findFirst({
+              where: { email },
+            });
+            if (exists) {
+              duplicates++;
+              continue;
+            }
           }
-          const refS = String(row['reference'] ?? row['ref'] ?? '').trim() || `IMP-S-${Date.now()}-${i}`;
+          const refS =
+            this.stringifyImportValue(row['reference'] ?? row['ref']).trim() ||
+            `IMP-S-${Date.now()}-${i}`;
           await this.prisma.supplier.create({
             data: {
               reference: refS,
-              name: String(row['nom'] ?? row['name'] ?? ''),
+              name: this.stringifyImportValue(row['nom'] ?? row['name']),
               email: email || undefined,
-              phone: String(row['telephone'] ?? row['phone'] ?? '') || undefined,
-              address: String(row['adresse'] ?? row['address'] ?? '') || undefined,
+              phone:
+                this.stringifyImportValue(row['telephone'] ?? row['phone']) ||
+                undefined,
+              address:
+                this.stringifyImportValue(row['adresse'] ?? row['address']) ||
+                undefined,
             },
           });
           inserted++;
@@ -751,13 +964,14 @@ export class DatabaseService {
   // ════════════════════════════════════════════════════════════
 
   async getHealth(): Promise<SystemHealth> {
-    const [dbHealth, minioHealth, smtpHealth, stats, lastBackup] = await Promise.all([
-      this.checkDatabase(),
-      this.checkMinio(),
-      this.checkSmtp(),
-      this.collectStats(),
-      this.getLastBackupDate(),
-    ]);
+    const [dbHealth, minioHealth, smtpHealth, stats, lastBackup] =
+      await Promise.all([
+        this.checkDatabase(),
+        this.checkMinio(),
+        Promise.resolve(this.checkSmtp()),
+        this.collectStats(),
+        this.getLastBackupDate(),
+      ]);
 
     return {
       database: dbHealth,
@@ -770,7 +984,11 @@ export class DatabaseService {
     };
   }
 
-  private async checkDatabase(): Promise<{ status: 'ok' | 'error'; message?: string; responseMs?: number }> {
+  private async checkDatabase(): Promise<{
+    status: 'ok' | 'error';
+    message?: string;
+    responseMs?: number;
+  }> {
     const start = Date.now();
     try {
       await this.prisma.$queryRaw`SELECT 1`;
@@ -780,7 +998,10 @@ export class DatabaseService {
     }
   }
 
-  private async checkMinio(): Promise<{ status: 'ok' | 'error'; message?: string }> {
+  private async checkMinio(): Promise<{
+    status: 'ok' | 'error';
+    message?: string;
+  }> {
     try {
       await this.minio.bucketExists(this.minio.bucket);
       return { status: 'ok' };
@@ -789,7 +1010,10 @@ export class DatabaseService {
     }
   }
 
-  private async checkSmtp(): Promise<{ status: 'ok' | 'error'; message?: string }> {
+  private checkSmtp(): {
+    status: 'ok' | 'error';
+    message?: string;
+  } {
     try {
       const host = this.config.get<string>('SMTP_HOST');
       if (!host) return { status: 'error', message: 'SMTP_HOST non configuré' };
@@ -800,15 +1024,23 @@ export class DatabaseService {
   }
 
   private async collectStats(): Promise<SystemHealth['stats']> {
-    const [customers, products, sales, documents, auditLogs, dbSize] = await Promise.all([
-      this.prisma.customer.count(),
-      this.prisma.product.count({ where: { deletedAt: null } }),
-      this.prisma.sale.count({ where: { deletedAt: null } }),
-      this.prisma.generatedDocument.count({ where: { deletedAt: null } }),
-      this.prisma.auditLog.count(),
-      this.getDbSize(),
-    ]);
-    return { customers, products, sales, documents, auditLogs, dbSizeBytes: dbSize };
+    const [customers, products, sales, documents, auditLogs, dbSize] =
+      await Promise.all([
+        this.prisma.customer.count(),
+        this.prisma.product.count({ where: { deletedAt: null } }),
+        this.prisma.sale.count({ where: { deletedAt: null } }),
+        this.prisma.generatedDocument.count({ where: { deletedAt: null } }),
+        this.prisma.auditLog.count(),
+        this.getDbSize(),
+      ]);
+    return {
+      customers,
+      products,
+      sales,
+      documents,
+      auditLogs,
+      dbSizeBytes: dbSize,
+    };
   }
 
   private async getDbSize(): Promise<number> {
@@ -823,16 +1055,28 @@ export class DatabaseService {
     }
   }
 
-  private inspectBackupStatus(zipPath: string): 'valid' | 'invalid' | 'missing-sql' {
+  private inspectBackupStatus(
+    zipPath: string,
+  ): 'valid' | 'invalid' | 'missing-sql' {
     try {
       const zip = new AdmZip(zipPath);
       const entryNames = zip.getEntries().map((e) => e.entryName);
 
-      if (!entryNames.includes('manifest.json') && !entryNames.includes('metadata.json')) {
+      if (
+        !entryNames.includes('backup-manifest.json') &&
+        !entryNames.includes('manifest.json') &&
+        !entryNames.includes('metadata.json')
+      ) {
         return 'invalid';
       }
-      const dumpEntryName = ['database/dump.sql', 'database/dump.dump', 'database/dump.backup']
-        .find((name) => entryNames.includes(name));
+      const dumpEntryName = [
+        'database.dump',
+        'database.sql',
+        'dump.sql',
+        'database/dump.sql',
+        'database/dump.dump',
+        'database/dump.backup',
+      ].find((name) => entryNames.includes(name));
       if (!dumpEntryName) {
         return 'missing-sql';
       }
@@ -840,8 +1084,7 @@ export class DatabaseService {
       const sqlEntry = zip.getEntry(dumpEntryName);
       if (!sqlEntry) return 'missing-sql';
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const uncompressedSize: number = (sqlEntry as any).header?.size ?? 0;
+      const uncompressedSize = sqlEntry.header.size;
       if (uncompressedSize === 0) return 'invalid';
 
       // Only decompress if very small — the "pg_dump not available" placeholder is ~50 bytes
@@ -878,7 +1121,10 @@ export class DatabaseService {
   // MAINTENANCE
   // ════════════════════════════════════════════════════════════
 
-  async runMaintenance(action: string, user?: AuthUser): Promise<{ message: string; details?: unknown }> {
+  async runMaintenance(
+    action: string,
+    user?: AuthUser,
+  ): Promise<{ message: string; details?: unknown }> {
     let result: { message: string; details?: unknown };
 
     switch (action) {
@@ -920,41 +1166,57 @@ export class DatabaseService {
     const deleted = await this.prisma.auditLog.deleteMany({
       where: { createdAt: { lt: cutoff } },
     });
-    return { message: `${deleted.count} logs supprimés (> 90 jours)`, details: { count: deleted.count } };
+    return {
+      message: `${deleted.count} logs supprimés (> 90 jours)`,
+      details: { count: deleted.count },
+    };
   }
 
-  private async checkDocumentsIntegrity(): Promise<{ message: string; details: unknown }> {
+  private async checkDocumentsIntegrity(): Promise<{
+    message: string;
+    details: unknown;
+  }> {
     const docs = await this.prisma.generatedDocument.findMany({
       select: { id: true, minioObjectKey: true, minioBucket: true },
       where: { deletedAt: null },
     });
     let missing = 0;
     for (const doc of docs) {
-      const exists = await this.minio.objectExists(doc.minioBucket, doc.minioObjectKey).catch(() => false);
+      const exists = await this.minio
+        .objectExists(doc.minioBucket, doc.minioObjectKey)
+        .catch(() => false);
       if (!exists) missing++;
     }
     return {
-      message: missing === 0
-        ? 'Tous les documents sont intacts'
-        : `${missing} document(s) manquant(s) dans MinIO`,
+      message:
+        missing === 0
+          ? 'Tous les documents sont intacts'
+          : `${missing} document(s) manquant(s) dans MinIO`,
       details: { total: docs.length, missing },
     };
   }
 
-  private async checkNegativeStock(): Promise<{ message: string; details: unknown }> {
+  private async checkNegativeStock(): Promise<{
+    message: string;
+    details: unknown;
+  }> {
     const products = await this.prisma.product.findMany({
       where: { quantity: { lt: 0 }, deletedAt: null },
       select: { id: true, name: true, reference: true, quantity: true },
     });
     return {
-      message: products.length === 0
-        ? 'Aucun stock négatif détecté'
-        : `${products.length} produit(s) avec stock négatif`,
+      message:
+        products.length === 0
+          ? 'Aucun stock négatif détecté'
+          : `${products.length} produit(s) avec stock négatif`,
       details: { products },
     };
   }
 
-  private async cleanOldTrash(): Promise<{ message: string; details: unknown }> {
+  private async cleanOldTrash(): Promise<{
+    message: string;
+    details: unknown;
+  }> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const deleted = await this.prisma.sale.deleteMany({
@@ -966,23 +1228,33 @@ export class DatabaseService {
     };
   }
 
-  private async vacuumDatabase(): Promise<{ message: string; details: unknown }> {
+  private async vacuumDatabase(): Promise<{
+    message: string;
+    details: unknown;
+  }> {
     try {
       await this.prisma.$executeRaw`VACUUM ANALYZE`;
       return { message: 'VACUUM ANALYZE exécuté avec succès', details: {} };
     } catch (err) {
-      return { message: `Erreur VACUUM : ${(err as Error).message}`, details: {} };
+      return {
+        message: `Erreur VACUUM : ${(err as Error).message}`,
+        details: {},
+      };
     }
   }
 
-  private async checkOrphanedRecords(): Promise<{ message: string; details: unknown }> {
+  private async checkOrphanedRecords(): Promise<{
+    message: string;
+    details: unknown;
+  }> {
     const orphanedItems = await this.prisma.saleItem.count({
       where: { sale: { deletedAt: { not: null } } },
     });
     return {
-      message: orphanedItems === 0
-        ? 'Aucun enregistrement orphelin détecté'
-        : `${orphanedItems} ligne(s) de vente orpheline(s) trouvées`,
+      message:
+        orphanedItems === 0
+          ? 'Aucun enregistrement orphelin détecté'
+          : `${orphanedItems} ligne(s) de vente orpheline(s) trouvées`,
       details: { orphanedSaleItems: orphanedItems },
     };
   }
@@ -993,13 +1265,16 @@ export class DatabaseService {
 
   @Cron('0 2 * * *')
   async autoBackupCron() {
-    const enabled = this.config.get<string>('AUTO_BACKUP_ENABLED', 'true') === 'true';
+    const enabled =
+      this.config.get<string>('AUTO_BACKUP_ENABLED', 'true') === 'true';
     if (!enabled) return;
 
     this.logger.log('Auto-backup started (cron 02:00)');
     try {
       const result = await this.createBackup();
-      this.logger.log(`Auto-backup completed: ${result.filename} (${result.size} bytes)`);
+      this.logger.log(
+        `Auto-backup completed: ${result.filename} (${result.size} bytes)`,
+      );
     } catch (err) {
       this.logger.error('Auto-backup failed', (err as Error).message);
     }
@@ -1052,34 +1327,181 @@ export class DatabaseService {
         normalized.startsWith('/') ||
         normalized.split('/').includes('..') ||
         path.isAbsolute(normalized);
+      const isDatabasePayload = [
+        'database.dump',
+        'database.sql',
+        'dump.sql',
+        'database/dump.sql',
+        'database/dump.dump',
+        'database/dump.backup',
+      ].includes(normalized);
+      const isMetadata = [
+        'backup-manifest.json',
+        'manifest.json',
+        'metadata.json',
+        'version.json',
+      ].includes(normalized);
+      const isLegacyIgnoredPayload =
+        /^(minio|documents|uploads|pdf|exports|files)(\/|$)/i.test(normalized);
       const isAllowed =
+        isDatabasePayload ||
+        isMetadata ||
         normalized === 'database' ||
         normalized === 'database/' ||
-        ['database/dump.sql', 'database/dump.dump', 'database/dump.backup'].includes(normalized) ||
-        normalized === 'manifest.json' ||
-        normalized === 'metadata.json' ||
-        normalized === 'version.json' ||
-        normalized === 'minio' ||
-        normalized === 'minio/' ||
-        normalized === `minio/${this.minio.bucket}` ||
-        normalized === `minio/${this.minio.bucket}/` ||
-        normalized.startsWith(`minio/${this.minio.bucket}/`);
+        isLegacyIgnoredPayload;
 
       if (isUnsafePath || !isAllowed) {
-        this.logger.warn(`[RESTORE] Rejected unsafe/out-of-scope ZIP entry: ${normalized}`);
+        this.logger.warn(
+          `[RESTORE] Rejected unsafe/out-of-scope ZIP entry: ${normalized}`,
+        );
         throw new BadRequestException(
-          `Archive hors périmètre : ${normalized}. Seuls le dump PostgreSQL, les métadonnées et minio/${this.minio.bucket}/ sont autorisés.`,
+          `Archive hors périmètre : ${normalized}. Seuls le dump PostgreSQL, les métadonnées et les anciens dossiers de fichiers ignorés sont autorisés.`,
         );
       }
     }
     this.logger.log(
-      `[RESTORE] Archive scope validated: database and optional MinIO only; runtime folders are excluded`,
+      `[RESTORE] Archive scope validated: PostgreSQL only; legacy file payloads will be ignored`,
     );
+  }
+
+  private findDatabaseDumpEntry(zip: AdmZip) {
+    for (const name of [
+      'database.dump',
+      'database.sql',
+      'dump.sql',
+      'database/dump.sql',
+      'database/dump.dump',
+      'database/dump.backup',
+    ]) {
+      const entry = zip.getEntry(name);
+      if (entry && !entry.isDirectory) return entry;
+    }
+    return null;
+  }
+
+  private validateBackupManifest(rawManifest: string, dumpPath: string): void {
+    let manifest: DatabaseBackupManifest;
+    try {
+      manifest = JSON.parse(rawManifest) as DatabaseBackupManifest;
+    } catch (error) {
+      throw new BadRequestException(
+        `backup-manifest.json invalide : ${(error as Error).message}`,
+      );
+    }
+    if (
+      manifest.backupVersion !== DATABASE_BACKUP_VERSION ||
+      manifest.type !== DATABASE_BACKUP_TYPE ||
+      manifest.databaseFile !== 'database.dump' ||
+      manifest.databaseFormat !== 'custom' ||
+      manifest.containsDatabase !== true ||
+      manifest.containsMinio !== false ||
+      manifest.containsGeneratedDocuments !== false ||
+      manifest.documentsMustBeRegenerated !== true ||
+      manifest.checksumAlgorithm !== 'sha256' ||
+      typeof manifest.checksums?.['database.dump'] !== 'string'
+    ) {
+      throw new BadRequestException(
+        'backup-manifest.json invalide ou incompatible avec la politique DATABASE_ONLY',
+      );
+    }
+    const actualChecksum = this.sha256File(dumpPath);
+    if (actualChecksum !== manifest.checksums['database.dump']) {
+      throw new BadRequestException(
+        'Checksum SHA-256 invalide pour database.dump',
+      );
+    }
+  }
+
+  private async createBackupManifest(
+    dumpPath: string,
+    createdAt: Date,
+  ): Promise<DatabaseBackupManifest> {
+    const pgDumpVersion = this.commandVersion('pg_dump');
+    const serverVersionRows = await this.prisma.$queryRawUnsafe<
+      Array<{ server_version: string }>
+    >('SHOW server_version');
+    const migrationsDirectory = path.join(
+      process.cwd(),
+      'prisma',
+      'migrations',
+    );
+    const prismaMigrationCount = fs.existsSync(migrationsDirectory)
+      ? fs
+          .readdirSync(migrationsDirectory, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory()).length
+      : 0;
+    const schemaPath = path.join(process.cwd(), 'prisma', 'schema.prisma');
+    const schemaFingerprint = fs.existsSync(schemaPath)
+      ? this.sha256File(schemaPath)
+      : 'unavailable';
+    const git = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    });
+
+    return {
+      backupVersion: DATABASE_BACKUP_VERSION,
+      type: DATABASE_BACKUP_TYPE,
+      createdAt: createdAt.toISOString(),
+      applicationVersion:
+        git.status === 0
+          ? git.stdout.trim()
+          : (process.env.npm_package_version ?? 'unknown'),
+      postgresServerVersion: serverVersionRows[0]?.server_version ?? 'unknown',
+      pgDumpVersion,
+      databaseFormat: 'custom',
+      databaseFile: 'database.dump',
+      containsDatabase: true,
+      containsMinio: false,
+      containsGeneratedDocuments: false,
+      documentsMustBeRegenerated: true,
+      prismaMigrationCount,
+      schemaFingerprint,
+      checksumAlgorithm: 'sha256',
+      checksums: { 'database.dump': this.sha256File(dumpPath) },
+    };
+  }
+
+  private commandVersion(command: string): string {
+    const result = spawnSync(command, ['--version'], { encoding: 'utf8' });
+    return result.status === 0
+      ? (result.stdout || result.stderr).trim()
+      : 'unknown';
+  }
+
+  private sha256File(filePath: string): string {
+    return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  }
+
+  private async assertDatabaseReachable(): Promise<void> {
+    try {
+      await this.prisma.$queryRawUnsafe('SELECT 1');
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `PostgreSQL inaccessible : ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async assertBackupDiskSpace(): Promise<void> {
+    const dbSize = await this.getDbSize();
+    const minimumFreeBytes = Math.max(dbSize * 2, 50 * 1024 * 1024);
+    for (const directory of [os.tmpdir(), this.backupStorage.directory]) {
+      const disk = fs.statfsSync(directory);
+      const freeBytes = Number(disk.bavail) * Number(disk.bsize);
+      if (freeBytes < minimumFreeBytes) {
+        throw new InternalServerErrorException(
+          `Espace disque insuffisant dans ${directory} : ${freeBytes} octets libres, ${minimumFreeBytes} requis`,
+        );
+      }
+    }
   }
 
   private async validateRestoredDatabase(): Promise<void> {
     const requiredTables = ['User', 'Customer', 'Product', 'Sale'];
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ table_name: string }>>(
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{ table_name: string }>
+    >(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
     );
     const found = new Set(rows.map((row) => row.table_name));
@@ -1090,7 +1512,9 @@ export class DatabaseService {
       );
     }
 
-    this.logger.log(`[RESTORE][VALIDATION] ${requiredTables.length} critical tables present`);
+    this.logger.log(
+      `[RESTORE][VALIDATION] ${requiredTables.length} critical tables present`,
+    );
   }
 
   private getPostgresConnection(): PostgresConnection {
@@ -1131,16 +1555,22 @@ export class DatabaseService {
     const connection = this.getPostgresConnection();
     const sql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;';
     const args = [
-      '-h', connection.host, '-p', connection.port, '-U', connection.user,
-      '-d', connection.database, '--set=ON_ERROR_STOP=1', '-c', sql,
+      '-h',
+      connection.host,
+      '-p',
+      connection.port,
+      '-U',
+      connection.user,
+      '-d',
+      connection.database,
+      '--set=ON_ERROR_STOP=1',
+      '-c',
+      sql,
     ];
     this.logger.log(
       `[RESTORE][PREPARE] Command: psql -h ${connection.host} -p ${connection.port} -U ${connection.user} -d ${connection.database} -c "${sql}"`,
     );
-    const result = this.runPostgresCommand(
-      'psql',
-      args,
-    );
+    const result = this.runPostgresCommand('psql', args);
     this.assertPostgresCommandSucceeded('Préparation PostgreSQL', result);
   }
 
@@ -1155,7 +1585,9 @@ export class DatabaseService {
       maxBuffer: 500 * 1024 * 1024,
     });
     if (result.error) {
-      this.logger.error(`[RESTORE] Impossible d'exécuter ${tool}: ${result.error.message}`);
+      this.logger.error(
+        `[RESTORE] Impossible d'exécuter ${tool}: ${result.error.message}`,
+      );
       throw new InternalServerErrorException(
         "postgresql-client n'est pas installé dans l'image backend.",
       );
@@ -1167,13 +1599,27 @@ export class DatabaseService {
     operation: string,
     result: ReturnType<typeof spawnSync>,
   ): void {
-    const stdout = result.stdout ? Buffer.from(result.stdout as any).toString('utf8').trim() : '';
-    const stderr = result.stderr ? Buffer.from(result.stderr as any).toString('utf8').trim() : '';
-    this.logger.log(`[RESTORE] ${operation} exit code: ${result.status ?? 'interrupted'}`);
+    const stdout = result.stdout
+      ? Buffer.from(result.stdout as any)
+          .toString('utf8')
+          .trim()
+      : '';
+    const stderr = result.stderr
+      ? Buffer.from(result.stderr as any)
+          .toString('utf8')
+          .trim()
+      : '';
+    this.logger.log(
+      `[RESTORE] ${operation} exit code: ${result.status ?? 'interrupted'}`,
+    );
     this.logger.log(`[RESTORE] ${operation} stdout: ${stdout || '(empty)'}`);
     this.logger.log(`[RESTORE] ${operation} stderr: ${stderr || '(empty)'}`);
     if (result.status !== 0) {
-      if (/could not connect|connection refused|connection.*failed|password authentication failed|no pg_hba\.conf entry|could not translate host name/i.test(stderr)) {
+      if (
+        /could not connect|connection refused|connection.*failed|password authentication failed|no pg_hba\.conf entry|could not translate host name/i.test(
+          stderr,
+        )
+      ) {
         throw new InternalServerErrorException(
           'Connexion PostgreSQL impossible. Vérifier POSTGRES_HOST/PORT/USER/PASSWORD/DB.',
         );
@@ -1185,8 +1631,16 @@ export class DatabaseService {
   }
 
   private deployCurrentMigrations(): void {
-    this.logger.log('[RESTORE][STEP=prisma-migrate] Applying pending migrations');
-    const prismaCli = path.join(process.cwd(), 'node_modules', 'prisma', 'build', 'index.js');
+    this.logger.log(
+      '[RESTORE][STEP=prisma-migrate] Applying pending migrations',
+    );
+    const prismaCli = path.join(
+      process.cwd(),
+      'node_modules',
+      'prisma',
+      'build',
+      'index.js',
+    );
     if (!fs.existsSync(prismaCli)) {
       throw new InternalServerErrorException(
         'Migration Prisma impossible : CLI Prisma absent du conteneur',
@@ -1204,7 +1658,9 @@ export class DatabaseService {
     );
     const stdout = result.stdout?.trim() ?? '';
     const stderr = result.stderr?.trim() ?? '';
-    this.logger.log(`[RESTORE][STEP=prisma-migrate] Exit code: ${result.status ?? 'interrupted'}`);
+    this.logger.log(
+      `[RESTORE][STEP=prisma-migrate] Exit code: ${result.status ?? 'interrupted'}`,
+    );
     if (stdout) this.logger.log(`[RESTORE][STEP=prisma-migrate] ${stdout}`);
     if (result.error || result.status !== 0) {
       throw new InternalServerErrorException(
@@ -1214,47 +1670,67 @@ export class DatabaseService {
     this.logger.log('[RESTORE][STEP=prisma-migrate] Schema is current');
   }
 
-  private async dumpPostgres(outputPath: string): Promise<void> {
-    const { user, password, host, port, database: dbName } = this.getPostgresConnection();
+  private dumpPostgres(outputPath: string): void {
+    const {
+      user,
+      password,
+      host,
+      port,
+      database: dbName,
+    } = this.getPostgresConnection();
 
-    this.logger.log(`[PG_DUMP] Starting — db=${dbName} host=${host} port=${port} user=${user}`);
+    this.logger.log(
+      `[PG_DUMP] Starting — db=${dbName} host=${host} port=${port} user=${user}`,
+    );
     this.logger.log(`[PG_DUMP] Output path: ${outputPath}`);
 
-    this.logger.log(`[PG_DUMP] Command: pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName}`);
+    this.logger.log(
+      `[PG_DUMP] Command: pg_dump --format=custom --no-owner --no-privileges --file=${outputPath} -h ${host} -p ${port} -U ${user} -d ${dbName}`,
+    );
     const result = spawnSync(
       'pg_dump',
       [
         '--no-password',
-        '--format=plain',
-        '--encoding=UTF8',
-        '--clean',
-        '--if-exists',
+        '--format=custom',
         '--no-owner',
         '--no-privileges',
-        '-h', host,
-        '-p', port,
-        '-U', user,
+        `--file=${outputPath}`,
+        '-h',
+        host,
+        '-p',
+        port,
+        '-U',
+        user,
         dbName,
       ],
-      { env: { ...process.env, PGPASSWORD: password }, maxBuffer: 500 * 1024 * 1024, encoding: 'buffer' },
+      {
+        env: { ...process.env, PGPASSWORD: password },
+        maxBuffer: 50 * 1024 * 1024,
+        encoding: 'buffer',
+      },
     );
 
     if (result.error) {
-      this.logger.error(`[PG_DUMP] Impossible d'exécuter pg_dump: ${result.error.message}`);
+      this.logger.error(
+        `[PG_DUMP] Impossible d'exécuter pg_dump: ${result.error.message}`,
+      );
       throw new InternalServerErrorException(
         "postgresql-client n'est pas installé dans l'image backend.",
       );
     }
 
-    const stderr = result.stderr ? Buffer.from(result.stderr).toString('utf8').trim() : '';
-    const stdout = result.stdout ? Buffer.from(result.stdout) : Buffer.alloc(0);
-
+    const stderr = result.stderr
+      ? Buffer.from(result.stderr).toString('utf8').trim()
+      : '';
     this.logger.log(`[PG_DUMP] Exit code: ${result.status}`);
     if (stderr) this.logger.log(`[PG_DUMP] STDERR: ${stderr}`);
-    this.logger.log(`[PG_DUMP] SQL size: ${stdout.length} bytes`);
 
     if (result.status !== 0) {
-      if (/could not connect|connection refused|connection.*failed|password authentication failed|no pg_hba\.conf entry|could not translate host name/i.test(stderr)) {
+      if (
+        /could not connect|connection refused|connection.*failed|password authentication failed|no pg_hba\.conf entry|could not translate host name/i.test(
+          stderr,
+        )
+      ) {
         throw new InternalServerErrorException(
           'Connexion PostgreSQL impossible. Vérifier POSTGRES_HOST/PORT/USER/PASSWORD/DB.',
         );
@@ -1264,31 +1740,64 @@ export class DatabaseService {
       );
     }
 
-    if (stdout.length === 0) {
-      throw new InternalServerErrorException('pg_dump a produit un fichier SQL vide');
+    if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+      throw new InternalServerErrorException('pg_dump a produit un dump vide');
     }
-
-    const sqlPreview = stdout.slice(0, 200).toString('utf8');
-    this.logger.log(`[PG_DUMP] SQL preview: ${sqlPreview.replace(/\n/g, ' ').substring(0, 150)}`);
-
-    fs.writeFileSync(outputPath, stdout);
-    this.logger.log(`[PG_DUMP] SQL dump written successfully: ${outputPath} (${stdout.length} bytes)`);
+    this.logger.log(
+      `[PG_DUMP] Custom dump written successfully: ${outputPath} (${fs.statSync(outputPath).size} bytes)`,
+    );
   }
 
   private restorePostgres(dumpPath: string): void {
     const connection = this.getPostgresConnection();
     const extension = path.extname(dumpPath).toLowerCase();
-    const signature = fs.readFileSync(dumpPath).subarray(0, 5).toString('ascii');
-    const isCustomDump = signature === 'PGDMP' || extension === '.dump' || extension === '.backup';
+    const signature = fs
+      .readFileSync(dumpPath)
+      .subarray(0, 5)
+      .toString('ascii');
+    const isCustomDump =
+      signature === 'PGDMP' || extension === '.dump' || extension === '.backup';
     const isPlainSql = !isCustomDump;
     const tool = isPlainSql ? 'psql' : 'pg_restore';
     const common = [
-      '-h', connection.host, '-p', connection.port,
-      '-U', connection.user, '-d', connection.database,
+      '-h',
+      connection.host,
+      '-p',
+      connection.port,
+      '-U',
+      connection.user,
+      '-d',
+      connection.database,
     ];
+    let effectiveDumpPath = dumpPath;
+    if (isPlainSql) {
+      const sql = fs.readFileSync(dumpPath, 'utf8');
+      const sanitized = sql.replace(
+        /^\s*SET\s+transaction_timeout\s*=\s*0\s*;\s*$/gim,
+        '',
+      );
+      if (sanitized !== sql) {
+        effectiveDumpPath = path.join(
+          path.dirname(dumpPath),
+          'dump-without-transaction-timeout.sql',
+        );
+        fs.writeFileSync(effectiveDumpPath, sanitized, { mode: 0o600 });
+        this.logger.warn(
+          '[RESTORE] Removed legacy SET transaction_timeout = 0 compatibility statement',
+        );
+      }
+    }
     const nativeArgs = isPlainSql
-      ? [...common, '--set=ON_ERROR_STOP=1', '-f', dumpPath]
-      : [...common, '--clean', '--if-exists', '--no-owner', '--no-privileges', dumpPath];
+      ? [...common, '--set=ON_ERROR_STOP=1', '-f', effectiveDumpPath]
+      : [
+          ...common,
+          '--clean',
+          '--if-exists',
+          '--no-owner',
+          '--no-privileges',
+          '--exit-on-error',
+          effectiveDumpPath,
+        ];
     this.logger.log(
       `[RESTORE] Dump format: ${isPlainSql ? 'plain SQL' : 'PostgreSQL custom'} (extension=${extension}, signature=${signature === 'PGDMP' ? 'PGDMP' : 'text'})`,
     );
@@ -1300,50 +1809,61 @@ export class DatabaseService {
     this.logger.log(`[RESTORE] PostgreSQL restore completed successfully`);
   }
 
-  private async exportMinio(targetDir: string): Promise<void> {
-    const keys = await this.minio.listAllObjects(this.minio.bucket);
-    for (const key of keys) {
-      const buf = await this.minio.getObject(this.minio.bucket, key);
-      const targetRoot = path.resolve(targetDir);
-      const destPath = path.resolve(targetRoot, key.replace(/\//g, path.sep));
-      if (destPath !== targetRoot && !destPath.startsWith(`${targetRoot}${path.sep}`)) {
-        throw new InternalServerErrorException(`Clé MinIO hors périmètre : ${key}`);
-      }
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.writeFileSync(destPath, buf);
-    }
-    this.logger.log(`[BACKUP] MinIO: exported ${keys.length} object(s)`);
-  }
-
-  private async importMinio(sourceDir: string, clearExisting = false): Promise<number> {
-    const walk = (dir: string): string[] => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      const files: string[] = [];
-      for (const e of entries) {
-        const full = path.join(dir, e.name);
-        if (e.isDirectory()) files.push(...walk(full));
-        else files.push(full);
-      }
-      return files;
-    };
-
-    const files = walk(sourceDir);
-    if (clearExisting) {
-      const existingKeys = await this.minio.listAllObjects(this.minio.bucket);
-      for (const key of existingKeys) await this.minio.removeObject(this.minio.bucket, key);
-      this.logger.log(`[RESTORE] MinIO: removed ${existingKeys.length} existing object(s)`);
-    }
-    for (const f of files) {
-      const objName = path.relative(sourceDir, f).replace(/\\/g, '/');
-      const buf = fs.readFileSync(f);
-      await this.minio.putObject(this.minio.bucket, objName, buf, 'application/octet-stream');
-    }
-    return files.length;
-  }
-
-  private createZip(sourceDir: string, destPath: string): void {
+  private createDatabaseZip(
+    dumpPath: string,
+    manifestPath: string,
+    destPath: string,
+  ): void {
     const zip = new AdmZip();
-    zip.addLocalFolder(sourceDir, '');
+    zip.addLocalFile(dumpPath, '', 'database.dump');
+    zip.addLocalFile(manifestPath, '', 'backup-manifest.json');
     zip.writeZip(destPath);
+  }
+
+  private validateDatabaseZip(zipPath: string): void {
+    const zip = new AdmZip(zipPath);
+    const names = zip
+      .getEntries()
+      .filter((entry) => !entry.isDirectory)
+      .map((entry) => entry.entryName)
+      .sort();
+    if (
+      names.length !== 2 ||
+      names[0] !== 'backup-manifest.json' ||
+      names[1] !== 'database.dump'
+    ) {
+      throw new InternalServerErrorException(
+        `Contenu ZIP DATABASE_ONLY invalide : ${names.join(', ')}`,
+      );
+    }
+    const dumpEntry = zip.getEntry('database.dump');
+    if (!dumpEntry || dumpEntry.getData().length === 0) {
+      throw new InternalServerErrorException('database.dump absent ou vide');
+    }
+    this.validateBackupManifest(
+      zip.getEntry('backup-manifest.json')!.getData().toString('utf8'),
+      (() => {
+        const checkPath = path.join(
+          path.dirname(zipPath),
+          'database.dump.check',
+        );
+        fs.writeFileSync(checkPath, dumpEntry.getData(), { mode: 0o600 });
+        return checkPath;
+      })(),
+    );
+    fs.rmSync(path.join(path.dirname(zipPath), 'database.dump.check'), {
+      force: true,
+    });
+  }
+
+  private readBackupType(zipPath: string): BackupInfo['type'] {
+    try {
+      const zip = new AdmZip(zipPath);
+      return zip.getEntry('backup-manifest.json')
+        ? DATABASE_BACKUP_TYPE
+        : 'LEGACY';
+    } catch {
+      return 'LEGACY';
+    }
   }
 }

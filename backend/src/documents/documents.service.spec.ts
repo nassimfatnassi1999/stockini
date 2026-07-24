@@ -1,8 +1,4 @@
-import {
-  DocumentStatus,
-  DocumentType,
-  Prisma,
-} from '@prisma/client';
+import { DocumentStatus, DocumentType, Prisma } from '@prisma/client';
 import { DocumentsService } from './documents.service';
 
 const sale = {
@@ -47,6 +43,8 @@ function createService(generatedDocument: Record<string, jest.Mock>) {
   const minio = {
     bucket: 'documents',
     putObject: jest.fn().mockResolvedValue(undefined),
+    objectExists: jest.fn().mockResolvedValue(true),
+    getObject: jest.fn().mockResolvedValue(Buffer.from('pdf')),
   };
   const pdf = {
     generateSaleDocument: jest.fn().mockResolvedValue(Buffer.from('pdf')),
@@ -62,6 +60,7 @@ function createService(generatedDocument: Record<string, jest.Mock>) {
     ),
     prisma,
     generatedDocument,
+    minio,
     pdf,
   };
 }
@@ -117,14 +116,17 @@ describe('DocumentsService.generate', () => {
       documentNumber: 'DEVIS-DEV-002',
       status: DocumentStatus.GENERATED,
     };
-    const conflict = new Prisma.PrismaClientKnownRequestError('Unique conflict', {
-      code: 'P2002',
-      clientVersion: 'test',
-      meta: {
-        modelName: 'GeneratedDocument',
-        target: ['documentNumber'],
+    const conflict = new Prisma.PrismaClientKnownRequestError(
+      'Unique conflict',
+      {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: {
+          modelName: 'GeneratedDocument',
+          target: ['documentNumber'],
+        },
       },
-    });
+    );
     const generatedDocument = {
       findFirst: jest
         .fn()
@@ -214,23 +216,58 @@ describe('DocumentsService.generate', () => {
       isConsolidated: true,
       consolidationStatus: 'ACTIVE',
       items: [{ ...sale.items[0], sourceReference: 'BL-001' }],
-      consolidationSources: [{ sourceReference: 'BL-001' }, { sourceReference: 'BL-002' }],
+      consolidationSources: [
+        { sourceReference: 'BL-001' },
+        { sourceReference: 'BL-002' },
+      ],
     };
-    const generatedDocument = { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(({ data }) => Promise.resolve(data)), update: jest.fn() };
+    const generatedDocument = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn(({ data }) => Promise.resolve(data)),
+      update: jest.fn(),
+    };
     const created = createService(generatedDocument);
     created.prisma.sale.findFirst.mockResolvedValue(consolidatedSale);
 
-    const result = await created.service.generate({ invoiceIds: ['grouped-1'], documentType: DocumentType.FACTURE });
+    const result = await created.service.generate({
+      invoiceIds: ['grouped-1'],
+      documentType: DocumentType.FACTURE,
+    });
 
     expect(result.documents).toHaveLength(1);
-    expect(generatedDocument.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ documentNumber: 'FACTURE-BLG-2026-001' }),
-    }));
+    expect(generatedDocument.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          documentNumber: 'FACTURE-BLG-2026-001',
+        }),
+      }),
+    );
     expect(created.pdf.generateSaleDocument).toHaveBeenCalledTimes(1);
     expect(created.pdf.generateSaleDocument).toHaveBeenCalledWith(
       expect.objectContaining({ sourceReferences: ['BL-001', 'BL-002'] }),
       DocumentType.FACTURE,
       expect.any(Object),
     );
+  });
+});
+
+describe('DocumentsService missing restored files', () => {
+  it('returns a clear regeneration message when the PDF is absent', async () => {
+    const document = {
+      id: 'doc-missing',
+      fileName: 'FACTURE-001.pdf',
+      minioBucket: 'documents',
+      minioObjectKey: 'documents/ventes/facture/FACTURE-001.pdf',
+      deletedAt: null,
+    };
+    const created = createService({
+      findFirst: jest.fn().mockResolvedValue(document),
+    });
+    created.minio.objectExists.mockResolvedValue(false);
+
+    await expect(
+      created.service.getDownloadBuffer(document.id),
+    ).rejects.toThrow('Vous pouvez le régénérer');
+    expect(created.minio.getObject).not.toHaveBeenCalled();
   });
 });

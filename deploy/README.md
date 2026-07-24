@@ -433,7 +433,11 @@ bash deploy/vps/setup_frontend.sh
 pm2 status
 ```
 
-La restauration depuis l'interface admin est limitée à PostgreSQL par défaut. MinIO doit être sélectionné explicitement ; aucun backup ne doit contenir ou modifier `frontend/.next`, `frontend/public` ou les fichiers runtime du projet.
+La sauvegarde et la restauration depuis l'interface admin sont strictement
+limitées à PostgreSQL. Le ZIP contient uniquement `database.dump` et
+`backup-manifest.json`. Les fichiers MinIO, PDF, images et exports ne sont
+jamais sauvegardés ni restaurés. Dans un ancien ZIP, les dossiers de fichiers
+sont acceptés mais ignorés, sans suppression ni remplacement du MinIO actif.
 
 ---
 

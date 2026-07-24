@@ -1,4 +1,8 @@
-import { DatabaseService, MAX_BACKUPS, type BackupInfo } from './database.service';
+import {
+  DatabaseService,
+  MAX_BACKUPS,
+  type BackupInfo,
+} from './database.service';
 
 describe('DatabaseService backup retention', () => {
   const backup = (position: number): BackupInfo => ({
@@ -6,7 +10,7 @@ describe('DatabaseService backup retention', () => {
     size: position,
     createdAt: new Date(Date.UTC(2026, 6, position, 2)).toISOString(),
     createdBy: 'system',
-    type: 'full',
+    type: 'DATABASE_ONLY',
     path: `/backups/backup-${position}.zip`,
     status: 'valid',
   });
@@ -28,9 +32,11 @@ describe('DatabaseService backup retention', () => {
     const backups = [7, 6, 5, 4, 3, 2, 1].map(backup);
     const { service, remove } = makeService(backups);
 
-    await (service as unknown as { applyBackupRetention(): Promise<void> })
-      .applyBackupRetention();
+    await (
+      service as unknown as { applyBackupRetention(): Promise<void> }
+    ).applyBackupRetention();
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     expect(remove.mock.calls.map(([filename]) => filename)).toEqual(
       backups.slice(MAX_BACKUPS).map(({ filename }) => filename),
     );
@@ -42,8 +48,9 @@ describe('DatabaseService backup retention', () => {
     remove.mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(
-      (service as unknown as { applyBackupRetention(): Promise<void> })
-        .applyBackupRetention(),
+      (
+        service as unknown as { applyBackupRetention(): Promise<void> }
+      ).applyBackupRetention(),
     ).resolves.toBeUndefined();
   });
 });

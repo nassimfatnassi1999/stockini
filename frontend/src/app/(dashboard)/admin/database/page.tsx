@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -27,19 +27,19 @@ import {
   XCircle,
   Plus,
   Eye,
-} from 'lucide-react';
-import { api } from '@/lib/api';
-import { clearAuthSession } from '@/lib/auth';
-import { toast } from '@/lib/toast';
-import { usePermissions } from '@/lib/hooks/usePermissions';
-import { PermissionGuard } from '@/components/shared/PermissionGuard';
-import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
-import { Can } from '@/components/shared/Can';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
+} from "lucide-react";
+import { api } from "@/lib/api";
+import { clearAuthSession } from "@/lib/auth";
+import { toast } from "@/lib/toast";
+import { usePermissions } from "@/lib/hooks/usePermissions";
+import { PermissionGuard } from "@/components/shared/PermissionGuard";
+import { KebabMenu } from "@/components/stockini/shared/KebabMenu";
+import { Can } from "@/components/shared/Can";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,13 +49,13 @@ interface BackupInfo {
   createdAt: string;
   createdBy: string;
   type: string;
-  status?: 'valid' | 'invalid' | 'missing-sql';
+  status?: "valid" | "invalid" | "missing-sql";
 }
 
 interface SystemHealth {
-  database: { status: 'ok' | 'error'; message?: string; responseMs?: number };
-  minio: { status: 'ok' | 'error'; message?: string };
-  smtp: { status: 'ok' | 'error'; message?: string };
+  database: { status: "ok" | "error"; message?: string; responseMs?: number };
+  minio: { status: "ok" | "error"; message?: string };
+  smtp: { status: "ok" | "error"; message?: string };
   disk: { backupsSize: number; uploadsSize: number };
   stats: {
     customers: number;
@@ -77,35 +77,55 @@ interface ImportPreview {
 interface SystemdService {
   name: string;
   serviceName: string;
-  status: 'active' | 'inactive' | 'failed' | 'not_found';
+  status: "active" | "inactive" | "failed" | "not_found";
   healthy: boolean;
 }
 
 interface InfrastructureStats {
-  cpu: { usage: number; cores: number; temperature: number | null; model: string };
+  cpu: {
+    usage: number;
+    cores: number;
+    temperature: number | null;
+    model: string;
+  };
   ram: { total: number; used: number; free: number; usagePercent: number };
   disk: { total: number; used: number; free: number; usagePercent: number };
-  system: { uptime: string; platform: string; hostname: string; loadAverage: number[] };
-  docker?: { containersRunning: number; containersStopped: number; unavailable?: boolean };
+  system: {
+    uptime: string;
+    platform: string;
+    hostname: string;
+    loadAverage: number[];
+  };
+  docker?: {
+    containersRunning: number;
+    containersStopped: number;
+    unavailable?: boolean;
+  };
   services?: SystemdService[];
   network: { rx: string; tx: string };
-  deployment: { mode: 'docker' | 'systemd'; environment: 'development' | 'production' };
+  deployment: {
+    mode: "docker" | "systemd";
+    environment: "development" | "production";
+  };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B';
+  if (!bytes || bytes === 0) return "0 B";
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('fr-FR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+  return new Date(iso).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
@@ -118,17 +138,23 @@ function formatUptime(seconds: number): string {
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
-function StatusBadge({ status, label }: { status: 'ok' | 'error'; label: string }) {
+function StatusBadge({
+  status,
+  label,
+}: {
+  status: "ok" | "error";
+  label: string;
+}) {
   return (
-    <div className={cn(
-      'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium',
-      status === 'ok'
-        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-    )}>
-      {status === 'ok'
-        ? <CheckCircle2 size={13} />
-        : <XCircle size={13} />}
+    <div
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+        status === "ok"
+          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+      )}
+    >
+      {status === "ok" ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
       {label}
     </div>
   );
@@ -137,14 +163,14 @@ function StatusBadge({ status, label }: { status: 'ok' | 'error'; label: string 
 // ─── Backup Status Badge ──────────────────────────────────────────────────────
 
 function BackupStatusBadge({ status }: { status?: string }) {
-  if (status === 'invalid') {
+  if (status === "invalid") {
     return (
       <div className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
         <XCircle size={10} /> Invalide
       </div>
     );
   }
-  if (status === 'missing-sql') {
+  if (status === "missing-sql") {
     return (
       <div className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
         <AlertTriangle size={10} /> SQL manquant
@@ -175,22 +201,29 @@ function ConfirmDialog({
   open,
   title,
   message,
-  confirmText = 'Confirmer',
-  confirmKeyword = 'CONFIRMER',
+  confirmText = "Confirmer",
+  confirmKeyword = "CONFIRMER",
   dangerous,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const [typed, setTyped] = useState('');
+  const [typed, setTyped] = useState("");
   const needsTyping = dangerous;
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-3" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-3"
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="max-h-[calc(100dvh-24px)] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-xl sm:p-6">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
-            <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
+            <AlertTriangle
+              size={20}
+              className="text-red-600 dark:text-red-400"
+            />
           </div>
           <h3 className="text-base font-semibold text-text-primary">{title}</h3>
         </div>
@@ -198,7 +231,11 @@ function ConfirmDialog({
         {needsTyping && (
           <div className="mb-4">
             <p className="mb-2 text-xs font-medium text-text-secondary">
-              Tapez <span className="font-mono font-bold text-red-600">{confirmKeyword}</span> pour valider
+              Tapez{" "}
+              <span className="font-mono font-bold text-red-600">
+                {confirmKeyword}
+              </span>{" "}
+              pour valider
             </p>
             <input
               type="text"
@@ -211,12 +248,17 @@ function ConfirmDialog({
           </div>
         )}
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>Annuler</Button>
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Annuler
+          </Button>
           <Button
             size="sm"
             className="bg-red-600 text-white hover:bg-red-700"
             disabled={needsTyping && typed !== confirmKeyword}
-            onClick={() => { setTyped(''); onConfirm(); }}
+            onClick={() => {
+              setTyped("");
+              onConfirm();
+            }}
           >
             {confirmText}
           </Button>
@@ -235,17 +277,21 @@ function BackupsTab() {
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [confirm, setConfirm] = useState<{ type: 'delete' | 'restore-file' | 'restore-server'; filename?: string } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    type: "delete" | "restore-file" | "restore-server";
+    filename?: string;
+  } | null>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
   const [restoring, setRestoring] = useState(false);
 
   const readRestoreError = (payload: unknown, status: number): string => {
-    if (payload && typeof payload === 'object') {
-      const value = (payload as { details?: unknown }).details ??
+    if (payload && typeof payload === "object") {
+      const value =
+        (payload as { details?: unknown }).details ??
         (payload as { message?: unknown; error?: unknown }).message ??
         (payload as { error?: unknown }).error;
-      if (Array.isArray(value)) return value.join(', ');
-      if (typeof value === 'string' && value.trim()) return value;
+      if (Array.isArray(value)) return value.join(", ");
+      if (typeof value === "string" && value.trim()) return value;
     }
     return `Erreur HTTP ${status}`;
   };
@@ -253,10 +299,12 @@ function BackupsTab() {
   const loadBackups = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get<BackupInfo[]>('/admin/database/backups');
+      const { data } = await api.get<BackupInfo[]>("/admin/database/backups");
       setBackups(data);
     } catch (error) {
-      const payload = (error as { response?: { data?: unknown; status?: number } }).response;
+      const payload = (
+        error as { response?: { data?: unknown; status?: number } }
+      ).response;
       toast.error(readRestoreError(payload?.data, payload?.status ?? 500));
     } finally {
       setLoading(false);
@@ -266,15 +314,20 @@ function BackupsTab() {
   const createBackup = async () => {
     setCreating(true);
     try {
-      const { data } = await api.post<{ success: boolean; filename: string; size: number }>(
-        '/admin/database/backups/create',
-        {},
-      );
+      const { data } = await api.post<{
+        success: boolean;
+        filename: string;
+        size: number;
+      }>("/admin/database/backups", {});
       toast.success(`Sauvegarde créée : ${data.filename}`);
       await loadBackups();
     } catch (error) {
-      const payload = (error as { response?: { data?: unknown; status?: number } }).response;
-      toast.error(`Échec de la création : ${readRestoreError(payload?.data, payload?.status ?? 500)}`);
+      const payload = (
+        error as { response?: { data?: unknown; status?: number } }
+      ).response;
+      toast.error(
+        `Échec de la création : ${readRestoreError(payload?.data, payload?.status ?? 500)}`,
+      );
     } finally {
       setCreating(false);
     }
@@ -284,26 +337,35 @@ function BackupsTab() {
     try {
       const { data: blob } = await api.get<Blob>(
         `/admin/database/backups/${encodeURIComponent(filename)}/download`,
-        { responseType: 'blob' },
+        { responseType: "blob" },
       );
-      if (blob.size === 0) throw new Error('Fichier reçu vide');
+      if (blob.size === 0) throw new Error("Fichier reçu vide");
       const burl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = burl;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(burl);
-      toast.success('Sauvegarde téléchargée');
+      toast.success("Sauvegarde téléchargée");
     } catch (err) {
-      const response = (err as { response?: { data?: Blob; status?: number } }).response;
+      const response = (err as { response?: { data?: Blob; status?: number } })
+        .response;
       let message = (err as Error).message;
-      if (response?.data instanceof Blob && response.data.type.includes('json')) {
+      if (
+        response?.data instanceof Blob &&
+        response.data.type.includes("json")
+      ) {
         try {
-          const payload = JSON.parse(await response.data.text()) as { message?: string; details?: string };
+          const payload = JSON.parse(await response.data.text()) as {
+            message?: string;
+            details?: string;
+          };
           message = payload.details ?? payload.message ?? message;
-        } catch { /* keep transport error */ }
+        } catch {
+          /* keep transport error */
+        }
       }
       toast.error(`Erreur téléchargement : ${message}`);
     }
@@ -311,62 +373,79 @@ function BackupsTab() {
 
   const deleteBackup = async (filename: string) => {
     try {
-      await api.delete(`/admin/database/backups/${encodeURIComponent(filename)}`);
-      toast.success('Sauvegarde supprimée');
+      await api.delete(
+        `/admin/database/backups/${encodeURIComponent(filename)}`,
+      );
+      toast.success("Sauvegarde supprimée");
       await loadBackups();
     } catch (error) {
-      const payload = (error as { response?: { data?: unknown; status?: number } }).response;
-      toast.error(`Erreur suppression : ${readRestoreError(payload?.data, payload?.status ?? 500)}`);
+      const payload = (
+        error as { response?: { data?: unknown; status?: number } }
+      ).response;
+      toast.error(
+        `Erreur suppression : ${readRestoreError(payload?.data, payload?.status ?? 500)}`,
+      );
     }
   };
 
   const handleRestoreFile = async (file: File) => {
     setRestoring(true);
-    window.sessionStorage.setItem('stockini_restore_in_progress', '1');
+    window.sessionStorage.setItem("stockini_restore_in_progress", "1");
     let restoreSucceeded = false;
     try {
       const form = new FormData();
-      form.append('file', file);
-      await api.post('/admin/database/restore', form);
+      form.append("file", file);
+      await api.post("/admin/database/restore", form);
 
       restoreSucceeded = true;
       clearAuthSession();
       window.sessionStorage.setItem(
-        'stockini_restore_message',
-        'Restauration terminée. Veuillez vous reconnecter.',
+        "stockini_restore_message",
+        "Restauration terminée. Veuillez vous reconnecter.",
       );
-      toast.success('Restauration terminée. Veuillez vous reconnecter.');
-      window.history.replaceState(null, '', '/login');
+      toast.success("Restauration terminée. Veuillez vous reconnecter.");
+      window.history.replaceState(null, "", "/login");
       window.setTimeout(() => window.location.reload(), 500);
     } catch (err) {
-      window.sessionStorage.removeItem('stockini_restore_in_progress');
-      const response = (err as { response?: { data?: unknown; status?: number } }).response;
-      toast.error(`Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`);
+      window.sessionStorage.removeItem("stockini_restore_in_progress");
+      const response = (
+        err as { response?: { data?: unknown; status?: number } }
+      ).response;
+      toast.error(
+        `Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`,
+      );
     } finally {
       if (!restoreSucceeded) setRestoring(false);
-      if (restoreRef.current) restoreRef.current.value = '';
+      if (restoreRef.current) restoreRef.current.value = "";
     }
   };
 
   const restoreByFilename = async (filename: string) => {
     setRestoring(true);
-    window.sessionStorage.setItem('stockini_restore_in_progress', '1');
+    window.sessionStorage.setItem("stockini_restore_in_progress", "1");
     let restoreSucceeded = false;
     try {
-      await api.post(`/admin/database/backups/${encodeURIComponent(filename)}/restore`, {});
+      await api.post(
+        `/admin/database/backups/${encodeURIComponent(filename)}/restore`,
+        {},
+      );
       restoreSucceeded = true;
       clearAuthSession();
       window.sessionStorage.setItem(
-        'stockini_restore_message',
-        'Restauration terminée. Veuillez vous reconnecter.',
+        "stockini_restore_message",
+        "Restauration terminée. Veuillez vous reconnecter.",
       );
-      toast.success('Restauration terminée. Veuillez vous reconnecter.');
-      window.history.replaceState(null, '', '/login');
+      toast.success("Restauration terminée. Veuillez vous reconnecter.");
+      window.history.replaceState(null, "", "/login");
       window.setTimeout(() => window.location.reload(), 500);
     } catch (err) {
-      window.sessionStorage.removeItem('stockini_restore_in_progress');
-      const response = (err as { response?: { data?: unknown; status?: number } }).response;
-      toast.error(`Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`);
+      window.sessionStorage.removeItem("stockini_restore_in_progress");
+      const response = (
+        err as { response?: { data?: unknown; status?: number } }
+      ).response;
+      toast.error(
+        `Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`,
+      );
     } finally {
       if (!restoreSucceeded) setRestoring(false);
     }
@@ -382,28 +461,51 @@ function BackupsTab() {
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-surface/95 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-8 py-7 shadow-xl">
             <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-base font-semibold text-text-primary">Restauration en cours...</p>
-            <p className="text-sm text-text-secondary">Ne fermez pas cette page.</p>
+            <p className="text-base font-semibold text-text-primary">
+              Restauration en cours...
+            </p>
+            <p className="text-sm text-text-secondary">
+              Ne fermez pas cette page.
+            </p>
           </div>
         </div>
       )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-text-primary">Sauvegardes système</h2>
-          <p className="text-xs text-text-secondary">Créez et gérez les sauvegardes complètes de votre ERP</p>
+          <h2 className="text-base font-semibold text-text-primary">
+            Sauvegardes de la base
+          </h2>
+          <p className="text-xs text-text-secondary">
+            Créez et gérez les sauvegardes PostgreSQL de votre ERP. Les PDF et
+            fichiers générés ne sont pas inclus.
+          </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={loadBackups} disabled={loading}>
-            <RefreshCw size={13} className={cn('mr-1.5', loading && 'animate-spin')} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadBackups}
+            disabled={loading}
+          >
+            <RefreshCw
+              size={13}
+              className={cn("mr-1.5", loading && "animate-spin")}
+            />
             Actualiser
           </Button>
           <Can permission="database.backup">
-            <Button size="sm" onClick={createBackup} disabled={creating || restoring}>
-              {creating
-                ? <RefreshCw size={13} className="mr-1.5 animate-spin" />
-                : <Plus size={13} className="mr-1.5" />}
-              {creating ? 'Création...' : 'Créer sauvegarde complète'}
+            <Button
+              size="sm"
+              onClick={createBackup}
+              disabled={creating || restoring}
+            >
+              {creating ? (
+                <RefreshCw size={13} className="mr-1.5 animate-spin" />
+              ) : (
+                <Plus size={13} className="mr-1.5" />
+              )}
+              {creating ? "Création..." : "Sauvegarder la base"}
             </Button>
           </Can>
         </div>
@@ -417,8 +519,14 @@ function BackupsTab() {
               <Upload size={18} className="text-orange-600" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-text-primary">Restaurer depuis un fichier</p>
-              <p className="text-xs text-text-secondary">Restaure la base PostgreSQL puis remplace les fichiers MinIO.</p>
+              <p className="text-sm font-medium text-text-primary">
+                Restaurer depuis un fichier
+              </p>
+              <p className="text-xs text-text-secondary">
+                Restaure toutes les données métier depuis PostgreSQL. Les
+                fichiers et PDF ne sont pas restaurés et pourront être régénérés
+                manuellement.
+              </p>
             </div>
             <input
               ref={restoreRef}
@@ -428,7 +536,7 @@ function BackupsTab() {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) {
-                  setConfirm({ type: 'restore-file' });
+                  setConfirm({ type: "restore-file" });
                 }
               }}
             />
@@ -439,12 +547,35 @@ function BackupsTab() {
               onClick={() => restoreRef.current?.click()}
               className="border-orange-300 text-orange-700 hover:bg-orange-100"
             >
-              {restoring ? <RefreshCw size={13} className="mr-1.5 animate-spin" /> : <Upload size={13} className="mr-1.5" />}
-              {restoring ? 'Restauration...' : 'Choisir un fichier'}
+              {restoring ? (
+                <RefreshCw size={13} className="mr-1.5 animate-spin" />
+              ) : (
+                <Upload size={13} className="mr-1.5" />
+              )}
+              {restoring ? "Restauration..." : "Choisir un fichier"}
             </Button>
           </CardContent>
         </Card>
       </Can>
+
+      <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20">
+        <CardContent className="grid gap-3 py-4 text-xs sm:grid-cols-2">
+          <div>
+            <p className="mb-1 font-semibold text-text-primary">Inclus</p>
+            <p className="text-text-secondary">
+              Toutes les données PostgreSQL : ventes, achats, stocks, paiements,
+              utilisateurs et paramètres.
+            </p>
+          </div>
+          <div>
+            <p className="mb-1 font-semibold text-text-primary">Non inclus</p>
+            <p className="text-text-secondary">
+              PDF, images, documents MinIO, fichiers exportés et fichiers
+              temporaires.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Backup list */}
       <Card>
@@ -452,36 +583,61 @@ function BackupsTab() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <RefreshCw size={20} className="animate-spin text-text-muted" />
-              <span className="ml-2 text-sm text-text-muted">Chargement...</span>
+              <span className="ml-2 text-sm text-text-muted">
+                Chargement...
+              </span>
             </div>
           ) : !backups || backups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Archive size={40} className="mb-3 text-text-muted" />
-              <p className="text-sm font-medium text-text-secondary">Aucune sauvegarde</p>
-              <p className="mt-1 text-xs text-text-muted">Créez votre première sauvegarde</p>
+              <p className="text-sm font-medium text-text-secondary">
+                Aucune sauvegarde
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                Créez votre première sauvegarde
+              </p>
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Fichier</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Taille</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Statut</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-text-muted">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">
+                    Fichier
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">
+                    Taille
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">
+                    Statut
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-text-muted">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {backups.map((b) => (
-                  <tr key={b.filename} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                  <tr
+                    key={b.filename}
+                    className="border-b border-border/50 hover:bg-muted/20 transition-colors"
+                  >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Archive size={14} className="text-text-muted" />
-                        <span className="font-mono text-xs text-text-primary">{b.filename}</span>
+                        <span className="font-mono text-xs text-text-primary">
+                          {b.filename}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-text-secondary">{formatBytes(b.size)}</td>
-                    <td className="px-4 py-3 text-xs text-text-secondary">{formatDate(b.createdAt)}</td>
+                    <td className="px-4 py-3 text-xs text-text-secondary">
+                      {formatBytes(b.size)}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-text-secondary">
+                      {formatDate(b.createdAt)}
+                    </td>
                     <td className="px-4 py-3">
                       <BackupStatusBadge status={b.status} />
                     </td>
@@ -489,23 +645,32 @@ function BackupsTab() {
                       <KebabMenu
                         items={[
                           {
-                            label: 'Télécharger',
+                            label: "Télécharger",
                             icon: <Download size={14} />,
                             onClick: () => void downloadBackup(b.filename),
                           },
                           {
-                            label: 'Restaurer',
+                            label: "Restaurer",
                             icon: <Upload size={14} />,
-                            onClick: () => b.status === 'valid' && setConfirm({ type: 'restore-server', filename: b.filename }),
-                            disabled: b.status !== 'valid' || restoring,
-                            hidden: !can('database.restore'),
+                            onClick: () =>
+                              b.status === "valid" &&
+                              setConfirm({
+                                type: "restore-server",
+                                filename: b.filename,
+                              }),
+                            disabled: b.status !== "valid" || restoring,
+                            hidden: !can("database.restore"),
                           },
                           {
-                            label: 'Supprimer le backup',
+                            label: "Supprimer le backup",
                             icon: <Trash2 size={14} />,
-                            onClick: () => setConfirm({ type: 'delete', filename: b.filename }),
-                            variant: 'destructive',
-                            hidden: !can('database.backup'),
+                            onClick: () =>
+                              setConfirm({
+                                type: "delete",
+                                filename: b.filename,
+                              }),
+                            variant: "destructive",
+                            hidden: !can("database.backup"),
                           },
                         ]}
                       />
@@ -520,9 +685,9 @@ function BackupsTab() {
 
       {/* Confirm modals */}
       <ConfirmDialog
-        open={confirm?.type === 'delete'}
+        open={confirm?.type === "delete"}
         title="Supprimer la sauvegarde"
-        message={`Supprimer définitivement ${confirm?.filename ?? ''} ?`}
+        message={`Supprimer définitivement ${confirm?.filename ?? ""} ?`}
         confirmText="Supprimer"
         dangerous={false}
         onConfirm={() => {
@@ -532,7 +697,7 @@ function BackupsTab() {
         onCancel={() => setConfirm(null)}
       />
       <ConfirmDialog
-        open={confirm?.type === 'restore-file'}
+        open={confirm?.type === "restore-file"}
         title="Restaurer depuis un fichier ?"
         message="Cette opération remplacera les données actuelles par celles de la sauvegarde. Une sauvegarde de sécurité sera créée automatiquement avant la restauration. Cette action est irréversible."
         confirmText="Restaurer"
@@ -545,13 +710,13 @@ function BackupsTab() {
         }}
         onCancel={() => {
           setConfirm(null);
-          if (restoreRef.current) restoreRef.current.value = '';
+          if (restoreRef.current) restoreRef.current.value = "";
         }}
       />
       <ConfirmDialog
-        open={confirm?.type === 'restore-server'}
+        open={confirm?.type === "restore-server"}
         title="Restaurer cette sauvegarde ?"
-        message="Cette action remplacera la base et les fichiers MinIO actuels."
+        message="Cette action remplacera uniquement la base PostgreSQL. Les fichiers MinIO actuels ne seront ni supprimés ni remplacés."
         confirmText="Restaurer"
         confirmKeyword="RESTAURER"
         dangerous
@@ -570,35 +735,82 @@ function BackupsTab() {
 // ═══════════════════════════════════════════════════════════
 
 const EXPORT_ENTITIES = [
-  { key: 'products', label: 'Produits', icon: FileText, description: 'Catalogue produits complet' },
-  { key: 'stock', label: 'Stock', icon: HardDrive, description: 'État du stock avec alertes' },
-  { key: 'customers', label: 'Clients', icon: FileText, description: 'Liste des clients' },
-  { key: 'suppliers', label: 'Fournisseurs', icon: FileText, description: 'Liste des fournisseurs' },
-  { key: 'sales', label: 'Ventes', icon: FileSpreadsheet, description: 'Toutes les ventes' },
-  { key: 'purchases', label: 'Achats', icon: FileSpreadsheet, description: 'Tous les achats' },
-  { key: 'payments', label: 'Paiements', icon: FileSpreadsheet, description: 'Paiements clients' },
-  { key: 'audit_logs', label: 'Audit Logs', icon: Shield, description: 'Journal des actions' },
+  {
+    key: "products",
+    label: "Produits",
+    icon: FileText,
+    description: "Catalogue produits complet",
+  },
+  {
+    key: "stock",
+    label: "Stock",
+    icon: HardDrive,
+    description: "État du stock avec alertes",
+  },
+  {
+    key: "customers",
+    label: "Clients",
+    icon: FileText,
+    description: "Liste des clients",
+  },
+  {
+    key: "suppliers",
+    label: "Fournisseurs",
+    icon: FileText,
+    description: "Liste des fournisseurs",
+  },
+  {
+    key: "sales",
+    label: "Ventes",
+    icon: FileSpreadsheet,
+    description: "Toutes les ventes",
+  },
+  {
+    key: "purchases",
+    label: "Achats",
+    icon: FileSpreadsheet,
+    description: "Tous les achats",
+  },
+  {
+    key: "payments",
+    label: "Paiements",
+    icon: FileSpreadsheet,
+    description: "Paiements clients",
+  },
+  {
+    key: "audit_logs",
+    label: "Audit Logs",
+    icon: Shield,
+    description: "Journal des actions",
+  },
 ];
 
 function ExportsTab() {
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const doExport = async (entity: string, format: 'xlsx' | 'csv') => {
+  const doExport = async (entity: string, format: "xlsx" | "csv") => {
     const key = `${entity}-${format}`;
     setExporting(key);
     try {
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem("access_token");
       const url = `/api/admin/database/export/${entity}?format=${format}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
       if (!res.ok) {
         let msg = `Erreur HTTP ${res.status}`;
-        try { const json = await res.json() as { message?: string }; msg = json.message ?? msg; } catch { /* ignore */ }
+        try {
+          const json = (await res.json()) as { message?: string };
+          msg = json.message ?? msg;
+        } catch {
+          /* ignore */
+        }
         throw new Error(msg);
       }
       const blob = await res.blob();
-      if (blob.size === 0) throw new Error('Fichier export vide');
+      if (blob.size === 0) throw new Error("Fichier export vide");
       const burl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = burl;
       a.download = `${entity}-export.${format}`;
       document.body.appendChild(a);
@@ -607,7 +819,7 @@ function ExportsTab() {
       URL.revokeObjectURL(burl);
       toast.success(`Export ${format.toUpperCase()} téléchargé`);
     } catch (err) {
-      console.error('[EXPORT] Error:', err);
+      console.error("[EXPORT] Error:", err);
       toast.error(`Erreur export : ${(err as Error).message}`);
     } finally {
       setExporting(null);
@@ -617,8 +829,12 @@ function ExportsTab() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Exports de données</h2>
-        <p className="text-xs text-text-secondary">Exportez vos données métier en Excel ou CSV</p>
+        <h2 className="text-base font-semibold text-text-primary">
+          Exports de données
+        </h2>
+        <p className="text-xs text-text-secondary">
+          Exportez vos données métier en Excel ou CSV
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -642,11 +858,13 @@ function ExportsTab() {
                   size="sm"
                   className="flex-1 text-xs"
                   disabled={exporting === `${key}-xlsx`}
-                  onClick={() => void doExport(key, 'xlsx')}
+                  onClick={() => void doExport(key, "xlsx")}
                 >
-                  {exporting === `${key}-xlsx`
-                    ? <RefreshCw size={11} className="mr-1 animate-spin" />
-                    : <FileSpreadsheet size={11} className="mr-1" />}
+                  {exporting === `${key}-xlsx` ? (
+                    <RefreshCw size={11} className="mr-1 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet size={11} className="mr-1" />
+                  )}
                   Excel
                 </Button>
                 <Button
@@ -654,11 +872,13 @@ function ExportsTab() {
                   size="sm"
                   className="flex-1 text-xs"
                   disabled={exporting === `${key}-csv`}
-                  onClick={() => void doExport(key, 'csv')}
+                  onClick={() => void doExport(key, "csv")}
                 >
-                  {exporting === `${key}-csv`
-                    ? <RefreshCw size={11} className="mr-1 animate-spin" />
-                    : <FileText size={11} className="mr-1" />}
+                  {exporting === `${key}-csv` ? (
+                    <RefreshCw size={11} className="mr-1 animate-spin" />
+                  ) : (
+                    <FileText size={11} className="mr-1" />
+                  )}
                   CSV
                 </Button>
               </div>
@@ -675,17 +895,33 @@ function ExportsTab() {
 // ═══════════════════════════════════════════════════════════
 
 const IMPORT_ENTITIES = [
-  { key: 'products', label: 'Produits', description: 'Colonnes: nom, reference, prix_achat, prix_vente, quantite' },
-  { key: 'customers', label: 'Clients', description: 'Colonnes: nom, email, telephone, adresse' },
-  { key: 'suppliers', label: 'Fournisseurs', description: 'Colonnes: nom, email, telephone, adresse' },
+  {
+    key: "products",
+    label: "Produits",
+    description: "Colonnes: nom, reference, prix_achat, prix_vente, quantite",
+  },
+  {
+    key: "customers",
+    label: "Clients",
+    description: "Colonnes: nom, email, telephone, adresse",
+  },
+  {
+    key: "suppliers",
+    label: "Fournisseurs",
+    description: "Colonnes: nom, email, telephone, adresse",
+  },
 ];
 
 function ImportsTab() {
-  const [selected, setSelected] = useState<string>('products');
+  const [selected, setSelected] = useState<string>("products");
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
-  const [result, setResult] = useState<{ inserted: number; errors: string[]; duplicates: number } | null>(null);
+  const [result, setResult] = useState<{
+    inserted: number;
+    errors: string[];
+    duplicates: number;
+  } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -697,15 +933,15 @@ function ImportsTab() {
     setPreviewing(true);
     try {
       const form = new FormData();
-      form.append('file', f);
+      form.append("file", f);
       const { data } = await api.post<ImportPreview>(
         `/admin/database/import/${selected}/preview`,
         form,
-        { headers: { 'Content-Type': 'multipart/form-data' } },
+        { headers: { "Content-Type": "multipart/form-data" } },
       );
       setPreview(data);
     } catch {
-      toast.error('Erreur lors de la prévisualisation');
+      toast.error("Erreur lors de la prévisualisation");
     } finally {
       setPreviewing(false);
     }
@@ -717,19 +953,21 @@ function ImportsTab() {
     setConfirm(false);
     try {
       const form = new FormData();
-      form.append('file', file);
-      const { data } = await api.post<{ inserted: number; errors: string[]; duplicates: number }>(
-        `/admin/database/import/${selected}`,
-        form,
-        { headers: { 'Content-Type': 'multipart/form-data' } },
-      );
+      form.append("file", file);
+      const { data } = await api.post<{
+        inserted: number;
+        errors: string[];
+        duplicates: number;
+      }>(`/admin/database/import/${selected}`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       setResult(data);
       toast.success(`Import terminé : ${data.inserted} ligne(s) insérée(s)`);
       setPreview(null);
       setFile(null);
-      if (fileRef.current) fileRef.current.value = '';
+      if (fileRef.current) fileRef.current.value = "";
     } catch {
-      toast.error('Erreur lors de l\'import');
+      toast.error("Erreur lors de l'import");
     } finally {
       setImporting(false);
     }
@@ -738,8 +976,12 @@ function ImportsTab() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Import de données</h2>
-        <p className="text-xs text-text-secondary">Importez vos données depuis Excel (.xlsx) ou CSV (.csv)</p>
+        <h2 className="text-base font-semibold text-text-primary">
+          Import de données
+        </h2>
+        <p className="text-xs text-text-secondary">
+          Importez vos données depuis Excel (.xlsx) ou CSV (.csv)
+        </p>
       </div>
 
       {/* Entity selector */}
@@ -748,12 +990,17 @@ function ImportsTab() {
           <button
             key={e.key}
             type="button"
-            onClick={() => { setSelected(e.key); setPreview(null); setResult(null); setFile(null); }}
+            onClick={() => {
+              setSelected(e.key);
+              setPreview(null);
+              setResult(null);
+              setFile(null);
+            }}
             className={cn(
-              'rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+              "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
               selected === e.key
-                ? 'border-app-primary bg-app-primary text-white'
-                : 'border-border bg-card text-text-secondary hover:border-app-primary hover:text-app-primary',
+                ? "border-app-primary bg-app-primary text-white"
+                : "border-border bg-card text-text-secondary hover:border-app-primary hover:text-app-primary",
             )}
           >
             {e.label}
@@ -773,16 +1020,21 @@ function ImportsTab() {
           >
             <Upload size={24} className="mb-2 text-text-muted" />
             <p className="text-sm font-medium text-text-secondary">
-              {file ? file.name : 'Glissez un fichier ou cliquez pour choisir'}
+              {file ? file.name : "Glissez un fichier ou cliquez pour choisir"}
             </p>
-            <p className="mt-1 text-xs text-text-muted">Excel (.xlsx) ou CSV (.csv)</p>
+            <p className="mt-1 text-xs text-text-muted">
+              Excel (.xlsx) ou CSV (.csv)
+            </p>
           </div>
           <input
             ref={fileRef}
             type="file"
             accept=".xlsx,.csv,.xls"
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFileChange(f); }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleFileChange(f);
+            }}
           />
         </CardContent>
       </Card>
@@ -801,10 +1053,14 @@ function ImportsTab() {
               <CardTitle className="text-sm">Aperçu des données</CardTitle>
               <div className="flex gap-2">
                 {preview.errors.length > 0 && (
-                  <Badge variant="danger">{preview.errors.length} erreur(s)</Badge>
+                  <Badge variant="danger">
+                    {preview.errors.length} erreur(s)
+                  </Badge>
                 )}
                 {preview.rows.length > 0 && (
-                  <Badge variant="success">{preview.rows.length} ligne(s) valide(s)</Badge>
+                  <Badge variant="success">
+                    {preview.rows.length} ligne(s) valide(s)
+                  </Badge>
                 )}
               </div>
             </div>
@@ -812,12 +1068,18 @@ function ImportsTab() {
           <CardContent>
             {preview.errors.length > 0 && (
               <div className="mb-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
-                <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-1">Erreurs détectées :</p>
+                <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-1">
+                  Erreurs détectées :
+                </p>
                 {preview.errors.slice(0, 5).map((e, i) => (
-                  <p key={i} className="text-xs text-red-600 dark:text-red-400">{e}</p>
+                  <p key={i} className="text-xs text-red-600 dark:text-red-400">
+                    {e}
+                  </p>
                 ))}
                 {preview.errors.length > 5 && (
-                  <p className="text-xs text-red-500">... et {preview.errors.length - 5} autre(s)</p>
+                  <p className="text-xs text-red-500">
+                    ... et {preview.errors.length - 5} autre(s)
+                  </p>
                 )}
               </div>
             )}
@@ -827,7 +1089,12 @@ function ImportsTab() {
                   <thead className="bg-muted/30">
                     <tr>
                       {Object.keys(preview.rows[0]).map((h) => (
-                        <th key={h} className="px-3 py-2 text-left font-medium text-text-muted">{h}</th>
+                        <th
+                          key={h}
+                          className="px-3 py-2 text-left font-medium text-text-muted"
+                        >
+                          {h}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -835,7 +1102,9 @@ function ImportsTab() {
                     {preview.rows.map((row, i) => (
                       <tr key={i} className="border-t border-border/50">
                         {Object.values(row).map((v, j) => (
-                          <td key={j} className="px-3 py-2 text-text-secondary">{String(v ?? '')}</td>
+                          <td key={j} className="px-3 py-2 text-text-secondary">
+                            {String(v ?? "")}
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -866,9 +1135,12 @@ function ImportsTab() {
             <div className="flex items-center gap-3">
               <CheckCircle2 size={20} className="text-green-600" />
               <div>
-                <p className="text-sm font-medium text-text-primary">Import terminé</p>
+                <p className="text-sm font-medium text-text-primary">
+                  Import terminé
+                </p>
                 <p className="text-xs text-text-secondary">
-                  {result.inserted} insérée(s) · {result.duplicates} doublon(s) · {result.errors.length} erreur(s)
+                  {result.inserted} insérée(s) · {result.duplicates} doublon(s)
+                  · {result.errors.length} erreur(s)
                 </p>
               </div>
             </div>
@@ -894,7 +1166,7 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
   return (
     <div className="h-1.5 w-full rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
       <div
-        className={cn('h-full rounded-full transition-all duration-500', color)}
+        className={cn("h-full rounded-full transition-all duration-500", color)}
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
     </div>
@@ -902,15 +1174,23 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
 }
 
 function usageColor(pct: number): string {
-  if (pct >= 90) return 'bg-red-500';
-  if (pct >= 75) return 'bg-orange-400';
-  return 'bg-green-500';
+  if (pct >= 90) return "bg-red-500";
+  if (pct >= 75) return "bg-orange-400";
+  return "bg-green-500";
 }
 
-function globalStatus(stats: InfrastructureStats): 'nominal' | 'attention' | 'critique' {
-  if (stats.ram.usagePercent > 90 || stats.disk.usagePercent > 90) return 'critique';
-  if (stats.cpu.usage > 85 || stats.ram.usagePercent > 75 || stats.disk.usagePercent > 75) return 'attention';
-  return 'nominal';
+function globalStatus(
+  stats: InfrastructureStats,
+): "nominal" | "attention" | "critique" {
+  if (stats.ram.usagePercent > 90 || stats.disk.usagePercent > 90)
+    return "critique";
+  if (
+    stats.cpu.usage > 85 ||
+    stats.ram.usagePercent > 75 ||
+    stats.disk.usagePercent > 75
+  )
+    return "attention";
+  return "nominal";
 }
 
 // ─── Infrastructure VPS Section ───────────────────────────────────────────────
@@ -923,7 +1203,9 @@ function InfrastructureSection() {
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get<InfrastructureStats>('/admin/system/infrastructure');
+      const { data } = await api.get<InfrastructureStats>(
+        "/admin/system/infrastructure",
+      );
       setStats(data);
       setLastUpdated(new Date());
     } catch {
@@ -935,39 +1217,43 @@ function InfrastructureSection() {
 
   useEffect(() => {
     void loadStats();
-    const id = setInterval(() => { void loadStats(); }, 10000);
+    const id = setInterval(() => {
+      void loadStats();
+    }, 10000);
     return () => clearInterval(id);
   }, [loadStats]);
 
   const status = stats ? globalStatus(stats) : null;
-  const isSystemd = stats?.deployment?.mode === 'systemd';
+  const isSystemd = stats?.deployment?.mode === "systemd";
 
   const activeServices = stats?.services?.filter((s) => s.healthy).length ?? 0;
-  const failedServices = stats?.services?.filter(
-    (s) => s.status === 'inactive' || s.status === 'failed',
-  ).length ?? 0;
-  const notFoundServices = stats?.services?.filter((s) => s.status === 'not_found').length ?? 0;
+  const failedServices =
+    stats?.services?.filter(
+      (s) => s.status === "inactive" || s.status === "failed",
+    ).length ?? 0;
+  const notFoundServices =
+    stats?.services?.filter((s) => s.status === "not_found").length ?? 0;
   const allServicesOk = stats?.services
     ? activeServices === stats.services.length
     : true;
 
   const servicesCardColor = allServicesOk
-    ? 'border-green-200 bg-green-50/30 dark:border-green-800 dark:bg-card'
+    ? "border-green-200 bg-green-50/30 dark:border-green-800 dark:bg-card"
     : failedServices > 0
-    ? 'border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-card'
-    : 'border-orange-200 bg-orange-50/30 dark:border-orange-800 dark:bg-card';
+      ? "border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-card"
+      : "border-orange-200 bg-orange-50/30 dark:border-orange-800 dark:bg-card";
 
   const servicesIconColor = allServicesOk
-    ? 'bg-green-50 dark:bg-green-900/20'
+    ? "bg-green-50 dark:bg-green-900/20"
     : failedServices > 0
-    ? 'bg-red-50 dark:bg-red-900/20'
-    : 'bg-orange-50 dark:bg-orange-900/20';
+      ? "bg-red-50 dark:bg-red-900/20"
+      : "bg-orange-50 dark:bg-orange-900/20";
 
   const servicesActivityColor = allServicesOk
-    ? 'text-green-600 dark:text-green-400'
+    ? "text-green-600 dark:text-green-400"
     : failedServices > 0
-    ? 'text-red-600 dark:text-red-400'
-    : 'text-orange-600 dark:text-orange-400';
+      ? "text-red-600 dark:text-red-400"
+      : "text-orange-600 dark:text-orange-400";
 
   return (
     <div className="space-y-3">
@@ -976,24 +1262,28 @@ function InfrastructureSection() {
         <div className="flex items-center gap-2">
           <Server size={15} className="text-text-muted" />
           <h3 className="text-sm font-semibold text-text-primary">
-            {stats?.deployment?.mode === 'docker' ? 'Infrastructure Docker' : 'Infrastructure VPS'}
+            {stats?.deployment?.mode === "docker"
+              ? "Infrastructure Docker"
+              : "Infrastructure VPS"}
           </h3>
           {stats?.deployment && (
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-              {stats.deployment.mode === 'docker' ? 'Docker Compose' : 'Services systemd'}
+              {stats.deployment.mode === "docker"
+                ? "Docker Compose"
+                : "Services systemd"}
             </span>
           )}
-          {status === 'nominal' && (
+          {status === "nominal" && (
             <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
               <CheckCircle2 size={9} /> Nominal
             </span>
           )}
-          {status === 'attention' && (
+          {status === "attention" && (
             <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
               <AlertTriangle size={9} /> Attention
             </span>
           )}
-          {status === 'critique' && (
+          {status === "critique" && (
             <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
               <XCircle size={9} /> Critique
             </span>
@@ -1002,7 +1292,12 @@ function InfrastructureSection() {
         <div className="flex items-center gap-2">
           {lastUpdated && (
             <span className="text-[10px] text-text-muted">
-              Mis à jour {lastUpdated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              Mis à jour{" "}
+              {lastUpdated.toLocaleTimeString("fr-FR", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
             </span>
           )}
           <button
@@ -1011,7 +1306,7 @@ function InfrastructureSection() {
             disabled={loading}
             className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs text-text-secondary hover:bg-muted disabled:opacity-50 transition-colors"
           >
-            <RefreshCw size={11} className={cn(loading && 'animate-spin')} />
+            <RefreshCw size={11} className={cn(loading && "animate-spin")} />
             Actualiser
           </button>
         </div>
@@ -1035,22 +1330,43 @@ function InfrastructureSection() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5">
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20">
-                    <Cpu size={13} className="text-blue-600 dark:text-blue-400" />
+                    <Cpu
+                      size={13}
+                      className="text-blue-600 dark:text-blue-400"
+                    />
                   </div>
-                  <span className="text-xs font-medium text-text-secondary">CPU</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    CPU
+                  </span>
                 </div>
-                <span className={cn(
-                  'text-xs font-bold',
-                  stats.cpu.usage >= 85 ? 'text-red-600' : stats.cpu.usage >= 70 ? 'text-orange-500' : 'text-text-primary',
-                )}>
+                <span
+                  className={cn(
+                    "text-xs font-bold",
+                    stats.cpu.usage >= 85
+                      ? "text-red-600"
+                      : stats.cpu.usage >= 70
+                        ? "text-orange-500"
+                        : "text-text-primary",
+                  )}
+                >
                   {stats.cpu.usage}%
                 </span>
               </div>
-              <ProgressBar value={stats.cpu.usage} color={usageColor(stats.cpu.usage)} />
+              <ProgressBar
+                value={stats.cpu.usage}
+                color={usageColor(stats.cpu.usage)}
+              />
               <div className="mt-2 space-y-0.5">
-                <p className="text-[10px] text-text-muted truncate" title={stats.cpu.model}>{stats.cpu.model}</p>
-                <p className="text-[10px] text-text-muted">{stats.cpu.cores} cœurs
-                  {stats.cpu.temperature != null && ` · ${stats.cpu.temperature}°C`}
+                <p
+                  className="text-[10px] text-text-muted truncate"
+                  title={stats.cpu.model}
+                >
+                  {stats.cpu.model}
+                </p>
+                <p className="text-[10px] text-text-muted">
+                  {stats.cpu.cores} cœurs
+                  {stats.cpu.temperature != null &&
+                    ` · ${stats.cpu.temperature}°C`}
                 </p>
               </div>
             </div>
@@ -1060,23 +1376,40 @@ function InfrastructureSection() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5">
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-900/20">
-                    <MemoryStick size={13} className="text-purple-600 dark:text-purple-400" />
+                    <MemoryStick
+                      size={13}
+                      className="text-purple-600 dark:text-purple-400"
+                    />
                   </div>
-                  <span className="text-xs font-medium text-text-secondary">RAM</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    RAM
+                  </span>
                 </div>
-                <span className={cn(
-                  'text-xs font-bold',
-                  stats.ram.usagePercent >= 90 ? 'text-red-600' : stats.ram.usagePercent >= 75 ? 'text-orange-500' : 'text-text-primary',
-                )}>
+                <span
+                  className={cn(
+                    "text-xs font-bold",
+                    stats.ram.usagePercent >= 90
+                      ? "text-red-600"
+                      : stats.ram.usagePercent >= 75
+                        ? "text-orange-500"
+                        : "text-text-primary",
+                  )}
+                >
                   {stats.ram.usagePercent}%
                 </span>
               </div>
-              <ProgressBar value={stats.ram.usagePercent} color={usageColor(stats.ram.usagePercent)} />
+              <ProgressBar
+                value={stats.ram.usagePercent}
+                color={usageColor(stats.ram.usagePercent)}
+              />
               <div className="mt-2 space-y-0.5">
                 <p className="text-[10px] text-text-muted">
-                  {(stats.ram.used / 1024).toFixed(1)} / {(stats.ram.total / 1024).toFixed(1)} GB
+                  {(stats.ram.used / 1024).toFixed(1)} /{" "}
+                  {(stats.ram.total / 1024).toFixed(1)} GB
                 </p>
-                <p className="text-[10px] text-text-muted">{(stats.ram.free / 1024).toFixed(1)} GB libre</p>
+                <p className="text-[10px] text-text-muted">
+                  {(stats.ram.free / 1024).toFixed(1)} GB libre
+                </p>
               </div>
             </div>
 
@@ -1085,21 +1418,39 @@ function InfrastructureSection() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5">
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-900/20">
-                    <HardDrive size={13} className="text-amber-600 dark:text-amber-400" />
+                    <HardDrive
+                      size={13}
+                      className="text-amber-600 dark:text-amber-400"
+                    />
                   </div>
-                  <span className="text-xs font-medium text-text-secondary">Disque</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    Disque
+                  </span>
                 </div>
-                <span className={cn(
-                  'text-xs font-bold',
-                  stats.disk.usagePercent >= 90 ? 'text-red-600' : stats.disk.usagePercent >= 75 ? 'text-orange-500' : 'text-text-primary',
-                )}>
+                <span
+                  className={cn(
+                    "text-xs font-bold",
+                    stats.disk.usagePercent >= 90
+                      ? "text-red-600"
+                      : stats.disk.usagePercent >= 75
+                        ? "text-orange-500"
+                        : "text-text-primary",
+                  )}
+                >
                   {stats.disk.usagePercent}%
                 </span>
               </div>
-              <ProgressBar value={stats.disk.usagePercent} color={usageColor(stats.disk.usagePercent)} />
+              <ProgressBar
+                value={stats.disk.usagePercent}
+                color={usageColor(stats.disk.usagePercent)}
+              />
               <div className="mt-2 space-y-0.5">
-                <p className="text-[10px] text-text-muted">{stats.disk.used} / {stats.disk.total} GB</p>
-                <p className="text-[10px] text-text-muted">{stats.disk.free} GB libre</p>
+                <p className="text-[10px] text-text-muted">
+                  {stats.disk.used} / {stats.disk.total} GB
+                </p>
+                <p className="text-[10px] text-text-muted">
+                  {stats.disk.free} GB libre
+                </p>
               </div>
             </div>
 
@@ -1107,42 +1458,73 @@ function InfrastructureSection() {
             <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
               <div className="flex items-center gap-1.5 mb-2">
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-green-50 dark:bg-green-900/20">
-                  <Clock size={13} className="text-green-600 dark:text-green-400" />
+                  <Clock
+                    size={13}
+                    className="text-green-600 dark:text-green-400"
+                  />
                 </div>
-                <span className="text-xs font-medium text-text-secondary">Uptime</span>
+                <span className="text-xs font-medium text-text-secondary">
+                  Uptime
+                </span>
               </div>
-              <p className="text-base font-bold text-text-primary leading-tight">{stats.system.uptime}</p>
+              <p className="text-base font-bold text-text-primary leading-tight">
+                {stats.system.uptime}
+              </p>
               <div className="mt-1.5 space-y-0.5">
-                <p className="text-[10px] text-text-muted truncate" title={stats.system.hostname}>{stats.system.hostname}</p>
-                <p className="text-[10px] text-text-muted capitalize">{stats.system.platform}</p>
+                <p
+                  className="text-[10px] text-text-muted truncate"
+                  title={stats.system.hostname}
+                >
+                  {stats.system.hostname}
+                </p>
+                <p className="text-[10px] text-text-muted capitalize">
+                  {stats.system.platform}
+                </p>
               </div>
             </div>
 
             {/* Docker (dev) or Services VPS (prod/systemd) */}
             {isSystemd ? (
-              <div className={cn(
-                'rounded-xl border shadow-sm p-4 hover:shadow-md transition-shadow',
-                servicesCardColor,
-              )}>
+              <div
+                className={cn(
+                  "rounded-xl border shadow-sm p-4 hover:shadow-md transition-shadow",
+                  servicesCardColor,
+                )}
+              >
                 <div className="flex items-center gap-1.5 mb-2">
-                  <div className={cn('flex h-7 w-7 items-center justify-center rounded-lg', servicesIconColor)}>
+                  <div
+                    className={cn(
+                      "flex h-7 w-7 items-center justify-center rounded-lg",
+                      servicesIconColor,
+                    )}
+                  >
                     <Activity size={13} className={servicesActivityColor} />
                   </div>
-                  <span className="text-xs font-medium text-text-secondary">Services VPS</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    Services VPS
+                  </span>
                 </div>
                 <div className="flex items-end gap-2">
-                  <span className="text-lg font-bold text-green-600">{activeServices}</span>
+                  <span className="text-lg font-bold text-green-600">
+                    {activeServices}
+                  </span>
                   <span className="text-xs text-text-muted mb-0.5">actifs</span>
                 </div>
                 <div className="mt-0.5 space-y-0.5">
                   {failedServices > 0 && (
-                    <p className="text-[10px] font-medium text-red-500">{failedServices} KO</p>
+                    <p className="text-[10px] font-medium text-red-500">
+                      {failedServices} KO
+                    </p>
                   )}
                   {notFoundServices > 0 && (
-                    <p className="text-[10px] font-medium text-orange-500">{notFoundServices} introuvable(s)</p>
+                    <p className="text-[10px] font-medium text-orange-500">
+                      {notFoundServices} introuvable(s)
+                    </p>
                   )}
                   {allServicesOk && (
-                    <p className="text-[10px] font-medium text-green-600">Tout nominal</p>
+                    <p className="text-[10px] font-medium text-green-600">
+                      Tout nominal
+                    </p>
                   )}
                 </div>
               </div>
@@ -1152,16 +1534,24 @@ function InfrastructureSection() {
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-50 dark:bg-sky-900/20">
                     <Box size={13} className="text-sky-600 dark:text-sky-400" />
                   </div>
-                  <span className="text-xs font-medium text-text-secondary">Docker</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    Docker
+                  </span>
                   {stats.docker?.unavailable && (
-                    <span className="text-[9px] text-text-muted">(indisponible)</span>
+                    <span className="text-[9px] text-text-muted">
+                      (indisponible)
+                    </span>
                   )}
                 </div>
                 <div className="flex items-end gap-2">
-                  <span className="text-lg font-bold text-green-600">{stats.docker?.containersRunning ?? 0}</span>
+                  <span className="text-lg font-bold text-green-600">
+                    {stats.docker?.containersRunning ?? 0}
+                  </span>
                   <span className="text-xs text-text-muted mb-0.5">actifs</span>
                 </div>
-                <p className="text-[10px] text-text-muted mt-0.5">{stats.docker?.containersStopped ?? 0} stoppé(s)</p>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  {stats.docker?.containersStopped ?? 0} stoppé(s)
+                </p>
               </div>
             )}
 
@@ -1169,15 +1559,20 @@ function InfrastructureSection() {
             <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 dark:border-gray-700 dark:bg-card hover:shadow-md transition-shadow">
               <div className="flex items-center gap-1.5 mb-2">
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-900/20">
-                  <Activity size={13} className="text-rose-600 dark:text-rose-400" />
+                  <Activity
+                    size={13}
+                    className="text-rose-600 dark:text-rose-400"
+                  />
                 </div>
-                <span className="text-xs font-medium text-text-secondary">Load Avg</span>
+                <span className="text-xs font-medium text-text-secondary">
+                  Load Avg
+                </span>
               </div>
               <div className="grid grid-cols-3 gap-1">
-                {(['1m', '5m', '15m'] as const).map((label, i) => (
+                {(["1m", "5m", "15m"] as const).map((label, i) => (
                   <div key={label} className="text-center">
                     <p className="text-xs font-semibold text-text-primary">
-                      {stats.system.loadAverage[i] ?? '--'}
+                      {stats.system.loadAverage[i] ?? "--"}
                     </p>
                     <p className="text-[9px] text-text-muted">{label}</p>
                   </div>
@@ -1191,22 +1586,36 @@ function InfrastructureSection() {
             <div className="rounded-xl border border-gray-200 bg-white shadow-sm px-4 py-3 dark:border-gray-700 dark:bg-card">
               <div className="flex flex-wrap gap-x-5 gap-y-1.5">
                 {stats.services.map((s) => (
-                  <div key={s.serviceName} className="flex items-center gap-1.5">
+                  <div
+                    key={s.serviceName}
+                    className="flex items-center gap-1.5"
+                  >
                     {s.healthy ? (
-                      <CheckCircle2 size={11} className="text-green-500 flex-shrink-0" />
-                    ) : s.status === 'not_found' ? (
-                      <AlertTriangle size={11} className="text-orange-500 flex-shrink-0" />
+                      <CheckCircle2
+                        size={11}
+                        className="text-green-500 flex-shrink-0"
+                      />
+                    ) : s.status === "not_found" ? (
+                      <AlertTriangle
+                        size={11}
+                        className="text-orange-500 flex-shrink-0"
+                      />
                     ) : (
-                      <XCircle size={11} className="text-red-500 flex-shrink-0" />
+                      <XCircle
+                        size={11}
+                        className="text-red-500 flex-shrink-0"
+                      />
                     )}
-                    <span className={cn(
-                      'text-[11px] font-medium',
-                      s.healthy
-                        ? 'text-text-secondary'
-                        : s.status === 'not_found'
-                        ? 'text-orange-600 dark:text-orange-400'
-                        : 'text-red-600 dark:text-red-400',
-                    )}>
+                    <span
+                      className={cn(
+                        "text-[11px] font-medium",
+                        s.healthy
+                          ? "text-text-secondary"
+                          : s.status === "not_found"
+                            ? "text-orange-600 dark:text-orange-400"
+                            : "text-red-600 dark:text-red-400",
+                      )}
+                    >
                       {s.name}
                     </span>
                   </div>
@@ -1231,10 +1640,10 @@ function HealthTab() {
   const loadHealth = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get<SystemHealth>('/admin/database/health');
+      const { data } = await api.get<SystemHealth>("/admin/database/health");
       setHealth(data);
     } catch {
-      toast.error('Erreur lors du chargement de la santé système');
+      toast.error("Erreur lors du chargement de la santé système");
     } finally {
       setLoading(false);
     }
@@ -1244,11 +1653,24 @@ function HealthTab() {
     void loadHealth();
   }, [loadHealth]);
 
-  const StatCard = ({ label, value, icon: Icon, color = 'text-app-primary' }: {
-    label: string; value: string | number; icon: React.ElementType; color?: string;
+  const StatCard = ({
+    label,
+    value,
+    icon: Icon,
+    color = "text-app-primary",
+  }: {
+    label: string;
+    value: string | number;
+    icon: React.ElementType;
+    color?: string;
   }) => (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-      <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg bg-muted', color)}>
+      <div
+        className={cn(
+          "flex h-9 w-9 items-center justify-center rounded-lg bg-muted",
+          color,
+        )}
+      >
         <Icon size={15} />
       </div>
       <div>
@@ -1262,11 +1684,23 @@ function HealthTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-text-primary">Santé système</h2>
-          <p className="text-xs text-text-secondary">État des services et statistiques ERP</p>
+          <h2 className="text-base font-semibold text-text-primary">
+            Santé système
+          </h2>
+          <p className="text-xs text-text-secondary">
+            État des services et statistiques ERP
+          </p>
         </div>
-        <Button variant="outline" size="sm" onClick={loadHealth} disabled={loading}>
-          <RefreshCw size={13} className={cn('mr-1.5', loading && 'animate-spin')} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={loadHealth}
+          disabled={loading}
+        >
+          <RefreshCw
+            size={13}
+            className={cn("mr-1.5", loading && "animate-spin")}
+          />
           Actualiser
         </Button>
       </div>
@@ -1291,31 +1725,50 @@ function HealthTab() {
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2">
                     <Database size={15} className="text-text-muted" />
-                    <span className="text-sm font-medium text-text-primary">PostgreSQL</span>
+                    <span className="text-sm font-medium text-text-primary">
+                      PostgreSQL
+                    </span>
                   </div>
-                  <StatusBadge status={health.database.status} label={
-                    health.database.status === 'ok' ? `${health.database.responseMs ?? 0}ms` : 'Erreur'
-                  } />
+                  <StatusBadge
+                    status={health.database.status}
+                    label={
+                      health.database.status === "ok"
+                        ? `${health.database.responseMs ?? 0}ms`
+                        : "Erreur"
+                    }
+                  />
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2">
                     <HardDrive size={15} className="text-text-muted" />
-                    <span className="text-sm font-medium text-text-primary">MinIO</span>
+                    <span className="text-sm font-medium text-text-primary">
+                      MinIO
+                    </span>
                   </div>
-                  <StatusBadge status={health.minio.status} label={
-                    health.minio.status === 'ok' ? 'Connecté' : 'Erreur'
-                  } />
+                  <StatusBadge
+                    status={health.minio.status}
+                    label={health.minio.status === "ok" ? "Connecté" : "Erreur"}
+                  />
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2">
-                    {health.smtp.status === 'ok'
-                      ? <Wifi size={15} className="text-text-muted" />
-                      : <WifiOff size={15} className="text-text-muted" />}
-                    <span className="text-sm font-medium text-text-primary">SMTP</span>
+                    {health.smtp.status === "ok" ? (
+                      <Wifi size={15} className="text-text-muted" />
+                    ) : (
+                      <WifiOff size={15} className="text-text-muted" />
+                    )}
+                    <span className="text-sm font-medium text-text-primary">
+                      SMTP
+                    </span>
                   </div>
-                  <StatusBadge status={health.smtp.status} label={
-                    health.smtp.status === 'ok' ? 'Configuré' : 'Non configuré'
-                  } />
+                  <StatusBadge
+                    status={health.smtp.status}
+                    label={
+                      health.smtp.status === "ok"
+                        ? "Configuré"
+                        : "Non configuré"
+                    }
+                  />
                 </div>
               </div>
             </CardContent>
@@ -1338,27 +1791,75 @@ function HealthTab() {
             </CardHeader>
             <CardContent>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                <StatCard label="Clients" value={health.stats.customers.toLocaleString()} icon={FileText} />
-                <StatCard label="Produits" value={health.stats.products.toLocaleString()} icon={HardDrive} />
-                <StatCard label="Ventes" value={health.stats.sales.toLocaleString()} icon={FileSpreadsheet} />
-                <StatCard label="Documents" value={health.stats.documents.toLocaleString()} icon={FileText} />
-                <StatCard label="Audit Logs" value={health.stats.auditLogs.toLocaleString()} icon={Shield} />
-                <StatCard label="Taille DB" value={formatBytes(health.stats.dbSizeBytes)} icon={Database} color="text-blue-500" />
+                <StatCard
+                  label="Clients"
+                  value={health.stats.customers.toLocaleString()}
+                  icon={FileText}
+                />
+                <StatCard
+                  label="Produits"
+                  value={health.stats.products.toLocaleString()}
+                  icon={HardDrive}
+                />
+                <StatCard
+                  label="Ventes"
+                  value={health.stats.sales.toLocaleString()}
+                  icon={FileSpreadsheet}
+                />
+                <StatCard
+                  label="Documents"
+                  value={health.stats.documents.toLocaleString()}
+                  icon={FileText}
+                />
+                <StatCard
+                  label="Audit Logs"
+                  value={health.stats.auditLogs.toLocaleString()}
+                  icon={Shield}
+                />
+                <StatCard
+                  label="Taille DB"
+                  value={formatBytes(health.stats.dbSizeBytes)}
+                  icon={Database}
+                  color="text-blue-500"
+                />
               </div>
             </CardContent>
           </Card>
 
           {/* Disk & System */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Sauvegardes" value={formatBytes(health.disk.backupsSize)} icon={Archive} />
-            <StatCard label="Uptime" value={formatUptime(health.uptime)} icon={Clock} color="text-green-500" />
-            <StatCard label="Dernière sauvegarde" value={health.lastBackup ? formatDate(health.lastBackup) : 'Jamais'} icon={Server} />
-            <StatCard label="Statut global" value={
-              health.database.status === 'ok' && health.minio.status === 'ok' ? 'Nominal' : 'Dégradé'
-            } icon={CheckCircle2} color={
-              health.database.status === 'ok' && health.minio.status === 'ok'
-                ? 'text-green-500' : 'text-red-500'
-            } />
+            <StatCard
+              label="Sauvegardes"
+              value={formatBytes(health.disk.backupsSize)}
+              icon={Archive}
+            />
+            <StatCard
+              label="Uptime"
+              value={formatUptime(health.uptime)}
+              icon={Clock}
+              color="text-green-500"
+            />
+            <StatCard
+              label="Dernière sauvegarde"
+              value={
+                health.lastBackup ? formatDate(health.lastBackup) : "Jamais"
+              }
+              icon={Server}
+            />
+            <StatCard
+              label="Statut global"
+              value={
+                health.database.status === "ok" && health.minio.status === "ok"
+                  ? "Nominal"
+                  : "Dégradé"
+              }
+              icon={CheckCircle2}
+              color={
+                health.database.status === "ok" && health.minio.status === "ok"
+                  ? "text-green-500"
+                  : "text-red-500"
+              }
+            />
           </div>
         </>
       )}
@@ -1372,59 +1873,63 @@ function HealthTab() {
 
 const MAINTENANCE_ACTIONS = [
   {
-    key: 'clean-logs',
-    label: 'Nettoyer les logs anciens',
-    description: 'Supprime les audit logs de plus de 90 jours',
+    key: "clean-logs",
+    label: "Nettoyer les logs anciens",
+    description: "Supprime les audit logs de plus de 90 jours",
     icon: Trash2,
-    color: 'text-orange-600',
-    bg: 'bg-orange-100 dark:bg-orange-900/30',
+    color: "text-orange-600",
+    bg: "bg-orange-100 dark:bg-orange-900/30",
   },
   {
-    key: 'check-documents',
-    label: 'Vérifier intégrité documents',
-    description: 'Vérifie que tous les documents PDF existent dans MinIO',
+    key: "check-documents",
+    label: "Vérifier intégrité documents",
+    description: "Vérifie que tous les documents PDF existent dans MinIO",
     icon: FileText,
-    color: 'text-blue-600',
-    bg: 'bg-blue-100 dark:bg-blue-900/30',
+    color: "text-blue-600",
+    bg: "bg-blue-100 dark:bg-blue-900/30",
   },
   {
-    key: 'check-negative-stock',
-    label: 'Vérifier stock négatif',
-    description: 'Détecte les produits avec un stock négatif',
+    key: "check-negative-stock",
+    label: "Vérifier stock négatif",
+    description: "Détecte les produits avec un stock négatif",
     icon: AlertTriangle,
-    color: 'text-yellow-600',
-    bg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    color: "text-yellow-600",
+    bg: "bg-yellow-100 dark:bg-yellow-900/30",
   },
   {
-    key: 'clean-trash',
-    label: 'Nettoyer la corbeille',
-    description: 'Supprime définitivement les éléments en corbeille depuis plus de 30 jours',
+    key: "clean-trash",
+    label: "Nettoyer la corbeille",
+    description:
+      "Supprime définitivement les éléments en corbeille depuis plus de 30 jours",
     icon: Trash2,
-    color: 'text-red-600',
-    bg: 'bg-red-100 dark:bg-red-900/30',
+    color: "text-red-600",
+    bg: "bg-red-100 dark:bg-red-900/30",
   },
   {
-    key: 'vacuum-db',
-    label: 'Optimiser la base de données',
-    description: 'Exécute VACUUM ANALYZE pour optimiser les performances PostgreSQL',
+    key: "vacuum-db",
+    label: "Optimiser la base de données",
+    description:
+      "Exécute VACUUM ANALYZE pour optimiser les performances PostgreSQL",
     icon: Database,
-    color: 'text-purple-600',
-    bg: 'bg-purple-100 dark:bg-purple-900/30',
+    color: "text-purple-600",
+    bg: "bg-purple-100 dark:bg-purple-900/30",
   },
   {
-    key: 'check-orphans',
-    label: 'Vérifier enregistrements orphelins',
-    description: 'Détecte les lignes de vente sans vente parente',
+    key: "check-orphans",
+    label: "Vérifier enregistrements orphelins",
+    description: "Détecte les lignes de vente sans vente parente",
     icon: Wrench,
-    color: 'text-gray-600',
-    bg: 'bg-gray-100 dark:bg-gray-800',
+    color: "text-gray-600",
+    bg: "bg-gray-100 dark:bg-gray-800",
   },
 ];
 
 function MaintenanceTab() {
   const [running, setRunning] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, { message: string; details?: unknown }>>({});
+  const [results, setResults] = useState<
+    Record<string, { message: string; details?: unknown }>
+  >({});
 
   const runAction = async (action: string) => {
     setRunning(action);
@@ -1445,53 +1950,72 @@ function MaintenanceTab() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Outils de maintenance</h2>
-        <p className="text-xs text-text-secondary">Optimisez et maintenez votre ERP en bonne santé</p>
+        <h2 className="text-base font-semibold text-text-primary">
+          Outils de maintenance
+        </h2>
+        <p className="text-xs text-text-secondary">
+          Optimisez et maintenez votre ERP en bonne santé
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {MAINTENANCE_ACTIONS.map(({ key, label, description, icon: Icon, color, bg }) => (
-          <Card key={key} className="transition-shadow hover:shadow-md">
-            <CardContent className="p-4">
-              <div className="mb-3 flex items-start gap-3">
-                <div className={cn('flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg', bg)}>
-                  <Icon size={16} className={color} />
+        {MAINTENANCE_ACTIONS.map(
+          ({ key, label, description, icon: Icon, color, bg }) => (
+            <Card key={key} className="transition-shadow hover:shadow-md">
+              <CardContent className="p-4">
+                <div className="mb-3 flex items-start gap-3">
+                  <div
+                    className={cn(
+                      "flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg",
+                      bg,
+                    )}
+                  >
+                    <Icon size={16} className={color} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-text-primary">
+                      {label}
+                    </p>
+                    <p className="text-xs text-text-muted">{description}</p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-text-primary">{label}</p>
-                  <p className="text-xs text-text-muted">{description}</p>
-                </div>
-              </div>
 
-              {results[key] && (
-                <div className="mb-2 rounded-md bg-muted/50 px-3 py-2">
-                  <p className="text-xs text-text-secondary">{results[key].message}</p>
-                </div>
-              )}
+                {results[key] && (
+                  <div className="mb-2 rounded-md bg-muted/50 px-3 py-2">
+                    <p className="text-xs text-text-secondary">
+                      {results[key].message}
+                    </p>
+                  </div>
+                )}
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                disabled={running === key}
-                onClick={() => setConfirm(key)}
-              >
-                {running === key
-                  ? <RefreshCw size={12} className="mr-1.5 animate-spin" />
-                  : <Wrench size={12} className="mr-1.5" />}
-                {running === key ? 'En cours...' : 'Exécuter'}
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  disabled={running === key}
+                  onClick={() => setConfirm(key)}
+                >
+                  {running === key ? (
+                    <RefreshCw size={12} className="mr-1.5 animate-spin" />
+                  ) : (
+                    <Wrench size={12} className="mr-1.5" />
+                  )}
+                  {running === key ? "En cours..." : "Exécuter"}
+                </Button>
+              </CardContent>
+            </Card>
+          ),
+        )}
       </div>
 
       <ConfirmDialog
         open={confirm !== null}
-        title={MAINTENANCE_ACTIONS.find((a) => a.key === confirm)?.label ?? ''}
+        title={MAINTENANCE_ACTIONS.find((a) => a.key === confirm)?.label ?? ""}
         message={`Confirmer l'exécution de "${MAINTENANCE_ACTIONS.find((a) => a.key === confirm)?.label}" ?`}
         confirmText="Exécuter"
-        onConfirm={() => { if (confirm) void runAction(confirm); }}
+        onConfirm={() => {
+          if (confirm) void runAction(confirm);
+        }}
         onCancel={() => setConfirm(null)}
       />
     </div>
@@ -1512,8 +2036,12 @@ export default function DatabasePage() {
             <Database size={20} className="text-app-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-text-primary">Base de données</h1>
-            <p className="text-xs text-text-secondary">Administration, sauvegardes, exports et maintenance système</p>
+            <h1 className="text-lg font-semibold text-text-primary">
+              Base de données
+            </h1>
+            <p className="text-xs text-text-secondary">
+              Administration, sauvegardes, exports et maintenance système
+            </p>
           </div>
         </div>
 
@@ -1521,11 +2049,11 @@ export default function DatabasePage() {
         <Tabs defaultValue="sauvegardes" className="w-full">
           <TabsList className="mb-2 w-full justify-start gap-1 h-auto flex-wrap bg-muted/50 p-1">
             {[
-              { value: 'sauvegardes', label: 'Sauvegardes', icon: Archive },
-              { value: 'exports', label: 'Exports', icon: Download },
-              { value: 'imports', label: 'Imports', icon: Upload },
-              { value: 'sante', label: 'Santé système', icon: Server },
-              { value: 'maintenance', label: 'Maintenance', icon: Wrench },
+              { value: "sauvegardes", label: "Sauvegardes", icon: Archive },
+              { value: "exports", label: "Exports", icon: Download },
+              { value: "imports", label: "Imports", icon: Upload },
+              { value: "sante", label: "Santé système", icon: Server },
+              { value: "maintenance", label: "Maintenance", icon: Wrench },
             ].map(({ value, label, icon: Icon }) => (
               <TabsTrigger
                 key={value}
@@ -1539,31 +2067,43 @@ export default function DatabasePage() {
           </TabsList>
 
           <TabsContent value="sauvegardes">
-            <Can permission="database.backup" fallback={
-              <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
-                <Shield size={16} /> Accès refusé — permission database.backup requise
-              </div>
-            }>
+            <Can
+              permission="database.backup"
+              fallback={
+                <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
+                  <Shield size={16} /> Accès refusé — permission database.backup
+                  requise
+                </div>
+              }
+            >
               <BackupsTab />
             </Can>
           </TabsContent>
 
           <TabsContent value="exports">
-            <Can permission="database.export" fallback={
-              <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
-                <Shield size={16} /> Accès refusé — permission database.export requise
-              </div>
-            }>
+            <Can
+              permission="database.export"
+              fallback={
+                <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
+                  <Shield size={16} /> Accès refusé — permission database.export
+                  requise
+                </div>
+              }
+            >
               <ExportsTab />
             </Can>
           </TabsContent>
 
           <TabsContent value="imports">
-            <Can permission="database.import" fallback={
-              <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
-                <Shield size={16} /> Accès refusé — permission database.import requise
-              </div>
-            }>
+            <Can
+              permission="database.import"
+              fallback={
+                <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
+                  <Shield size={16} /> Accès refusé — permission database.import
+                  requise
+                </div>
+              }
+            >
               <ImportsTab />
             </Can>
           </TabsContent>
@@ -1573,11 +2113,15 @@ export default function DatabasePage() {
           </TabsContent>
 
           <TabsContent value="maintenance">
-            <Can permission="database.maintenance" fallback={
-              <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
-                <Shield size={16} /> Accès refusé — permission database.maintenance requise
-              </div>
-            }>
+            <Can
+              permission="database.maintenance"
+              fallback={
+                <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
+                  <Shield size={16} /> Accès refusé — permission
+                  database.maintenance requise
+                </div>
+              }
+            >
               <MaintenanceTab />
             </Can>
           </TabsContent>
