@@ -200,8 +200,8 @@ export function AppSidebar() {
         onClick={closeMobileOnNavigate}
         title={isCollapsedDesktop ? label : undefined}
         className={cn(
-          'group relative flex items-center rounded-md text-[12px] font-medium outline-none transition-all duration-150',
-          isCollapsedDesktop ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-[7px]',
+          'group relative flex h-10 w-full items-center rounded-lg text-sm font-medium leading-5 outline-none transition-colors duration-150',
+          isCollapsedDesktop ? 'justify-center px-2' : 'gap-3 px-3',
           active
             ? 'border-l-[2.5px] border-app-primary bg-sidebar-active text-white shadow-[inset_0_0_0_1px_rgb(var(--color-primary-rgb)/0.15)]'
             : 'border-l-[2.5px] border-transparent text-sidebar-text hover:bg-sidebar-hover hover:text-white',
@@ -209,15 +209,15 @@ export function AppSidebar() {
         )}
       >
         <Icon
-          size={15}
+          size={19}
           className={cn(
-            'flex-shrink-0 transition-opacity',
+            'h-[19px] w-[19px] shrink-0 transition-opacity',
             active ? 'opacity-100' : 'opacity-65 group-hover:opacity-90',
           )}
         />
-        {!isCollapsedDesktop && <span className="truncate">{label}</span>}
+        {!isCollapsedDesktop && <span className="min-w-0 truncate">{label}</span>}
         {isCollapsedDesktop && (
-          <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-app-sidebar-active px-2 py-1 text-[11px] text-white shadow-lg opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 lg:block">
+          <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-app-sidebar-active px-2.5 py-1.5 text-xs text-white shadow-lg opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 lg:block">
             {label}
           </span>
         )}
@@ -250,16 +250,16 @@ export function AppSidebar() {
             type="button"
             onClick={() => toggleSection(section.id)}
             className={cn(
-              'group flex w-full items-center justify-between px-3 pb-1 pt-2',
-              'rounded-sm text-[9px] font-bold uppercase tracking-[0.12em] outline-none',
+              'group flex h-9 w-full items-center justify-between rounded-md px-3',
+              'text-[10px] font-bold uppercase tracking-[0.12em] outline-none',
               'transition-colors hover:text-white focus-visible:ring-1 focus-visible:ring-white',
               sectionColors[section.id] ?? 'text-app-sidebar-text',
             )}
           >
             <span>{section.title}</span>
             {isSectionCollapsed
-              ? <ChevronRight size={10} className="opacity-60" />
-              : <ChevronDown size={10} className="opacity-60" />
+              ? <ChevronRight size={13} className="opacity-60" />
+              : <ChevronDown size={13} className="opacity-60" />
             }
           </button>
         ) : (
@@ -267,7 +267,7 @@ export function AppSidebar() {
         )}
 
         {!isSectionCollapsed && (
-          <div className="flex flex-col gap-[2px]">
+          <div className="flex flex-col gap-1">
             {visibleItems.map((item) => renderNavLink(item))}
           </div>
         )}
@@ -291,25 +291,29 @@ export function AppSidebar() {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex h-dvh max-w-[85vw] flex-col overflow-hidden',
-          'border-r border-white/[0.07] bg-sidebar-bg shadow-card transition-all duration-200 ease-out',
-          'lg:static lg:z-20 lg:max-w-none lg:shadow-none',
-          isCollapsedDesktop ? 'lg:w-[62px]' : 'lg:w-[232px]',
-          isMobile ? (mobileOpen ? 'translate-x-0' : '-translate-x-full') : 'translate-x-0',
-          'w-[min(268px,85vw)] lg:w-auto',
+          'fixed inset-y-0 left-0 z-40 flex h-dvh w-[var(--sidebar-mobile-width)] max-w-[calc(100vw-24px)] shrink-0 flex-col overflow-hidden',
+          'border-r border-white/[0.07] bg-sidebar-bg shadow-card transition-[width,transform] duration-300 ease-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+          'lg:static lg:z-20 lg:max-w-none lg:translate-x-0 lg:shadow-none',
+          isCollapsedDesktop
+            ? 'lg:w-[var(--sidebar-collapsed-width)]'
+            : 'lg:w-[var(--sidebar-width)]',
         )}
         aria-label="Navigation principale"
       >
         {/* Header */}
-        <div className="flex h-[60px] flex-shrink-0 items-center border-b border-white/[0.07] px-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <div className="flex h-16 shrink-0 items-center border-b border-white/[0.07] px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               type="button"
-              title="Réduire/Développer la barre"
-              onClick={toggleCollapsed}
+              title={isMobile ? 'Stockini' : 'Réduire/Développer la barre'}
+              aria-label={isMobile ? 'Logo Stockini' : 'Réduire ou développer la barre latérale'}
+              onClick={() => {
+                if (!isMobile) toggleCollapsed();
+              }}
               className={cn(
-                'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg',
-                'bg-sidebar-active font-mono text-base font-bold text-white',
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                'bg-sidebar-active font-mono text-sm font-bold text-white',
                 'transition-all hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white',
                 'select-none cursor-pointer',
               )}
@@ -318,8 +322,8 @@ export function AppSidebar() {
             </button>
             {!isCollapsedDesktop && (
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-semibold tracking-tight text-white">Stockini</p>
-                <p className="truncate text-[10px] text-sidebar-text">ERP / Gestion stock</p>
+                <p className="truncate text-sm font-semibold tracking-tight text-white">Stockini</p>
+                <p className="truncate text-xs text-sidebar-text">ERP / Gestion stock</p>
               </div>
             )}
           </div>
@@ -329,16 +333,16 @@ export function AppSidebar() {
               type="button"
               aria-label="Fermer la barre latérale"
               onClick={closeMobile}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-text outline-none transition-colors hover:bg-sidebar-hover hover:text-white focus-visible:ring-2 focus-visible:ring-white"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sidebar-text outline-none transition-colors hover:bg-sidebar-hover hover:text-white focus-visible:ring-2 focus-visible:ring-white"
             >
-              <X size={15} />
+              <X size={18} />
             </button>
           )}
         </div>
 
         {/* Navigation — le wrapper .nav-sections-slot est toujours rendu (SSR + client)
             pour garantir l'identité structurelle avant hydration. */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
           <div className="nav-sections-slot">
             {mounted ? NAV_SECTIONS.map((section) => renderSection(section)) : null}
           </div>
@@ -347,15 +351,15 @@ export function AppSidebar() {
         {/* User footer */}
         <div
           className={cn(
-            'flex-shrink-0 border-t border-white/[0.07] p-3',
-            isCollapsedDesktop ? 'flex justify-center' : 'flex items-center gap-2.5',
+            'shrink-0 border-t border-white/[0.07] p-3',
+            isCollapsedDesktop ? 'flex justify-center' : 'flex min-h-16 items-center gap-3',
           )}
         >
           <div
             title={isCollapsedDesktop ? `${identity} — ${roleLabel}` : undefined}
             className={cn(
-              'flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-full',
-              'bg-sidebar-active font-mono text-[10px] font-bold text-white',
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+              'bg-sidebar-active font-mono text-xs font-bold text-white',
               'select-none',
             )}
           >
@@ -363,8 +367,8 @@ export function AppSidebar() {
           </div>
           {!isCollapsedDesktop && (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[11px] font-semibold leading-tight text-white">{identity}</p>
-              <p className="truncate text-[10px] capitalize leading-tight text-sidebar-text">{roleLabel}</p>
+              <p className="truncate text-sm font-semibold leading-5 text-white">{identity}</p>
+              <p className="truncate text-xs capitalize leading-4 text-sidebar-text">{roleLabel}</p>
             </div>
           )}
         </div>
