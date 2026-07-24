@@ -9,13 +9,15 @@ import {
 } from 'recharts';
 import {
   ShoppingCart, Truck, Package, AlertTriangle,
-  ArrowUpRight, ArrowDownRight, TrendingUp, Bell, Boxes,
+  TrendingUp, Bell, Boxes,
   Banknote, WalletCards, BadgePercent,
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { money } from '@/lib/stockini/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Product, ReportPeriod } from '@/lib/stockini/types';
+import { KpiCard } from './shared/KpiCard';
+import { formatKpiPeriod } from '@/lib/kpi-definitions';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Period = 'day' | 'week' | 'month' | 'year' | 'custom';
@@ -37,51 +39,6 @@ function compactMoney(v: number): string {
   return String(Math.round(v));
 }
 
-
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-type KpiColor = 'blue' | 'purple' | 'amber' | 'teal' | 'green' | 'orange' | 'red' | 'slate';
-
-function KpiCard({
-  icon: Icon, label, value, sub, trend, color,
-}: {
-  icon: React.ElementType; label: string; value: string | number;
-  sub?: string; trend?: number; color: KpiColor;
-}) {
-  const styles: Record<KpiColor, string> = {
-    blue:   'bg-blue-100 text-blue-600',
-    purple: 'bg-purple-100 text-purple-600',
-    amber:  'bg-amber-100 text-amber-600',
-    teal:   'bg-teal-100 text-teal-600',
-    green:  'bg-green-100 text-green-600',
-    orange: 'bg-orange-100 text-orange-600',
-    red:    'bg-red-100 text-red-600',
-    slate:  'bg-slate-100 text-slate-500',
-  };
-  return (
-    <Card className="shadow-card transition-shadow hover:shadow-card-hover">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className={`rounded-xl p-2.5 ${styles[color]}`}>
-            <Icon size={18} />
-          </div>
-          {trend !== undefined && (
-            <span className={`flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-              trend >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-            }`}>
-              {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-              {Math.abs(trend)}%
-            </span>
-          )}
-        </div>
-        <div className="mt-4">
-          <p className="text-2xl font-bold leading-tight text-text-primary">{value}</p>
-          <p className="mt-0.5 text-xs font-medium text-text-secondary">{label}</p>
-          {sub && <p className="mt-1 text-[11px] text-text-muted">{sub}</p>}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 // ─── Section divider ──────────────────────────────────────────────────────────
 function SectionDivider({ label }: { label: string }) {
@@ -165,6 +122,10 @@ export function SimpleDashboard() {
   const salesSeries = useMemo(() => (dashboard?.series ?? []).map((item) => ({ label: item.label, CA: item.ca, Ventes: item.ventes })), [dashboard]);
   const purchSeries = useMemo(() => (dashboard?.series ?? []).map((item) => ({ label: item.label, Achats: item.achatsCount })), [dashboard]);
   const weeklyData = salesSeries;
+  const selectedPeriodLabel = formatKpiPeriod(
+    PERIOD_OPTIONS.find((option) => option.value === period)?.label ?? period,
+    dashboard?.range,
+  );
 
   const topProductsData = useMemo(() => {
     const arr = dashboard?.topProduits ?? [];
@@ -215,17 +176,17 @@ export function SimpleDashboard() {
       <div>
         <SectionDivider label="Suivi quotidien" />
         <div className="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <KpiCard icon={ShoppingCart} label="CA HT net" value={money(dashboard?.operationnel.caNet ?? 0)} trend={dashboard?.ventes.countTrend ?? undefined} color="blue" sub={`${dashboard?.ventes.count ?? 0} vente(s) comptabilisée(s)`} />
-          <KpiCard icon={Banknote} label="Encaissements" value={money(dashboard?.operationnel.encaissements ?? 0)} color="green" sub="Montants réellement payés" />
-          <KpiCard icon={WalletCards} label="Reste à encaisser" value={money(dashboard?.operationnel.resteAEncaisser ?? 0)} color="orange" sub="Créances de la période" />
-          <KpiCard icon={TrendingUp} label="Panier moyen" value={money(dashboard?.operationnel.panierMoyen ?? 0)} color="purple" />
+          <KpiCard metric="netRevenue" period={selectedPeriodLabel} icon={ShoppingCart} label="CA HT net" value={money(dashboard?.operationnel.caNet ?? 0)} trend={dashboard?.ventes.countTrend ?? undefined} color="blue" sub={`${dashboard?.ventes.count ?? 0} vente(s) comptabilisée(s)`} />
+          <KpiCard metric="customerCollections" period={selectedPeriodLabel} icon={Banknote} label="Encaissements" value={money(dashboard?.operationnel.encaissements ?? 0)} color="green" sub="Montants réellement payés" />
+          <KpiCard metric="customerReceivables" period={selectedPeriodLabel} icon={WalletCards} label="Reste à encaisser" value={money(dashboard?.operationnel.resteAEncaisser ?? 0)} color="orange" sub="Créances de la période" />
+          <KpiCard metric="averageBasket" period={selectedPeriodLabel} icon={TrendingUp} label="Panier moyen" value={money(dashboard?.operationnel.panierMoyen ?? 0)} color="purple" />
         </div>
         {dashboard?.financier && (
           <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <KpiCard icon={TrendingUp} label="Bénéfice brut réel" value={money(dashboard.financier.beneficeBrut)} color={dashboard.financier.beneficeBrut >= 0 ? 'green' : 'red'} />
-            <KpiCard icon={Boxes} label="Coût des produits vendus" value={money(dashboard.financier.coutProduitsVendus)} color="slate" />
-            <KpiCard icon={BadgePercent} label="Taux de marque sur vente" value={`${dashboard.financier.tauxMarque.toFixed(3)} %`} color="teal" />
-            <KpiCard icon={BadgePercent} label="Remises accordées" value={money(dashboard.financier.remisesAccordees)} color="amber" />
+            <KpiCard metric="grossProfit" period={selectedPeriodLabel} icon={TrendingUp} label="Bénéfice brut réel" value={money(dashboard.financier.beneficeBrut)} color={dashboard.financier.beneficeBrut >= 0 ? 'green' : 'red'} />
+            <KpiCard metric="costOfGoodsSold" period={selectedPeriodLabel} icon={Boxes} label="Coût des produits vendus" value={money(dashboard.financier.coutProduitsVendus)} color="slate" />
+            <KpiCard metric="markupRate" period={selectedPeriodLabel} icon={BadgePercent} label="Taux de marque sur vente" value={`${dashboard.financier.tauxMarque.toFixed(3)} %`} color="teal" />
+            <KpiCard metric="discounts" period={selectedPeriodLabel} icon={BadgePercent} label="Remises accordées" value={money(dashboard.financier.remisesAccordees)} color="amber" />
           </div>
         )}
       </div>
@@ -237,6 +198,7 @@ export function SimpleDashboard() {
         <SectionDivider label="Activité commerciale" />
         <div className="mt-3 grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           <KpiCard
+            metric="salesCount" period={selectedPeriodLabel}
             icon={ShoppingCart}
             label="Ventes (période)"
             value={dashboard?.ventes.count ?? 0}
@@ -245,6 +207,7 @@ export function SimpleDashboard() {
             sub={`${dashboard?.ventes.prevCount ?? 0} période précédente`}
           />
           <KpiCard
+            metric="purchaseCount" period={selectedPeriodLabel}
             icon={Truck}
             label="Achats / commandes"
             value={dashboard?.achats.count ?? 0}
@@ -253,6 +216,7 @@ export function SimpleDashboard() {
             sub={`${dashboard?.achats.prevCount ?? 0} période précédente`}
           />
           <KpiCard
+            metric="pendingCustomerOrders" period={selectedPeriodLabel}
             icon={ShoppingCart}
             label="Commandes en attente"
             value={dashboard?.pendingCustomerOrders ?? 0}
@@ -260,6 +224,7 @@ export function SimpleDashboard() {
             sub="Clients non encore livrés"
           />
           <KpiCard
+            metric="pendingSupplierReceipts" period={selectedPeriodLabel}
             icon={Truck}
             label="Réceptions en attente"
             value={dashboard?.pendingSupplierReceipts ?? 0}
@@ -276,6 +241,7 @@ export function SimpleDashboard() {
         <SectionDivider label="Stock & Alertes" />
         <div className="mt-3 grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           <KpiCard
+            metric="activeProducts" period={selectedPeriodLabel}
             icon={Package}
             label="Produits en stock"
             value={products.length}
@@ -283,6 +249,7 @@ export function SimpleDashboard() {
             sub={`${products.reduce((a, p) => a + p.quantity, 0).toLocaleString()} unités totales`}
           />
           <KpiCard
+            metric="lowStockProducts" period={selectedPeriodLabel}
             icon={AlertTriangle}
             label="Produits sous seuil"
             value={lowProds.length}
@@ -290,6 +257,7 @@ export function SimpleDashboard() {
             sub="Stock bas — à réapprovisionner"
           />
           <KpiCard
+            metric="outOfStockProducts" period={selectedPeriodLabel}
             icon={Boxes}
             label="Ruptures de stock"
             value={ruptureProds.length}
@@ -297,6 +265,7 @@ export function SimpleDashboard() {
             sub="Quantité = 0"
           />
           <KpiCard
+            metric="stockAlerts" period={selectedPeriodLabel}
             icon={Bell}
             label="Alertes stock"
             value={stockAlerts}

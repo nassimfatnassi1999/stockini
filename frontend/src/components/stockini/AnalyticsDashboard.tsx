@@ -9,10 +9,10 @@ import {
 } from 'recharts';
 import {
   Package, TrendingUp, AlertTriangle, Users, ShoppingCart,
-  Boxes, DollarSign, Activity, BarChart2, ArrowUpRight,
-  ArrowDownRight, RefreshCw, Layers, Target, Zap, Truck,
+  Boxes, DollarSign, Activity, BarChart2,
+  RefreshCw, Layers, Target, Zap, Truck,
   TrendingDown, Loader2, AlertCircle, Download,
-  SlidersHorizontal, X, CalendarDays, Info,
+  SlidersHorizontal, X, CalendarDays,
 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/button';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { SearchableFilterCombobox } from '@/components/reports/SearchableFilterCombobox';
 import type { ReportFilterOption, ReportOverviewQuery, ReportPeriod, ReportOverview } from '@/lib/stockini/types';
+import { KpiCard } from './shared/KpiCard';
+import { formatKpiPeriod } from '@/lib/kpi-definitions';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -75,52 +77,6 @@ const PAYMENT_OPTIONS: ReportFilterOption[] = [
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-type KpiColor = 'default' | 'green' | 'orange' | 'red' | 'blue' | 'purple' | 'teal';
-
-function KpiCard({
-  icon: Icon, label, value, sub, trend, color = 'default', formula, trendPositiveWhen = 'up',
-}: {
-  icon: React.ElementType; label: string; value: string | number;
-  sub?: string; trend?: number | null; color?: KpiColor; formula?: string; trendPositiveWhen?: 'up' | 'down';
-}) {
-  const iconBg: Record<KpiColor, string> = {
-    default: 'bg-slate-100 text-slate-500',
-    green:   'bg-emerald-100 text-emerald-600',
-    orange:  'bg-orange-100 text-orange-600',
-    red:     'bg-red-100 text-red-600',
-    blue:    'bg-blue-100 text-blue-600',
-    purple:  'bg-purple-100 text-purple-600',
-    teal:    'bg-teal-100 text-teal-600',
-  };
-  return (
-    <Card className="h-full border-border/80 shadow-card transition-shadow hover:shadow-card-hover">
-      <CardContent className="flex h-full min-h-36 flex-col p-5">
-        <div className="flex items-start justify-between">
-          <div className={`rounded-xl p-2.5 ${iconBg[color]}`}>
-            <Icon size={18} />
-          </div>
-          <div className="flex items-center gap-2">
-            {formula && <span title={formula} aria-label={`Formule : ${formula}`}><Info size={15} className="text-text-muted" /></span>}
-            {trend !== undefined && (trend === null ? (
-              <span title="Comparaison indisponible" className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">—</span>
-            ) : (() => {
-              const favorable = trendPositiveWhen === 'up' ? trend >= 0 : trend <= 0;
-              return <span aria-label={`${trend >= 0 ? 'Hausse' : 'Baisse'} de ${Math.abs(trend)} %`} className={`flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${favorable ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}{Math.abs(trend)}%
-              </span>;
-            })())}
-          </div>
-        </div>
-        <div className="mt-auto pt-4">
-          <p className="truncate text-xl font-bold leading-tight text-text-primary">{value}</p>
-          <p className="mt-0.5 text-xs text-text-secondary">{label}</p>
-          {sub && <p className="mt-1 text-[11px] text-text-muted">{sub}</p>}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function SectionHead({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
   return (
@@ -426,6 +382,11 @@ export function AnalyticsDashboard() {
   );
 
   const { financier, ventes, achats, stock, clients, topProduitsBenefice, produitsFaibleMarge, topClients, topFournisseurs, series } = overview;
+  const selectedPeriodLabel = formatKpiPeriod(
+    PERIOD_OPTIONS.find((option) => option.value === period)?.label ?? period,
+    overview.range,
+  );
+  const kpiContext = { period: selectedPeriodLabel, filtersActive: activeFilterCount > 0, variant: 'report' as const };
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const seriesChart = series.map((s) => ({
@@ -494,44 +455,51 @@ export function AnalyticsDashboard() {
         <SectionHead icon={DollarSign} title="Synthèse financière" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
+            {...kpiContext}
+            metric="netRevenue"
             icon={DollarSign}
             label="CA net HT hors timbre"
             value={reportMoney(financier.caNet)}
             trend={financier.caTrend}
-            formula="Somme des ventes reconnues HT, nette des remises et avoirs, hors timbre"
             color="orange"
           />
           <KpiCard
+            {...kpiContext}
+            metric="customerCollections"
             icon={TrendingUp}
             label="Encaissements clients"
             value={reportMoney(financier.encaissementsClients)}
-            formula="Somme des paiements clients encaissés sur la période"
             color="green"
           />
           <KpiCard
+            {...kpiContext}
+            metric="customerReceivables"
             icon={AlertTriangle}
             label="Impayés clients"
             value={reportMoney(financier.impayesClients)}
-            formula="Somme des montants restant dus sur les ventes de la période"
             color="red"
           />
           <KpiCard
+            {...kpiContext}
+            metric="grossProfit"
             icon={TrendingUp}
             label="Bénéfice brut réel"
             value={reportMoney(financier.beneficeBrut)}
             sub={`Taux de marque sur vente : ${financier.tauxMarque}%`}
-            formula="CA net HT − coût d'achat HT des produits vendus"
             color={financier.beneficeBrut >= 0 ? 'green' : 'red'}
           />
           <KpiCard
+            {...kpiContext}
+            metric="costOfGoodsSold"
             icon={ShoppingCart}
             label="Coût des produits vendus"
             value={reportMoney(financier.coutProduitsVendus)}
             sub={`Taux de marge sur coût : ${financier.tauxMargeSurCout}%`}
-            formula="Somme des quantités vendues × coût d'achat unitaire HT historique"
             color="blue"
           />
           <KpiCard
+            {...kpiContext}
+            metric="supplierPayments"
             icon={Truck}
             label="Paiements fournisseurs"
             value={reportMoney(financier.paiementsFournisseurs)}
@@ -543,12 +511,16 @@ export function AnalyticsDashboard() {
             color="teal"
           />
           <KpiCard
+            {...kpiContext}
+            metric="supplierPayables"
             icon={AlertTriangle}
             label="Impayés fournisseurs"
             value={reportMoney(financier.impayesFournisseurs)}
             color="orange"
           />
           <KpiCard
+            {...kpiContext}
+            metric="discounts"
             icon={Boxes}
             label="Remises accordées"
             value={reportMoney(financier.remisesAccordees)}
@@ -565,24 +537,32 @@ export function AnalyticsDashboard() {
         <SectionHead icon={DollarSign} title="Trésorerie" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
+            {...kpiContext}
+            metric="physicalCash"
             icon={DollarSign}
             label="Caisse physique"
             value={reportMoney(financier.soldeCaisse)}
             color="green"
           />
           <KpiCard
+            {...kpiContext}
+            metric="bankBalance"
             icon={DollarSign}
             label="Trésorerie bancaire"
             value={reportMoney(financier.soldeBanque)}
             color="blue"
           />
           <KpiCard
+            {...kpiContext}
+            metric="globalBalance"
             icon={DollarSign}
             label="Solde global"
             value={reportMoney(financier.soldeGlobal)}
             color="teal"
           />
           <KpiCard
+            {...kpiContext}
+            metric="periodExpenses"
             icon={TrendingDown}
             label="Dépenses (période)"
             value={reportMoney(financier.depenses)}
@@ -598,6 +578,8 @@ export function AnalyticsDashboard() {
         <SectionHead icon={DollarSign} title="Ventes" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <KpiCard
+            {...kpiContext}
+            metric="netRevenue"
             icon={DollarSign}
             label="CA période"
             value={reportMoney(financier.caNet)}
@@ -605,6 +587,8 @@ export function AnalyticsDashboard() {
             color="orange"
           />
           <KpiCard
+            {...kpiContext}
+            metric="salesCount"
             icon={TrendingUp}
             label="Nb ventes (BL+FA)"
             value={ventes.count}
@@ -612,24 +596,32 @@ export function AnalyticsDashboard() {
             color="blue"
           />
           <KpiCard
+            {...kpiContext}
+            metric="averageBasket"
             icon={Activity}
             label="Panier moyen"
             value={reportMoney(ventes.panierMoyen)}
             color="purple"
           />
           <KpiCard
+            {...kpiContext}
+            metric="quotesCount"
             icon={DollarSign}
             label="Devis"
             value={ventes.devisCount}
             color="default"
           />
           <KpiCard
+            {...kpiContext}
+            metric="invoicesCount"
             icon={Layers}
             label="Factures"
             value={ventes.factureCount}
             color="green"
           />
           <KpiCard
+            {...kpiContext}
+            metric="cancelledSalesCount"
             icon={RefreshCw}
             label="Annulées"
             value={ventes.cancelledCount}
@@ -641,18 +633,24 @@ export function AnalyticsDashboard() {
         {ventes.avoirs.count > 0 && (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <KpiCard
+              {...kpiContext}
+              metric="creditNotesCount"
               icon={RefreshCw}
               label="Avoirs émis"
               value={ventes.avoirs.count}
               color="orange"
             />
             <KpiCard
+              {...kpiContext}
+              metric="creditNotesAmount"
               icon={DollarSign}
               label="Montant avoirs"
               value={reportMoney(ventes.avoirs.total)}
               color="orange"
             />
             <KpiCard
+              {...kpiContext}
+              metric="refundedAmount"
               icon={DollarSign}
               label="Montant remboursé"
               value={reportMoney(ventes.avoirs.montantRembourse)}
@@ -668,12 +666,12 @@ export function AnalyticsDashboard() {
       <section>
         <SectionHead icon={Package} title="Produits & Stock" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <KpiCard icon={Package}       label="Total produits"   value={stock.totalProduits}  color="blue" />
-          <KpiCard icon={AlertTriangle} label="Ruptures stock"   value={stock.ruptureCount}   color="red" />
-          <KpiCard icon={AlertTriangle} label="Sous seuil"       value={stock.lowStockCount}  color="orange" />
-          <KpiCard icon={Boxes}         label="Qté en stock"     value={stock.totalQuantite.toLocaleString()} color="teal" />
-          <KpiCard icon={TrendingUp}    label="Entrées stock"    value={stock.mouvements.entries} color="green" />
-          <KpiCard icon={TrendingDown}  label="Sorties stock"    value={stock.mouvements.exits}   color="red" />
+          <KpiCard {...kpiContext} metric="activeProducts" icon={Package} label="Total produits" value={stock.totalProduits} color="blue" />
+          <KpiCard {...kpiContext} metric="outOfStockProducts" icon={AlertTriangle} label="Ruptures stock" value={stock.ruptureCount} color="red" />
+          <KpiCard {...kpiContext} metric="lowStockProducts" icon={AlertTriangle} label="Sous seuil" value={stock.lowStockCount} color="orange" />
+          <KpiCard {...kpiContext} metric="stockQuantity" icon={Boxes} label="Qté en stock" value={stock.totalQuantite.toLocaleString()} color="teal" />
+          <KpiCard {...kpiContext} metric="stockEntries" icon={TrendingUp} label="Entrées stock" value={stock.mouvements.entries} color="green" />
+          <KpiCard {...kpiContext} metric="stockExits" icon={TrendingDown} label="Sorties stock" value={stock.mouvements.exits} color="red" />
         </div>
       </section>
 
@@ -683,10 +681,10 @@ export function AnalyticsDashboard() {
       <section>
         <SectionHead icon={ShoppingCart} title="Achats" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard icon={ShoppingCart} label="Total achats" value={reportMoney(financier.totalAchats)} trend={financier.achatsTrend} trendPositiveWhen="down" formula="Somme des achats actifs sur la période" color="blue" />
-          <KpiCard icon={Layers}        label="Nb commandes"         value={achats.count}                       trend={achats.countTrend}     color="purple" />
-          <KpiCard icon={Truck}         label="Paiements fournisseurs" value={reportMoney(financier.paiementsFournisseurs)} color="teal" />
-          <KpiCard icon={AlertTriangle} label="Impayés fournisseurs" value={reportMoney(financier.impayesFournisseurs)}  color="orange" />
+          <KpiCard {...kpiContext} metric="totalPurchases" icon={ShoppingCart} label="Total achats" value={reportMoney(financier.totalAchats)} trend={financier.achatsTrend} trendPositiveWhen="down" color="blue" />
+          <KpiCard {...kpiContext} metric="purchaseCount" icon={Layers} label="Nb commandes" value={achats.count} trend={achats.countTrend} color="purple" />
+          <KpiCard {...kpiContext} metric="supplierPayments" icon={Truck} label="Paiements fournisseurs" value={reportMoney(financier.paiementsFournisseurs)} color="teal" />
+          <KpiCard {...kpiContext} metric="supplierPayables" icon={AlertTriangle} label="Impayés fournisseurs" value={reportMoney(financier.impayesFournisseurs)} color="orange" />
         </div>
       </section>
 
@@ -696,9 +694,9 @@ export function AnalyticsDashboard() {
       <section>
         <SectionHead icon={Users} title="Clients" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <KpiCard icon={Users}         label="Total clients"        value={clients.total}                        color="blue" />
-          <KpiCard icon={DollarSign}    label="Encaissements période" value={reportMoney(financier.encaissementsClients)} color="green" />
-          <KpiCard icon={AlertTriangle} label="Impayés période"       value={reportMoney(financier.impayesClients)}       color="red" />
+          <KpiCard {...kpiContext} metric="customersCount" icon={Users} label="Total clients" value={clients.total} color="blue" />
+          <KpiCard {...kpiContext} metric="customerCollections" icon={DollarSign} label="Encaissements période" value={reportMoney(financier.encaissementsClients)} color="green" />
+          <KpiCard {...kpiContext} metric="customerReceivables" icon={AlertTriangle} label="Impayés période" value={reportMoney(financier.impayesClients)} color="red" />
         </div>
       </section>
 
