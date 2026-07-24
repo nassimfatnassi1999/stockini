@@ -1,9 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
+import { hashUserPassword, verifyUserPassword } from '../users/password.util';
 import { ChangePasswordDto, LoginDto, UpdateProfileDto } from './dto/login.dto';
 
 @Injectable()
@@ -25,7 +25,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+    const passwordMatches = await verifyUserPassword(dto.password, user.passwordHash);
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -142,7 +142,7 @@ export class AuthService {
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    const passwordMatches = await bcrypt.compare(
+    const passwordMatches = await verifyUserPassword(
       dto.currentPassword ?? dto.oldPassword ?? '',
       user.passwordHash,
     );
@@ -152,7 +152,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: await bcrypt.hash(dto.newPassword, 10) },
+      data: { passwordHash: await hashUserPassword(dto.newPassword) },
     });
 
     return { ok: true };

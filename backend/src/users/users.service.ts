@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/utils/pagination.util';
@@ -17,6 +16,7 @@ import {
   UpdateUserStatusDto,
   UsersQueryDto,
 } from './dto/user.dto';
+import { hashUserPassword } from './password.util';
 
 @Injectable()
 export class UsersService {
@@ -84,7 +84,7 @@ export class UsersService {
     if (!role)
       throw new BadRequestException(`Role '${dto.roleName}' not found`);
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await hashUserPassword(dto.password);
 
     const user = await this.prisma.user.create({
       data: {
@@ -199,7 +199,7 @@ export class UsersService {
     const exists = await this.prisma.user.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('User not found');
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await hashUserPassword(dto.password);
     await this.prisma.user.update({ where: { id }, data: { passwordHash } });
 
     await this.auditLogs.create({

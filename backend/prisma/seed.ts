@@ -1,6 +1,6 @@
 import { CustomerType, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import * as bcrypt from 'bcryptjs';
+import { hashUserPassword } from '../src/users/password.util';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -152,7 +152,7 @@ async function main() {
     },
     create: {
       email: seedAdminEmail,
-      passwordHash: await bcrypt.hash(seedAdminPassword, 10),
+      passwordHash: await hashUserPassword(seedAdminPassword),
       fullName: 'Stockini Admin',
       roleId: adminRoleId,
       isActive: true,
