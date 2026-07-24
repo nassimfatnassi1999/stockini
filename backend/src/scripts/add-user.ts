@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { ROLE_DEFINITIONS } from '../../prisma/role-definitions';
 import { hashUserPassword, PASSWORD_MIN_LENGTH } from '../users/password.util';
 
 export { BCRYPT_ROUNDS, PASSWORD_MIN_LENGTH } from '../users/password.util';
@@ -243,8 +244,23 @@ async function run(): Promise<void> {
         select: { id: true, name: true },
         orderBy: { name: 'asc' },
       });
-      for (const role of roles)
-        process.stdout.write(`${role.id}\t${role.name}\n`);
+      const definitions = new Map(
+        ROLE_DEFINITIONS.map((definition) => [definition.name, definition]),
+      );
+      const existingNames = new Set(roles.map(({ name }) => name));
+      for (const role of roles) {
+        const displayName = definitions.get(role.name)?.displayName ?? '';
+        process.stdout.write(
+          `AVAILABLE\t${role.id}\t${role.name}\t${displayName}\n`,
+        );
+      }
+      for (const definition of ROLE_DEFINITIONS) {
+        if (!existingNames.has(definition.name)) {
+          process.stdout.write(
+            `MISSING\t-\t${definition.name}\t${definition.displayName}\n`,
+          );
+        }
+      }
       return;
     }
 

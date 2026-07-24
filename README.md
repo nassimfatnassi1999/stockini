@@ -37,10 +37,10 @@ Local URLs:
 The root `.env` file is shared by the local development commands.
 
 ```env
-DATABASE_URL="postgresql://stockpro:stockpro_password@localhost:5432/stockpro?schema=public"
+DATABASE_URL=
 APP_NAME="Stockini"
-JWT_SECRET="change_me"
-JWT_REFRESH_SECRET="change_me_refresh"
+JWT_SECRET=
+JWT_REFRESH_SECRET=
 JWT_EXPIRES_IN="15m"
 JWT_REFRESH_EXPIRES_IN="7d"
 PORT=3001

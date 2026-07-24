@@ -12,11 +12,16 @@ import {
   type CreatedUser,
 } from './add-user';
 
+const TEST_PASSWORD = '**TEST_PASSWORD**';
+const TEST_SHORT_PASSWORD = TEST_PASSWORD.slice(0, 4);
+const TEST_PASSWORD_HASH = '**TEST_PASSWORD_HASH**';
+const TEST_DIFFERENT_PASSWORD = '**TEST_DIFFERENT_PASSWORD**';
+
 const validInput: AddUserInput = {
   fullName: ' Administrateur Stockini ',
   email: ' ADMIN@EXAMPLE.COM ',
   phone: '',
-  password: 'mot-de-passe-solide',
+  password: TEST_PASSWORD,
   roleName: 'ADMIN',
   isActive: true,
 };
@@ -126,7 +131,7 @@ describe('script add-user', () => {
 
   it('refuse un mot de passe trop court', () => {
     expect(() =>
-      normalizeAndValidate({ ...validInput, password: 'court' }),
+      normalizeAndValidate({ ...validInput, password: TEST_SHORT_PASSWORD }),
     ).toThrow(
       expect.objectContaining({ code: 'INVALID_PASSWORD' }) as AddUserError,
     );
@@ -161,11 +166,11 @@ describe('script add-user', () => {
 
   it('utilise bcrypt avec le même coût que le backend et ne stocke pas le mot de passe en clair', async () => {
     const mock = mockClient();
-    const hash = jest.fn().mockResolvedValue('$2b$10$hash');
+    const hash = jest.fn().mockResolvedValue(TEST_PASSWORD_HASH);
     await createUser(mock.client, validInput, hash);
     expect(hash).toHaveBeenCalledWith(validInput.password);
     expect(mock.getCreatedData()).toEqual(
-      expect.objectContaining({ passwordHash: '$2b$10$hash' }),
+      expect.objectContaining({ passwordHash: TEST_PASSWORD_HASH }),
     );
     expect(JSON.stringify(mock.getCreatedData())).not.toContain(
       validInput.password,
@@ -208,7 +213,11 @@ describe('script add-user', () => {
       `#!/usr/bin/env bash
 printf '%s\\n' "$1" >>"${calls}"
 case "$1" in
-  roles) printf 'role-1\\tADMIN\\n' ;;
+  roles)
+    printf 'AVAILABLE\\trole-1\\tADMIN\\tAdministrateur complet\\n'
+    printf 'AVAILABLE\\trole-2\\tNEW_DYNAMIC_ROLE\\tRôle ajouté dynamiquement\\n'
+    printf 'MISSING\\t-\\tCASHIER\\tCaissier\\n'
+    ;;
   create) printf '{"id":"unexpected"}\\n' ;;
 esac
 `,
@@ -221,12 +230,13 @@ esac
       'Administrateur',
       'admin@example.com',
       '',
-      '1',
+      'abc',
+      'admin',
       '',
-      'motdepasse-1',
-      'motdepasse-2',
-      'motdepasse-1',
-      'motdepasse-1',
+      TEST_PASSWORD,
+      TEST_DIFFERENT_PASSWORD,
+      TEST_PASSWORD,
+      TEST_PASSWORD,
       'n',
       '',
     ].join('\n');
@@ -247,8 +257,16 @@ esac
     expect(`${result.stdout}${result.stderr}`).toContain(
       'Les mots de passe ne correspondent pas.',
     );
-    expect(`${result.stdout}${result.stderr}`).not.toContain('motdepasse-1');
-    expect(`${result.stdout}${result.stderr}`).not.toContain('motdepasse-2');
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      'Veuillez choisir un rôle existant.',
+    );
+    expect(result.stdout).toContain('NEW_DYNAMIC_ROLE');
+    expect(result.stdout).toContain('Rôle         : ADMIN');
+    expect(result.stderr).toContain('CASHIER — Caissier');
+    expect(`${result.stdout}${result.stderr}`).not.toContain(TEST_PASSWORD);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(
+      TEST_DIFFERENT_PASSWORD,
+    );
     expect(result.stdout).toContain('Création annulée.');
     expect(readFileSync(calls, 'utf8')).toBe('roles\n');
   });

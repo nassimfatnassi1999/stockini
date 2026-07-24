@@ -18,6 +18,7 @@ import {
 } from './database.service';
 
 type ObjectStore = Map<string, Buffer>;
+const TEST_DATABASE_PASSWORD = '**TEST_DATABASE_PASSWORD**';
 
 describe('DatabaseService full PostgreSQL + MinIO backups', () => {
   let directory: string;
@@ -97,7 +98,7 @@ describe('DatabaseService full PostgreSQL + MinIO backups', () => {
         host: 'postgres',
         port: '5432',
         user: 'stockini',
-        password: 'not-logged',
+        password: TEST_DATABASE_PASSWORD,
         database: 'stockini',
       })),
       commandVersion: jest.fn(() => 'pg_dump (PostgreSQL) 16.4'),

@@ -8,6 +8,7 @@ readonly PROJECT_ROOT
 readonly BACKEND_DIR="${PROJECT_ROOT}/backend"
 readonly HELPER_SOURCE="${BACKEND_DIR}/src/scripts/add-user.ts"
 readonly PASSWORD_HELPER_SOURCE="${BACKEND_DIR}/src/users/password.util.ts"
+readonly ROLE_DEFINITIONS_SOURCE="${BACKEND_DIR}/prisma/role-definitions.ts"
 readonly PASSWORD_MIN_LENGTH=8
 
 RUN_MODE=""
@@ -127,7 +128,7 @@ run_docker_compose() {
     -e TS_NODE_TRANSPILE_ONLY=true \
     -e 'TS_NODE_COMPILER_OPTIONS={"module":"CommonJS","moduleResolution":"Node"}' \
     -e NODE_PATH=/app/node_modules \
-    "$COMPOSE_SERVICE" ./node_modules/.bin/ts-node /tmp/stockini-add-user/scripts/add-user.ts "$@"
+    "$COMPOSE_SERVICE" ./node_modules/.bin/ts-node /tmp/stockini-add-user/src/scripts/add-user.ts "$@"
 }
 
 run_docker_exec() {
@@ -135,22 +136,30 @@ run_docker_exec() {
     -e TS_NODE_TRANSPILE_ONLY=true \
     -e 'TS_NODE_COMPILER_OPTIONS={"module":"CommonJS","moduleResolution":"Node"}' \
     -e NODE_PATH=/app/node_modules \
-    "$DOCKER_CONTAINER" ./node_modules/.bin/ts-node /tmp/stockini-add-user/scripts/add-user.ts "$@"
+    "$DOCKER_CONTAINER" ./node_modules/.bin/ts-node /tmp/stockini-add-user/src/scripts/add-user.ts "$@"
 }
 
 install_helper_with_compose() {
   local compose_container
-  compose exec -T "$COMPOSE_SERVICE" mkdir -p /tmp/stockini-add-user/scripts /tmp/stockini-add-user/users
+  compose exec -T "$COMPOSE_SERVICE" mkdir -p \
+    /tmp/stockini-add-user/src/scripts \
+    /tmp/stockini-add-user/src/users \
+    /tmp/stockini-add-user/prisma
   compose_container="$(compose ps -q "$COMPOSE_SERVICE")"
   [[ -n "$compose_container" ]] || die "Le conteneur du service $COMPOSE_SERVICE est introuvable."
-  docker cp -q "$HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/scripts/add-user.ts"
-  docker cp -q "$PASSWORD_HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/users/password.util.ts"
+  docker cp -q "$HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/src/scripts/add-user.ts"
+  docker cp -q "$PASSWORD_HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/src/users/password.util.ts"
+  docker cp -q "$ROLE_DEFINITIONS_SOURCE" "${compose_container}:/tmp/stockini-add-user/prisma/role-definitions.ts"
 }
 
 install_helper_with_docker() {
-  docker exec "$DOCKER_CONTAINER" mkdir -p /tmp/stockini-add-user/scripts /tmp/stockini-add-user/users
-  docker cp "$HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/scripts/add-user.ts" >/dev/null
-  docker cp "$PASSWORD_HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/users/password.util.ts" >/dev/null
+  docker exec "$DOCKER_CONTAINER" mkdir -p \
+    /tmp/stockini-add-user/src/scripts \
+    /tmp/stockini-add-user/src/users \
+    /tmp/stockini-add-user/prisma
+  docker cp "$HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/src/scripts/add-user.ts" >/dev/null
+  docker cp "$PASSWORD_HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/src/users/password.util.ts" >/dev/null
+  docker cp "$ROLE_DEFINITIONS_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/prisma/role-definitions.ts" >/dev/null
 }
 
 configure_compose_candidate() {
@@ -283,20 +292,67 @@ if [[ -z "$PHONE" && "$PASSWORD_STDIN" == false ]]; then
   IFS= read -r -p 'Téléphone (facultatif) : ' PHONE || on_interrupt
 fi
 
-declare -a ROLE_ROWS=()
-while IFS= read -r row; do ROLE_ROWS[${#ROLE_ROWS[@]}]="$row"; done < <(run_helper roles)
-((${#ROLE_ROWS[@]} > 0)) || die "Aucun rôle n’est disponible dans la base."
 declare -a ROLE_NAMES=()
-printf '\nRôles disponibles :\n\n'
-for row in "${ROLE_ROWS[@]}"; do
-  ROLE_NAMES[${#ROLE_NAMES[@]}]="${row#*$'\t'}"
-  printf '%d) %s\n' "${#ROLE_NAMES[@]}" "${ROLE_NAMES[${#ROLE_NAMES[@]}-1]}"
+declare -a ROLE_DESCRIPTIONS=()
+declare -a MISSING_ROLE_NAMES=()
+declare -a MISSING_ROLE_DESCRIPTIONS=()
+while IFS=$'\t' read -r role_status _role_id role_name role_description; do
+  case "$role_status" in
+    AVAILABLE)
+      ROLE_NAMES[${#ROLE_NAMES[@]}]="$role_name"
+      ROLE_DESCRIPTIONS[${#ROLE_DESCRIPTIONS[@]}]="$role_description"
+      ;;
+    MISSING)
+      MISSING_ROLE_NAMES[${#MISSING_ROLE_NAMES[@]}]="$role_name"
+      MISSING_ROLE_DESCRIPTIONS[${#MISSING_ROLE_DESCRIPTIONS[@]}]="$role_description"
+      ;;
+  esac
+done < <(run_helper roles)
+
+((${#ROLE_NAMES[@]} > 0)) || die "Aucun rôle n’est disponible dans la base."
+
+printf '\n==========================================\n'
+printf '          RÔLES DISPONIBLES\n'
+printf '==========================================\n\n'
+for ((role_index = 0; role_index < ${#ROLE_NAMES[@]}; role_index++)); do
+  printf '%d) %s\n' "$((role_index + 1))" "${ROLE_NAMES[role_index]}"
+  if [[ -n "${ROLE_DESCRIPTIONS[role_index]}" ]]; then
+    printf '   %s\n' "${ROLE_DESCRIPTIONS[role_index]}"
+  fi
+  printf '\n'
 done
+printf '%s\n' '------------------------------------------'
+
+if ((${#MISSING_ROLE_NAMES[@]} > 0)); then
+  if ((${#ROLE_NAMES[@]} == 1)); then
+    printf '\nAvertissement : le seed prévoit %d rôles, mais un seul est présent en base.\n' \
+      "$(( ${#ROLE_NAMES[@]} + ${#MISSING_ROLE_NAMES[@]} ))" >&2
+  else
+    printf '\nAvertissement : le seed prévoit %d rôles, mais seuls %d sont présents en base.\n' \
+      "$(( ${#ROLE_NAMES[@]} + ${#MISSING_ROLE_NAMES[@]} ))" "${#ROLE_NAMES[@]}" >&2
+  fi
+  printf 'Rôles prévus mais indisponibles :\n' >&2
+  for ((missing_index = 0; missing_index < ${#MISSING_ROLE_NAMES[@]}; missing_index++)); do
+    printf '  - %s' "${MISSING_ROLE_NAMES[missing_index]}" >&2
+    if [[ -n "${MISSING_ROLE_DESCRIPTIONS[missing_index]}" ]]; then
+      printf ' — %s' "${MISSING_ROLE_DESCRIPTIONS[missing_index]}" >&2
+    fi
+    printf '\n' >&2
+  done
+  printf 'Exécutez manuellement « npm run prisma:seed-roles » dans le backend pour les synchroniser.\n\n' >&2
+fi
 
 role_exists=false
 if [[ -n "$ROLE" ]]; then
-  for role_name in "${ROLE_NAMES[@]}"; do [[ "$ROLE" == "$role_name" ]] && role_exists=true; done
-  [[ "$role_exists" == true ]] || die "Le rôle « $ROLE » n’existe pas."
+  normalized_role="$(printf '%s' "$ROLE" | tr '[:lower:]' '[:upper:]')"
+  for role_name in "${ROLE_NAMES[@]}"; do
+    if [[ "$normalized_role" == "$role_name" ]]; then
+      ROLE="$role_name"
+      role_exists=true
+      break
+    fi
+  done
+  [[ "$role_exists" == true ]] || die "Rôle invalide. Veuillez choisir un rôle existant."
 else
   while true; do
     IFS= read -r -p 'Choisissez un rôle : ' choice || on_interrupt
@@ -304,7 +360,16 @@ else
       ROLE="${ROLE_NAMES[choice-1]}"
       break
     fi
-    printf 'Sélection invalide.\n' >&2
+    normalized_role="$(printf '%s' "$choice" | tr '[:lower:]' '[:upper:]')"
+    for role_name in "${ROLE_NAMES[@]}"; do
+      if [[ "$normalized_role" == "$role_name" ]]; then
+        ROLE="$role_name"
+        role_exists=true
+        break
+      fi
+    done
+    [[ "$role_exists" == true ]] && break
+    printf 'Rôle invalide.\nVeuillez choisir un rôle existant.\n' >&2
   done
 fi
 

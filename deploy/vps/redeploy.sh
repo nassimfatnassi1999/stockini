@@ -270,7 +270,7 @@ cd "$FRONTEND_DIR"
 npm ci --legacy-peer-deps --include=dev
 
 _VPS_IP=$(grep -E '^VPS_IP=' "$ENV_FILE" | head -1 | cut -d= -f2 | tr -d '[:space:]"'"'"'')
-_VPS_IP="${_VPS_IP:-51.178.46.89}"
+_VPS_IP="${_VPS_IP:-203.0.113.10}"
 export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-/api}"
 export INTERNAL_API_URL="${INTERNAL_API_URL:-http://127.0.0.1:$BACKEND_PORT/api}"
 export NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-http://$_VPS_IP}"
@@ -494,7 +494,7 @@ fi
 # ── Update Nginx config from repo then reload ────────────────
 log_info "Mise à jour et rechargement Nginx..."
 _SITE=$(grep -E '^VPS_IP=' "$ENV_FILE" | head -1 | cut -d= -f2 | tr -d '[:space:]"'"'"'')
-_SITE="${_SITE:-51.178.46.89}"
+_SITE="${_SITE:-203.0.113.10}"
 _NGINX_SRC="$PROJECT_ROOT/deploy/vps/nginx-stockini-msp.conf"
 _NGINX_DEST="/etc/nginx/sites-available/$_SITE"
 

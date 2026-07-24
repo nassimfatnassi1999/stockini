@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NGINX_CONF_SRC="$SCRIPT_DIR/nginx-stockini-msp.conf"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$PROJECT_ROOT/.env"
-SITE_NAME="51.178.46.89"
+SITE_NAME="203.0.113.10"
 NGINX_AVAILABLE="/etc/nginx/sites-available/$SITE_NAME"
 NGINX_ENABLED="/etc/nginx/sites-enabled/$SITE_NAME"
 

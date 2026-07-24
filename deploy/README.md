@@ -69,16 +69,16 @@ Services locaux (localhost uniquement, pas exposés) :
 - **Accès SSH :** utilisateur non-root avec `sudo`
 
 ### DNS
-Avant de lancer le setup, le domaine `51.178.46.89` doit pointer vers l'IP du VPS :
+Avant de lancer le setup, le domaine `203.0.113.10` doit pointer vers l'IP du VPS :
 
 ```
-A    51.178.46.89      →  <IP_DU_VPS>
-A    51.178.46.89  →  <IP_DU_VPS>
+A    203.0.113.10      →  <IP_DU_VPS>
+A    203.0.113.10  →  <IP_DU_VPS>
 ```
 
 Vérifier la propagation :
 ```bash
-dig 51.178.46.89 +short
+dig 203.0.113.10 +short
 # doit retourner l'IP du VPS
 ```
 
@@ -163,34 +163,34 @@ nano .env
 
 ```bash
 # Base de données
-DB_PASSWORD="mot_de_passe_fort_postgres"
+DB_PASSWORD="<YOUR_DATABASE_PASSWORD>"
 
 # JWT — générer avec : openssl rand -base64 64
-JWT_SECRET="..."
-JWT_REFRESH_SECRET="..."
+JWT_SECRET="<YOUR_JWT_SECRET>"
+JWT_REFRESH_SECRET="<YOUR_JWT_REFRESH_SECRET>"
 
 # Redis — générer avec : openssl rand -base64 32
-REDIS_PASSWORD="..."
+REDIS_PASSWORD="<YOUR_REDIS_PASSWORD>"
 
 # MinIO — identifiants d'accès au stockage fichiers
-MINIO_ACCESS_KEY="cle_acces_minio"
-MINIO_SECRET_KEY="cle_secrete_minio"
+MINIO_ACCESS_KEY="<YOUR_MINIO_ACCESS_KEY>"
+MINIO_SECRET_KEY="<YOUR_MINIO_SECRET_KEY>"
 
 # SMTP (email, optionnel mais recommandé) — Gmail
-SMTP_USER="moumnaspareparts@gmail.com"
-SMTP_PASS="app_password_gmail_16_caracteres"
+SMTP_USER="noreply@example.com"
+SMTP_PASS="<YOUR_SMTP_PASSWORD>"
 ```
 
 Le domaine et les URLs sont déjà pré-configurés :
 
 ```bash
-DOMAIN=51.178.46.89
-CORS_ORIGIN=http://51.178.46.89
-FRONTEND_URL=http://51.178.46.89
-NEXT_PUBLIC_APP_URL=http://51.178.46.89
-NEXT_PUBLIC_SITE_URL=http://51.178.46.89
-MINIO_PUBLIC_ENDPOINT=http://51.178.46.89/storage
-SMTP_FROM="moumnaspareparts@gmail.com"
+DOMAIN=203.0.113.10
+CORS_ORIGIN=http://203.0.113.10
+FRONTEND_URL=http://203.0.113.10
+NEXT_PUBLIC_APP_URL=http://203.0.113.10
+NEXT_PUBLIC_SITE_URL=http://203.0.113.10
+MINIO_PUBLIC_ENDPOINT=http://203.0.113.10/storage
+SMTP_FROM="noreply@example.com"
 ```
 
 > **Note :** Le setup valide `.env` avant de commencer et bloque si des `CHANGE_ME` critiques sont détectés.
@@ -256,7 +256,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Configure et démarre PM2 (`stockini-frontend`, port 3000)
 
 #### Étape 7/8 — Nginx (`setup_nginx.sh`, sudo)
-- Copie `nginx-stockini-msp.conf` vers `/etc/nginx/sites-available/51.178.46.89`
+- Copie `nginx-stockini-msp.conf` vers `/etc/nginx/sites-available/203.0.113.10`
 - Active le site (symlink dans `sites-enabled`)
 - Supprime le site `default` de Nginx
 - Teste la configuration (`nginx -t`) et recharge Nginx
@@ -264,7 +264,7 @@ Installe tous les outils nécessaires s'ils sont absents :
 - Sinon : installe une config HTTP-only temporaire (pour pouvoir obtenir le certificat)
 
 #### Étape 8/8 — SSL Let's Encrypt (automatique)
-- Utilise Certbot pour obtenir un certificat pour `51.178.46.89` et `51.178.46.89`
+- Utilise Certbot pour obtenir un certificat pour `203.0.113.10` et `203.0.113.10`
 - Active le renouvellement automatique via `certbot.timer`
 - Reconfigure Nginx en HTTPS après obtention du certificat
 
@@ -275,7 +275,7 @@ Le setup l'active automatiquement si le DNS est propagé. Si le certificat n'a p
 ```bash
 # Obtenir le certificat manuellement
 sudo certbot certonly --nginx \
-  -d 51.178.46.89 -d 51.178.46.89 \
+  -d 203.0.113.10 -d 203.0.113.10 \
   --non-interactive --agree-tos \
   -m admin@localhost
 
@@ -504,7 +504,7 @@ curl http://127.0.0.1:3001/health
 
 # Certificat SSL — date d'expiration
 sudo certbot certificates
-echo | openssl s_client -servername 51.178.46.89 -connect 51.178.46.89:443 2>/dev/null \
+echo | openssl s_client -servername 203.0.113.10 -connect 203.0.113.10:443 2>/dev/null \
   | openssl x509 -noout -enddate
 ```
 
@@ -573,7 +573,7 @@ echo | openssl s_client -servername 51.178.46.89 -connect 51.178.46.89:443 2>/de
 **Rôle :** Installation et activation de la configuration Nginx.  
 **Exécution :** `sudo bash deploy/vps/setup_nginx.sh`  
 **Source config :** `deploy/vps/nginx-stockini-msp.conf`  
-**Destination :** `/etc/nginx/sites-available/51.178.46.89`
+**Destination :** `/etc/nginx/sites-available/203.0.113.10`
 **Comportement :** installe la config HTTPS si les certificats existent, sinon HTTP-only.
 
 ---
@@ -642,7 +642,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 
 | Variable | Exemple | Description |
 |----------|---------|-------------|
-| `DOMAIN` | `51.178.46.89` | Domaine principal |
+| `DOMAIN` | `203.0.113.10` | Domaine principal |
 | `NODE_ENV` | `production` | Environnement Node |
 | `PORT` | `3001` | Port backend NestJS |
 | `BACKEND_PORT` | `3001` | Port backend (redondant, utilisé par les scripts) |
@@ -658,12 +658,12 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `JWT_REFRESH_SECRET` | `openssl rand -base64 64` | Clé refresh tokens JWT |
 | `JWT_EXPIRES_IN` | `15m` | Durée token d'accès |
 | `JWT_REFRESH_EXPIRES_IN` | `7d` | Durée token de rafraîchissement |
-| `CORS_ORIGIN` | `http://51.178.46.89` | Origines CORS autorisées |
-| `FRONTEND_URL` | `http://51.178.46.89` | URL frontend (pour les liens dans les emails) |
+| `CORS_ORIGIN` | `http://203.0.113.10` | Origines CORS autorisées |
+| `FRONTEND_URL` | `http://203.0.113.10` | URL frontend (pour les liens dans les emails) |
 | `NEXT_PUBLIC_API_URL` | `/api` | Chemin API côté browser |
 | `INTERNAL_API_URL` | `http://127.0.0.1:3001/api` | URL API interne (SSR Next.js) |
-| `NEXT_PUBLIC_APP_URL` | `http://51.178.46.89` | URL publique de l'app |
-| `NEXT_PUBLIC_SITE_URL` | `http://51.178.46.89` | URL du site (Next.js metadata) |
+| `NEXT_PUBLIC_APP_URL` | `http://203.0.113.10` | URL publique de l'app |
+| `NEXT_PUBLIC_SITE_URL` | `http://203.0.113.10` | URL du site (Next.js metadata) |
 | `NEXT_PUBLIC_APP_NAME` | `Stockini` | Nom affiché de l'application |
 | `MINIO_ENDPOINT` | `127.0.0.1` | Adresse MinIO |
 | `MINIO_PORT` | `9000` | Port MinIO API |
@@ -671,7 +671,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `MINIO_BUCKET` | `generated-documents` | Nom du bucket |
 | `MINIO_ACCESS_KEY` | `...` | Clé d'accès MinIO |
 | `MINIO_SECRET_KEY` | `...` | Clé secrète MinIO |
-| `MINIO_PUBLIC_ENDPOINT` | `http://51.178.46.89/storage` | URL publique MinIO (liens de téléchargement) |
+| `MINIO_PUBLIC_ENDPOINT` | `http://203.0.113.10/storage` | URL publique MinIO (liens de téléchargement) |
 | `UPLOAD_DIR` | `/home/ubuntu/stockini/uploads` | Répertoire uploads local |
 | `SMTP_HOST` | `smtp.gmail.com` | Hôte SMTP |
 | `SMTP_PORT` | `587` | Port SMTP |
@@ -680,7 +680,7 @@ Toutes les variables sont dans `.env` à la racine du projet. Le modèle est `de
 | `SMTP_FORCE_IPV4` | `true` | Force IPv4 (évite `ENETUNREACH` sur VPS sans IPv6) |
 | `SMTP_USER` | `...` | Utilisateur SMTP |
 | `SMTP_PASS` | `...` | Mot de passe SMTP (App Password Gmail) |
-| `SMTP_FROM` | `moumnaspareparts@gmail.com` | Expéditeur des emails |
+| `SMTP_FROM` | `noreply@example.com` | Expéditeur des emails |
 | `COMPANY_NAME` | `Moumna spare part` | Nom société (en-tête PDF) |
 | `COMPANY_ADDRESS` | `...` | Adresse société (PDF) |
 | `COMPANY_PHONE` | `...` | Téléphone société (PDF) |
@@ -763,7 +763,7 @@ sudo certbot certificates
 sudo certbot renew
 
 # Renouveler un domaine spécifique
-sudo certbot renew --cert-name 51.178.46.89
+sudo certbot renew --cert-name 203.0.113.10
 
 # Recharger Nginx après renouvellement
 sudo systemctl reload nginx

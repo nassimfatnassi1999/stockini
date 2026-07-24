@@ -34,6 +34,20 @@ Le script demande le nom complet, l'email, le téléphone facultatif, le rôle
 (liste lue depuis la table `Role`), le statut et deux fois le mot de passe. La
 confirmation finale vaut « non » par défaut.
 
+Les libellés et les rôles attendus proviennent de
+`backend/prisma/role-definitions.ts`, également utilisé par le seed Prisma. Les
+rôles réellement attribuables restent exclusivement ceux présents dans la table
+`Role`. Si le seed prévoit des rôles absents de la base, le script les signale
+sans les créer automatiquement. Une sélection accepte le numéro ou le nom du
+rôle, sans tenir compte de la casse.
+
+Pour synchroniser uniquement les rôles, sans charger les autres données du seed :
+
+```bash
+cd backend
+npm run prisma:seed-roles
+```
+
 En mode Docker, le script utilise `.env` avec le Compose de développement et
 `deploy-docker/.env.prod` avec le Compose de production. Les appels Docker sont
 réservés aux contrôles et à l'écriture transactionnelle ; l'assistant lui-même

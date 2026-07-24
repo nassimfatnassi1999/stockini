@@ -28,6 +28,17 @@ pnpm-debug.log*
 .env.*.local
 !.env.example
 
+# Private keys, certificates and credential bundles
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cert
+secrets/
+credentials/
+service-account.json
+
 # OS / Editor
 .DS_Store
 Thumbs.db
