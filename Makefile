@@ -4,7 +4,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 SHELL := /bin/bash
-ROOT_DIR := $(shell pwd)
+ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BACKEND := $(ROOT_DIR)/backend
 FRONTEND := $(ROOT_DIR)/frontend
 ENV_FILE := $(ROOT_DIR)/.env
@@ -23,7 +23,7 @@ PROD_WAIT_FRONTEND ?= 1
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
 # le compose actuel peut encore utiliser "postgres".
-COMPOSE_SERVICES := $(shell docker compose config --services 2>/dev/null)
+COMPOSE_SERVICES := $(if $(wildcard $(ENV_FILE)),$(shell docker compose --project-directory "$(ROOT_DIR)" --env-file "$(ENV_FILE)" -f "$(ROOT_DIR)/docker-compose.yml" config --services),)
 DB_SERVICE := $(if $(filter db,$(COMPOSE_SERVICES)),db,$(if $(filter postgres,$(COMPOSE_SERVICES)),postgres,db))
 MINIO_SERVICE := minio
 MINIO_PORT ?= 9000
@@ -43,7 +43,7 @@ NC := \033[0m
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-backend install-frontend dev preview stop \
+.PHONY: help add-user install install-backend install-frontend dev preview stop \
 	db-up db-down db-wait db-migrate db-seed db-seed-only db-reset studio \
 	minio-up minio-down minio-wait \
 	logs logs-db logs-minio build clear clean-all \
@@ -71,6 +71,18 @@ help: ## Afficher cette aide
 	@echo -e "$(YELLOW)Environnement$(NC)"
 	@echo "  Fichier unique: $(ENV_FILE)"
 	@echo "  Service DB    : $(DB_SERVICE)"
+
+add-user: ## Créer un utilisateur de manière interactive
+	@echo "Lancement de l'assistant de création d'utilisateur..."
+	@if [ ! -f "$(ROOT_DIR)/scripts/add-user.sh" ]; then \
+		echo "Erreur : scripts/add-user.sh est introuvable."; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(ROOT_DIR)/scripts/add-user.sh" ]; then \
+		echo "Le script n'est pas exécutable. Correction des permissions..."; \
+		chmod +x "$(ROOT_DIR)/scripts/add-user.sh"; \
+	fi
+	@"$(ROOT_DIR)/scripts/add-user.sh"
 
 env-check:
 	@if [ ! -f "$(ENV_FILE)" ]; then \

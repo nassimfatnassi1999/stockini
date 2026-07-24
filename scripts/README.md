@@ -17,15 +17,27 @@ Il ne démarre, ne reconstruit et ne migre aucun conteneur.
 
 ## Utilisation interactive
 
-Depuis n'importe quel dossier :
+Depuis la racine du projet :
 
 ```bash
-/chemin/vers/stockini/scripts/add-user.sh
+make add-user
+```
+
+La target vérifie la présence et le droit d'exécution du script, puis lui
+transmet directement le terminal. Elle fonctionne également avec :
+
+```bash
+make -C /chemin/vers/stockini add-user
 ```
 
 Le script demande le nom complet, l'email, le téléphone facultatif, le rôle
 (liste lue depuis la table `Role`), le statut et deux fois le mot de passe. La
 confirmation finale vaut « non » par défaut.
+
+En mode Docker, le script utilise `.env` avec le Compose de développement et
+`deploy-docker/.env.prod` avec le Compose de production. Les appels Docker sont
+réservés aux contrôles et à l'écriture transactionnelle ; l'assistant lui-même
+reste attaché au terminal de `make`.
 
 ## Options d'automatisation
 

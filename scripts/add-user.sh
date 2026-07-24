@@ -12,7 +12,10 @@ readonly PASSWORD_MIN_LENGTH=8
 
 RUN_MODE=""
 COMPOSE_FILE=""
+COMPOSE_PROJECT_DIR=""
+COMPOSE_ENV_FILE=""
 COMPOSE_SERVICE=""
+DOCKER_CONTAINER=""
 EMAIL=""
 FULL_NAME=""
 PHONE=""
@@ -22,13 +25,14 @@ PASSWORD_STDIN=false
 ASSUME_YES=false
 
 die() {
-  printf 'Erreur : %s\nAucune modification n’a été effectuée.\n' "$1" >&2
+  printf "Erreur : %s\nAucune modification n’a été effectuée.\n" "$1" >&2
   exit "${2:-1}"
 }
 
 on_interrupt() {
-  printf '\nOpération annulée. Aucune modification n’a été effectuée.\n' >&2
-  exit 130
+  unset PASSWORD PASSWORD_CONFIRM 2>/dev/null || true
+  printf "\nCréation annulée.\nAucune modification n’a été effectuée.\n" >&2
+  exit 0
 }
 trap on_interrupt INT TERM
 
@@ -72,6 +76,10 @@ while (($#)); do
   esac
 done
 
+if [[ "$PASSWORD_STDIN" == false && "${NODE_ENV:-}" != test && ! -t 0 ]]; then
+  die "Cette commande nécessite un terminal interactif. Lancez-la avec : make add-user" 2
+fi
+
 if [[ "$PASSWORD_STDIN" == true ]]; then
   [[ -n "$FULL_NAME" ]] || die "--name est obligatoire avec --password-stdin." 2
   [[ -n "$EMAIL" ]] || die "--email est obligatoire avec --password-stdin." 2
@@ -108,14 +116,55 @@ run_local() {
 }
 
 compose() {
-  (cd "$(dirname "$COMPOSE_FILE")" && docker compose -f "$(basename "$COMPOSE_FILE")" "$@")
+  docker compose \
+    --project-directory "$COMPOSE_PROJECT_DIR" \
+    --env-file "$COMPOSE_ENV_FILE" \
+    -f "$COMPOSE_FILE" "$@"
 }
 
-run_docker() {
+run_docker_compose() {
   compose exec -T \
     -e TS_NODE_TRANSPILE_ONLY=true \
+    -e 'TS_NODE_COMPILER_OPTIONS={"module":"CommonJS","moduleResolution":"Node"}' \
     -e NODE_PATH=/app/node_modules \
     "$COMPOSE_SERVICE" ./node_modules/.bin/ts-node /tmp/stockini-add-user/scripts/add-user.ts "$@"
+}
+
+run_docker_exec() {
+  docker exec -i \
+    -e TS_NODE_TRANSPILE_ONLY=true \
+    -e 'TS_NODE_COMPILER_OPTIONS={"module":"CommonJS","moduleResolution":"Node"}' \
+    -e NODE_PATH=/app/node_modules \
+    "$DOCKER_CONTAINER" ./node_modules/.bin/ts-node /tmp/stockini-add-user/scripts/add-user.ts "$@"
+}
+
+install_helper_with_compose() {
+  local compose_container
+  compose exec -T "$COMPOSE_SERVICE" mkdir -p /tmp/stockini-add-user/scripts /tmp/stockini-add-user/users
+  compose_container="$(compose ps -q "$COMPOSE_SERVICE")"
+  [[ -n "$compose_container" ]] || die "Le conteneur du service $COMPOSE_SERVICE est introuvable."
+  docker cp -q "$HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/scripts/add-user.ts"
+  docker cp -q "$PASSWORD_HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/users/password.util.ts"
+}
+
+install_helper_with_docker() {
+  docker exec "$DOCKER_CONTAINER" mkdir -p /tmp/stockini-add-user/scripts /tmp/stockini-add-user/users
+  docker cp "$HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/scripts/add-user.ts" >/dev/null
+  docker cp "$PASSWORD_HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/users/password.util.ts" >/dev/null
+}
+
+configure_compose_candidate() {
+  COMPOSE_FILE="$1"
+  COMPOSE_PROJECT_DIR="$(dirname "$COMPOSE_FILE")"
+  case "$COMPOSE_FILE" in
+    "${PROJECT_ROOT}/deploy-docker/"*)
+      COMPOSE_ENV_FILE="${PROJECT_ROOT}/deploy-docker/.env.prod"
+      ;;
+    *)
+      COMPOSE_ENV_FILE="${PROJECT_ROOT}/.env"
+      ;;
+  esac
+  [[ -f "$COMPOSE_ENV_FILE" ]]
 }
 
 detect_runner() {
@@ -134,45 +183,65 @@ detect_runner() {
   command -v docker >/dev/null 2>&1 || die "Base locale inaccessible et Docker indisponible."
   docker compose version >/dev/null 2>&1 || die "Le plugin Docker Compose est indisponible."
 
-  local candidate service
+  local candidate service container_id container_name container_service
   for candidate in "${PROJECT_ROOT}/docker-compose.yml" "${PROJECT_ROOT}/docker-compose.yaml" \
+    "${PROJECT_ROOT}/compose.yml" "${PROJECT_ROOT}/compose.yaml" \
+    "${PROJECT_ROOT}/docker-compose.prod.yml" "${PROJECT_ROOT}/docker-compose.prod.yaml" \
+    "${PROJECT_ROOT}/compose.prod.yml" "${PROJECT_ROOT}/compose.prod.yaml" \
     "${PROJECT_ROOT}/deploy-docker/docker-compose.prod.yml" "${PROJECT_ROOT}/deploy-docker/docker-compose.prod.yaml"; do
     [[ -f "$candidate" ]] || continue
-    COMPOSE_FILE="$candidate"
+    if ! configure_compose_candidate "$candidate"; then
+      printf "Fichier d’environnement ignoré car absent pour %s : %s\n" "$candidate" "$COMPOSE_ENV_FILE" >&2
+      continue
+    fi
     while IFS= read -r service; do
       [[ "$service" == *backend* ]] || continue
-      if compose ps --status running --services 2>/dev/null | grep -Fxq "$service"; then
+      if compose ps --status running --services | grep -Fxq "$service"; then
         COMPOSE_SERVICE="$service"
-        compose exec -T "$COMPOSE_SERVICE" mkdir -p /tmp/stockini-add-user/scripts /tmp/stockini-add-user/users
-        compose cp "$HELPER_SOURCE" "${COMPOSE_SERVICE}:/tmp/stockini-add-user/scripts/add-user.ts" >/dev/null
-        compose cp "$PASSWORD_HELPER_SOURCE" "${COMPOSE_SERVICE}:/tmp/stockini-add-user/users/password.util.ts" >/dev/null
-        if run_docker health >/dev/null 2>&1; then
-          RUN_MODE=docker
+        install_helper_with_compose
+        if run_docker_compose health >/dev/null; then
+          RUN_MODE=docker-compose
           return
         fi
       fi
-    done < <(compose config --services 2>/dev/null || true)
+    done < <(compose config --services)
   done
+
+  while IFS=$'\t' read -r container_id container_name container_service; do
+    [[ "$container_name" == *backend* || "$container_service" == *backend* ]] || continue
+    DOCKER_CONTAINER="$container_id"
+    install_helper_with_docker
+    if run_docker_exec health >/dev/null; then
+      RUN_MODE=docker-exec
+      return
+    fi
+  done < <(docker ps --format '{{.ID}}\t{{.Names}}\t{{.Label "com.docker.compose.service"}}')
+
   die "Impossible de joindre PostgreSQL, localement ou via un backend Docker Compose actif."
 }
 
 run_helper() {
   if [[ "$RUN_MODE" == local ]]; then
     run_local "$@"
-  elif [[ "$RUN_MODE" == docker ]]; then
-    run_docker "$@"
+  elif [[ "$RUN_MODE" == docker-compose ]]; then
+    run_docker_compose "$@"
+  elif [[ "$RUN_MODE" == docker-exec ]]; then
+    run_docker_exec "$@"
   else
     "$ADD_USER_TEST_HELPER" "$@"
   fi
 }
 
 prompt_required() {
-  local label="$1" value
+  local variable_name="$1" label="$2" value
   while true; do
     IFS= read -r -p "$label : " value || on_interrupt
     value="${value#"${value%%[![:space:]]*}"}"
     value="${value%"${value##*[![:space:]]}"}"
-    [[ -n "$value" ]] && { printf '%s' "$value"; return; }
+    if [[ -n "$value" ]]; then
+      printf -v "$variable_name" '%s' "$value"
+      return
+    fi
     printf 'Cette valeur est obligatoire.\n' >&2
   done
 }
@@ -181,12 +250,29 @@ validate_email() {
   [[ "$1" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
 }
 
+printf '%s\n' '========================================'
+printf "%s\n" "       Création d’un utilisateur"
+printf '%s\n\n' '========================================'
 detect_runner
-printf 'Connexion à PostgreSQL établie (%s).\n\n' "$RUN_MODE"
+case "$RUN_MODE" in
+  local)
+    printf 'Environnement détecté : Local\nBackend actif          : dépendances locales\n'
+    ;;
+  docker-compose)
+    printf 'Environnement détecté : Docker Compose\nBackend actif          : %s\n' "$COMPOSE_SERVICE"
+    ;;
+  docker-exec)
+    printf 'Environnement détecté : Docker\nBackend actif          : %s\n' "$DOCKER_CONTAINER"
+    ;;
+  test)
+    printf 'Environnement détecté : Test\nBackend actif          : auxiliaire de test\n'
+    ;;
+esac
+printf 'Connexion PostgreSQL   : OK\n\n'
 
-while [[ -z "$FULL_NAME" ]]; do FULL_NAME="$(prompt_required 'Nom complet')"; done
+[[ -n "$FULL_NAME" ]] || prompt_required FULL_NAME 'Nom complet'
 while true; do
-  [[ -n "$EMAIL" ]] || EMAIL="$(prompt_required 'Email')"
+  [[ -n "$EMAIL" ]] || prompt_required EMAIL 'Email'
   EMAIL="$(printf '%s' "$EMAIL" | tr '[:upper:]' '[:lower:]')"
   validate_email "$EMAIL" && break
   printf 'Format email invalide.\n' >&2
@@ -258,7 +344,7 @@ if [[ "$ASSUME_YES" == false ]]; then
   confirmation="$(printf '%s' "$confirmation" | tr '[:upper:]' '[:lower:]')"
   case "$confirmation" in
     o|oui|y|yes) ;;
-    *) unset PASSWORD; printf 'Création annulée. Aucune modification n’a été effectuée.\n'; exit 0 ;;
+    *) unset PASSWORD; printf "Création annulée. Aucune modification n’a été effectuée.\n"; exit 0 ;;
   esac
 fi
 
@@ -270,6 +356,8 @@ unset PASSWORD
 ((status == 0)) || die "La création de l’utilisateur a échoué." "$status"
 
 printf '\nUtilisateur créé avec succès.\n\n'
+# Le programme JavaScript est volontairement littéral : Bash ne doit rien y développer.
+# shellcheck disable=SC2016
 printf '%s' "$RESULT" | node -e '
 let s=""; process.stdin.on("data",c=>s+=c).on("end",()=>{
   const u=JSON.parse(s);

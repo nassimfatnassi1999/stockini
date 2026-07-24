@@ -216,7 +216,7 @@ esac
     );
     chmodSync(helper, 0o700);
 
-    const script = resolve(process.cwd(), '..', 'scripts', 'add-user.sh');
+    const projectRoot = resolve(process.cwd(), '..');
     const input = [
       'Administrateur',
       'admin@example.com',
@@ -230,17 +230,42 @@ esac
       'n',
       '',
     ].join('\n');
-    const result = spawnSync('bash', [script], {
-      input,
-      encoding: 'utf8',
-      env: { ...process.env, NODE_ENV: 'test', ADD_USER_TEST_HELPER: helper },
-    });
+    const result = spawnSync(
+      'make',
+      ['-C', projectRoot, 'NODE_ENV=test', 'add-user'],
+      {
+        input,
+        encoding: 'utf8',
+        env: { ...process.env, NODE_ENV: 'test', ADD_USER_TEST_HELPER: helper },
+      },
+    );
 
     expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "Lancement de l'assistant de création d'utilisateur...",
+    );
     expect(`${result.stdout}${result.stderr}`).toContain(
       'Les mots de passe ne correspondent pas.',
     );
+    expect(`${result.stdout}${result.stderr}`).not.toContain('motdepasse-1');
+    expect(`${result.stdout}${result.stderr}`).not.toContain('motdepasse-2');
     expect(result.stdout).toContain('Création annulée.');
     expect(readFileSync(calls, 'utf8')).toBe('roles\n');
+  });
+
+  it('refuse le mode interactif sans terminal avec un code non nul', () => {
+    const projectRoot = resolve(process.cwd(), '..');
+    const result = spawnSync(
+      'bash',
+      [resolve(projectRoot, 'scripts', 'add-user.sh')],
+      {
+        input: '',
+        encoding: 'utf8',
+        env: { ...process.env, NODE_ENV: 'development' },
+      },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('nécessite un terminal interactif');
   });
 });
