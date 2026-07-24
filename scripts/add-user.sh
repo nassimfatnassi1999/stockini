@@ -9,6 +9,7 @@ readonly BACKEND_DIR="${PROJECT_ROOT}/backend"
 readonly HELPER_SOURCE="${BACKEND_DIR}/src/scripts/add-user.ts"
 readonly PASSWORD_HELPER_SOURCE="${BACKEND_DIR}/src/users/password.util.ts"
 readonly ROLE_DEFINITIONS_SOURCE="${BACKEND_DIR}/prisma/role-definitions.ts"
+readonly ROLE_SEED_SOURCE="${BACKEND_DIR}/prisma/seed-roles.ts"
 readonly PASSWORD_MIN_LENGTH=8
 
 RUN_MODE=""
@@ -150,6 +151,7 @@ install_helper_with_compose() {
   docker cp -q "$HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/src/scripts/add-user.ts"
   docker cp -q "$PASSWORD_HELPER_SOURCE" "${compose_container}:/tmp/stockini-add-user/src/users/password.util.ts"
   docker cp -q "$ROLE_DEFINITIONS_SOURCE" "${compose_container}:/tmp/stockini-add-user/prisma/role-definitions.ts"
+  docker cp -q "$ROLE_SEED_SOURCE" "${compose_container}:/tmp/stockini-add-user/prisma/seed-roles.ts"
 }
 
 install_helper_with_docker() {
@@ -160,6 +162,7 @@ install_helper_with_docker() {
   docker cp "$HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/src/scripts/add-user.ts" >/dev/null
   docker cp "$PASSWORD_HELPER_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/src/users/password.util.ts" >/dev/null
   docker cp "$ROLE_DEFINITIONS_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/prisma/role-definitions.ts" >/dev/null
+  docker cp "$ROLE_SEED_SOURCE" "${DOCKER_CONTAINER}:/tmp/stockini-add-user/prisma/seed-roles.ts" >/dev/null
 }
 
 configure_compose_candidate() {
@@ -200,7 +203,6 @@ detect_runner() {
     "${PROJECT_ROOT}/deploy-docker/docker-compose.prod.yml" "${PROJECT_ROOT}/deploy-docker/docker-compose.prod.yaml"; do
     [[ -f "$candidate" ]] || continue
     if ! configure_compose_candidate "$candidate"; then
-      printf "Fichier d’environnement ignoré car absent pour %s : %s\n" "$candidate" "$COMPOSE_ENV_FILE" >&2
       continue
     fi
     while IFS= read -r service; do
@@ -279,6 +281,11 @@ case "$RUN_MODE" in
 esac
 printf 'Connexion PostgreSQL   : OK\n\n'
 
+synced_role_count="$(run_helper sync-roles)"
+[[ "$synced_role_count" =~ ^[0-9]+$ ]] ||
+  die "La synchronisation des rôles par défaut a échoué."
+printf 'Rôles synchronisés     : %s\n\n' "$synced_role_count"
+
 [[ -n "$FULL_NAME" ]] || prompt_required FULL_NAME 'Nom complet'
 while true; do
   [[ -n "$EMAIL" ]] || prompt_required EMAIL 'Email'
@@ -339,7 +346,7 @@ if ((${#MISSING_ROLE_NAMES[@]} > 0)); then
     fi
     printf '\n' >&2
   done
-  printf 'Exécutez manuellement « npm run prisma:seed-roles » dans le backend pour les synchroniser.\n\n' >&2
+  printf 'La synchronisation automatique est incomplète ; vérifiez les migrations et la connexion PostgreSQL.\n\n' >&2
 fi
 
 role_exists=false

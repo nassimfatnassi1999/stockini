@@ -213,6 +213,7 @@ describe('script add-user', () => {
       `#!/usr/bin/env bash
 printf '%s\\n' "$1" >>"${calls}"
 case "$1" in
+  sync-roles) printf '2\\n' ;;
   roles)
     printf 'AVAILABLE\\trole-1\\tADMIN\\tAdministrateur complet\\n'
     printf 'AVAILABLE\\trole-2\\tNEW_DYNAMIC_ROLE\\tRôle ajouté dynamiquement\\n'
@@ -268,7 +269,7 @@ esac
       TEST_DIFFERENT_PASSWORD,
     );
     expect(result.stdout).toContain('Création annulée.');
-    expect(readFileSync(calls, 'utf8')).toBe('roles\n');
+    expect(readFileSync(calls, 'utf8')).toBe('sync-roles\nroles\n');
   });
 
   it('refuse le mode interactif sans terminal avec un code non nul', () => {

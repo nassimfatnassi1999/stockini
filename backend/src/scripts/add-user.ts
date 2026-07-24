@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { ROLE_DEFINITIONS } from '../../prisma/role-definitions';
+import { seedRoles } from '../../prisma/seed-roles';
 import { hashUserPassword, PASSWORD_MIN_LENGTH } from '../users/password.util';
 
 export { BCRYPT_ROUNDS, PASSWORD_MIN_LENGTH } from '../users/password.util';
@@ -224,7 +225,7 @@ function parseInput(payload: string): AddUserInput {
 
 async function run(): Promise<void> {
   const command = process.argv[2];
-  if (!['health', 'roles', 'create'].includes(command ?? '')) {
+  if (!['health', 'sync-roles', 'roles', 'create'].includes(command ?? '')) {
     throw new AddUserError('USAGE', 'Commande interne invalide.');
   }
 
@@ -236,6 +237,12 @@ async function run(): Promise<void> {
     if (command === 'health') {
       await prisma.$queryRaw`SELECT 1`;
       process.stdout.write('ok\n');
+      return;
+    }
+
+    if (command === 'sync-roles') {
+      const roles = await seedRoles(prisma);
+      process.stdout.write(`${roles.size}\n`);
       return;
     }
 
