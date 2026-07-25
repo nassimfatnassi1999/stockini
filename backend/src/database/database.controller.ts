@@ -14,9 +14,11 @@ import {
   Res,
   UploadedFile,
   UseGuards,
+  UseFilters,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
 import type { Response } from 'express';
 import { RequirePermissions, Roles } from '../auth/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -26,9 +28,63 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { DatabaseService } from './database.service';
 import * as path from 'path';
+import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 import { BackupStorageService } from './backup-storage.service';
+import { BackupUploadFilter } from './backup-upload.filter';
+import { BackupHttpException } from './backup-errors';
 
 type MulterFile = Express.Multer.File;
+
+const restoreUploadDirectory = () =>
+  process.env.BACKUP_UPLOAD_DIRECTORY?.trim() || '/opt/stockini/uploads';
+const restoreUploadLimit = () => {
+  const configured = Number(process.env.BACKUP_MAX_UPLOAD_BYTES);
+  return Number.isSafeInteger(configured) && configured > 0
+    ? configured
+    : 2 * 1024 * 1024 * 1024;
+};
+const restoreUploadOptions = {
+  storage: diskStorage({
+    destination: (_request, _file, callback) => {
+      const directory = restoreUploadDirectory();
+      try {
+        fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+        callback(null, directory);
+      } catch (error) {
+        callback(error as Error, directory);
+      }
+    },
+    filename: (_request, _file, callback) =>
+      callback(null, `${randomUUID()}.zip.upload`),
+  }),
+  limits: { fileSize: restoreUploadLimit(), files: 1 },
+  fileFilter: (
+    _request: unknown,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    const allowedMimes = new Set([
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/x-zip',
+      'application/octet-stream',
+    ]);
+    const accepted =
+      path.extname(file.originalname).toLowerCase() === '.zip' &&
+      allowedMimes.has(file.mimetype);
+    callback(
+      accepted
+        ? null
+        : new BackupHttpException(
+            400,
+            'BACKUP_INVALID_ZIP',
+            "Le fichier sélectionné n'est pas un ZIP accepté.",
+          ),
+      accepted,
+    );
+  },
+};
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles('ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin')
@@ -192,7 +248,8 @@ export class DatabaseController {
 
   @RequirePermissions('database.restore')
   @Post('restore')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseFilters(BackupUploadFilter)
+  @UseInterceptors(FileInterceptor('file', restoreUploadOptions))
   async restoreBackup(
     @UploadedFile() file: MulterFile,
     @CurrentUser() user: AuthUser,
@@ -201,22 +258,7 @@ export class DatabaseController {
       throw new BadRequestException('Aucun fichier ZIP fourni');
     }
 
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ext !== '.zip') {
-      throw new BadRequestException('Le fichier doit être un ZIP (.zip)');
-    }
-
-    const allowedMimes = [
-      'application/zip',
-      'application/x-zip-compressed',
-      'application/x-zip',
-      'application/octet-stream',
-    ];
-    if (!allowedMimes.includes(file.mimetype)) {
-      throw new BadRequestException(`Type MIME non accepté : ${file.mimetype}`);
-    }
-
-    if (!file.buffer || file.buffer.length === 0) {
+    if (!file.path || file.size === 0) {
       throw new BadRequestException('Le fichier ZIP est vide');
     }
 
@@ -225,7 +267,7 @@ export class DatabaseController {
     );
 
     try {
-      const result = await this.db.restoreBackup(file.buffer, user, {
+      const result = await this.db.restoreBackupFile(file.path, user, {
         uploadedFilename: file.originalname,
       });
       return {
@@ -241,6 +283,8 @@ export class DatabaseController {
       };
     } catch (error) {
       this.throwStructuredError(error, 'Restore failed');
+    } finally {
+      fs.rmSync(file.path, { force: true });
     }
   }
 
@@ -259,11 +303,28 @@ export class DatabaseController {
           : error instanceof Error
             ? error.message
             : String(error);
+    const original =
+      response && typeof response === 'object' ? response : undefined;
+    const safeDetail =
+      status >= 500 && !(original && 'code' in original)
+        ? 'Une erreur serveur est survenue. Consultez les logs.'
+        : Array.isArray(detail)
+          ? detail.join(', ')
+          : detail;
     throw new HttpException(
       {
         success: false,
-        message,
-        details: Array.isArray(detail) ? detail.join(', ') : detail,
+        message:
+          original && 'message' in original
+            ? (original as { message: unknown }).message
+            : message,
+        ...(original && 'code' in original
+          ? { code: (original as { code: unknown }).code }
+          : {}),
+        ...(original && 'restoreId' in original
+          ? { restoreId: (original as { restoreId: unknown }).restoreId }
+          : {}),
+        details: safeDetail,
       },
       status,
     );

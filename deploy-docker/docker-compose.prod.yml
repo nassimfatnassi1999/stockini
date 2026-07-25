@@ -57,8 +57,12 @@ services:
       MINIO_ENDPOINT: stockini-prod-minio
       MINIO_PORT: 9000
       BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/opt/stockini/backups}
+      BACKUP_UPLOAD_DIRECTORY: ${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
+      BACKUP_MAX_UPLOAD_BYTES: ${BACKUP_MAX_UPLOAD_BYTES:-2147483648}
+      BACKUP_MAX_EXTRACTED_BYTES: ${BACKUP_MAX_EXTRACTED_BYTES:-8589934592}
     volumes:
       - ${BACKUP_DIRECTORY:-/opt/stockini/backups}:${BACKUP_DIRECTORY:-/opt/stockini/backups}
+      - stockini-prod-backup-uploads:${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
     ports:
       - "${BACKEND_HOST_PORT:-4010}:${BACKEND_PORT:-4000}"
     networks:
@@ -105,6 +109,7 @@ services:
 volumes:
   stockini-prod-postgres-data:
   stockini-prod-minio-data:
+  stockini-prod-backup-uploads:
 
 networks:
   stockini-prod-network:

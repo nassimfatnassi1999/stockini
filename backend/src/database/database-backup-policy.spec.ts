@@ -16,6 +16,7 @@ import {
   DATABASE_BACKUP_VERSION,
   DatabaseService,
 } from './database.service';
+import { BackupHttpException } from './backup-errors';
 
 type ObjectStore = Map<string, Buffer>;
 const TEST_DATABASE_PASSWORD = '**TEST_DATABASE_PASSWORD**';
@@ -234,9 +235,9 @@ describe('DatabaseService full PostgreSQL + MinIO backups', () => {
       validateRestoredDatabase: jest.fn().mockResolvedValue(undefined),
     });
 
-    await expect(service.restoreDatabaseBackup(archive)).rejects.toThrow(
-      'S3 write failed',
-    );
+    await expect(service.restoreDatabaseBackup(archive)).rejects.toMatchObject({
+      response: { code: 'BACKUP_MINIO_RESTORE_FAILED' },
+    });
 
     expect(restorePostgres).toHaveBeenCalledTimes(2);
     expect([...objects.keys()]).toEqual(['stale.pdf']);
@@ -271,14 +272,14 @@ describe('DatabaseService full PostgreSQL + MinIO backups', () => {
 
     await expect(
       service.restoreDatabaseBackup(zip.toBuffer()),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(BackupHttpException);
     expect(preparePostgresForRestore).not.toHaveBeenCalled();
   });
 
   it('refuses invalid ZIP data', async () => {
     await expect(
       service.restoreDatabaseBackup(Buffer.from('not-a-zip')),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(BackupHttpException);
   });
 
   it('refuses path traversal entries', () => {
@@ -324,5 +325,77 @@ describe('DatabaseService full PostgreSQL + MinIO backups', () => {
     expect(manifest.checksums['database/postgres.dump']).toBe(
       createHash('sha256').update(dump).digest('hex'),
     );
+  });
+
+  it('rejects a second concurrent restore with a stable application code', async () => {
+    Object.assign(service, { restoreInProgress: true });
+    await expect(
+      service.restoreDatabaseBackup(Buffer.from('PK\u0003\u0004')),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'BACKUP_RESTORE_IN_PROGRESS' },
+    });
+  });
+
+  it('rejects an archive whose extracted size exceeds the configured limit', async () => {
+    const backup = await service.createDatabaseBackup();
+    Object.assign(service, {
+      config: {
+        get: jest.fn((key: string) =>
+          key === 'BACKUP_MAX_EXTRACTED_BYTES' ? '8' : undefined,
+        ),
+      },
+    });
+
+    await expect(service.restoreBackupFile(backup.path)).rejects.toMatchObject({
+      status: 400,
+      response: { code: 'BACKUP_INVALID_ZIP' },
+    });
+  });
+
+  it('reports a PostgreSQL restore failure and attempts the safety rollback', async () => {
+    const backup = await service.createDatabaseBackup();
+    const restorePostgres = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('simulated pg_restore failure');
+      })
+      .mockImplementationOnce(() => undefined);
+    Object.assign(service, {
+      preparePostgresForRestore: jest.fn(),
+      restorePostgres,
+      deployCurrentMigrations: jest.fn(),
+      validateRestoredDatabase: jest.fn().mockResolvedValue(undefined),
+    });
+
+    await expect(service.restoreBackupFile(backup.path)).rejects.toMatchObject({
+      status: 500,
+      response: { code: 'BACKUP_DATABASE_RESTORE_FAILED' },
+    });
+    expect(restorePostgres).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects an incomplete ZIP and removes its restore workspace', async () => {
+    const incompletePath = path.join(directory, 'incomplete.zip');
+    const zip = new AdmZip();
+    zip.addFile('manifest.json', Buffer.from('{}'));
+    zip.writeZip(incompletePath);
+    Object.assign(service, {
+      config: {
+        get: jest.fn((key: string) =>
+          key === 'BACKUP_UPLOAD_DIRECTORY' ? directory : undefined,
+        ),
+      },
+    });
+
+    await expect(
+      service.restoreBackupFile(incompletePath),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: { code: 'BACKUP_INVALID_ZIP' },
+    });
+    expect(
+      readdirSync(directory).filter((name) => name.startsWith('restore-')),
+    ).toEqual([]);
   });
 });

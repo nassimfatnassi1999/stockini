@@ -14,11 +14,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import AdmZip from 'adm-zip';
 import * as ExcelJS from 'exceljs';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { BackupStorageService } from './backup-storage.service';
+import { BackupHttpException, type BackupErrorCode } from './backup-errors';
 
 export const MAX_BACKUPS = 3;
 export const DATABASE_BACKUP_VERSION = 4;
@@ -266,7 +267,7 @@ export class DatabaseService {
   }
 
   async restoreDatabaseBackup(
-    zipBuffer: Buffer,
+    zipSource: Buffer | string,
     user?: AuthUser,
     options: RestoreOptions = {},
   ): Promise<{
@@ -277,31 +278,63 @@ export class DatabaseService {
     documentsMustBeRegenerated: boolean;
     ignoredLegacyFiles: boolean;
   }> {
-    if (this.backupInProgress) {
-      throw new ConflictException('Une sauvegarde est en cours');
-    }
+    if (this.backupInProgress)
+      throw new BackupHttpException(
+        409,
+        'BACKUP_RESTORE_IN_PROGRESS',
+        'Une sauvegarde est en cours',
+      );
     if (this.restoreInProgress) {
-      throw new ConflictException('Une restauration est déjà en cours');
+      throw new BackupHttpException(
+        409,
+        'BACKUP_RESTORE_IN_PROGRESS',
+        'Une restauration est déjà en cours',
+      );
     }
     this.restoreInProgress = true;
+    const restoreId = randomUUID();
+    const restoreStartedAt = Date.now();
     const stamp = this.dateStamp(new Date());
-    const tmpDir = path.join(os.tmpdir(), `restore-${stamp}-${Date.now()}`);
+    const workspaceRoot =
+      this.config?.get<string>('BACKUP_UPLOAD_DIRECTORY')?.trim() ||
+      os.tmpdir();
+    const tmpDir = path.join(workspaceRoot, `restore-${restoreId}`);
     fs.mkdirSync(tmpDir, { recursive: true });
 
     this.logger.log(
-      `[RESTORE] Upload received: ${options.uploadedFilename ?? 'server backup'}`,
+      JSON.stringify({
+        event: 'backup_restore_started',
+        restoreId,
+        originalFilename: options.uploadedFilename ?? 'server backup',
+      }),
     );
-    this.logger.log(`[RESTORE] File size: ${zipBuffer.length} bytes`);
-    this.logger.log(`[RESTORE] Temporary workspace: ${tmpDir}`);
 
     let safetyDumpPath: string | null = null;
+    let restoreStage: 'validation' | 'postgres' | 'minio' = 'validation';
+    let stageStartedAt = Date.now();
     try {
-      if (zipBuffer.length === 0) {
-        throw new BadRequestException('Le fichier ZIP est vide');
+      const zipPath =
+        typeof zipSource === 'string'
+          ? zipSource
+          : path.join(tmpDir, 'restore.zip');
+      if (Buffer.isBuffer(zipSource)) {
+        fs.writeFileSync(zipPath, zipSource, { mode: 0o600 });
       }
-
-      const zipPath = path.join(tmpDir, 'restore.zip');
-      fs.writeFileSync(zipPath, zipBuffer);
+      const zipSize = fs.statSync(zipPath).size;
+      if (zipSize === 0)
+        throw new BackupHttpException(
+          400,
+          'BACKUP_INVALID_ZIP',
+          'Le fichier ZIP est vide',
+        );
+      this.logger.log(
+        JSON.stringify({
+          event: 'backup_upload_completed',
+          restoreId,
+          receivedBytes: zipSize,
+        }),
+      );
+      this.assertZipSignature(zipPath);
 
       this.logger.log(`[RESTORE] Validating ZIP...`);
       let zip: AdmZip;
@@ -309,14 +342,17 @@ export class DatabaseService {
         zip = new AdmZip(zipPath);
         zip.getEntries();
       } catch (error) {
-        throw new BadRequestException(
-          `Archive ZIP invalide ou corrompue : ${(error as Error).message}`,
+        throw new BackupHttpException(
+          400,
+          'BACKUP_INVALID_ZIP',
+          'Archive ZIP invalide ou corrompue.',
         );
       }
 
       this.assertSafeBackupEntries(zip);
+      this.assertExtractionCapacity(zip, tmpDir);
       const extractDir = path.join(tmpDir, 'extracted');
-      this.extractSafeBackup(zip, extractDir);
+      this.extractSafeBackup(zip, zipPath, extractDir);
 
       const dumpEntry = this.findDatabaseDumpEntry(zip);
       if (!dumpEntry) {
@@ -397,6 +433,14 @@ export class DatabaseService {
       this.logger.log(
         `[RESTORE] ZIP validated (${backupType}, MinIO=${containsMinio ? 'oui' : 'non'})`,
       );
+      this.logger.log(
+        JSON.stringify({
+          event: 'backup_restore_step_completed',
+          restoreId,
+          step: 'validation',
+          durationMs: Date.now() - stageStartedAt,
+        }),
+      );
 
       const restored: string[] = [];
       const minioSafetyDir = path.join(tmpDir, 'minio-safety');
@@ -406,6 +450,8 @@ export class DatabaseService {
         await this.exportMinio(minioSafetyDir);
       }
 
+      restoreStage = 'postgres';
+      stageStartedAt = Date.now();
       this.logger.log(`[RESTORE][STEP=postgres] Restore started`);
       safetyDumpPath = path.join(
         this.backupStorage.directory,
@@ -461,8 +507,18 @@ export class DatabaseService {
         throw validationError;
       }
       restored.push('prisma-schema');
+      this.logger.log(
+        JSON.stringify({
+          event: 'backup_restore_step_completed',
+          restoreId,
+          step: 'postgres',
+          durationMs: Date.now() - stageStartedAt,
+        }),
+      );
 
       if (containsMinio && minioSourceDir) {
+        restoreStage = 'minio';
+        stageStartedAt = Date.now();
         this.logger.log(
           `[RESTORE][STEP=minio] Replacing bucket ${this.minio.bucket}`,
         );
@@ -483,6 +539,14 @@ export class DatabaseService {
           restored.push(`minio/${this.minio.bucket}/`);
           this.logger.log(
             `[RESTORE][STEP=minio] ${restoredObjects} objet(s) restauré(s)`,
+          );
+          this.logger.log(
+            JSON.stringify({
+              event: 'backup_restore_step_completed',
+              restoreId,
+              step: 'minio',
+              durationMs: Date.now() - stageStartedAt,
+            }),
           );
         } catch (minioError) {
           this.logger.error(
@@ -518,9 +582,58 @@ export class DatabaseService {
       };
     } catch (err) {
       this.logger.error(
-        `[RESTORE][ERROR] ${(err as Error).message}`,
+        JSON.stringify({
+          event: 'backup_restore_failed',
+          restoreId,
+          durationMs: Date.now() - restoreStartedAt,
+          error: (err as Error).message,
+        }),
         (err as Error).stack,
       );
+      if (this.isNoSpaceError(err)) {
+        throw new BackupHttpException(
+          507,
+          'BACKUP_DISK_SPACE_INSUFFICIENT',
+          "L'espace disque est insuffisant pour restaurer ce backup.",
+          restoreId,
+        );
+      }
+      if (err instanceof BackupHttpException) {
+        const response = err.getResponse() as {
+          code: BackupErrorCode;
+          message: string;
+        };
+        throw new BackupHttpException(
+          err.getStatus(),
+          response.code,
+          response.message,
+          restoreId,
+        );
+      }
+      if (restoreStage === 'validation' && err instanceof BadRequestException) {
+        throw new BackupHttpException(
+          400,
+          'BACKUP_INVALID_ZIP',
+          err.message,
+          restoreId,
+        );
+      }
+      if (restoreStage === 'postgres') {
+        throw new BackupHttpException(
+          500,
+          'BACKUP_DATABASE_RESTORE_FAILED',
+          'La restauration PostgreSQL a échoué. Le rollback de sécurité a été tenté.',
+          restoreId,
+        );
+      }
+      if (restoreStage === 'minio') {
+        throw new BackupHttpException(
+          500,
+          'BACKUP_MINIO_RESTORE_FAILED',
+          'La restauration MinIO a échoué. Le rollback de sécurité a été tenté.',
+          restoreId,
+        );
+      }
       throw err;
     } finally {
       try {
@@ -529,6 +642,13 @@ export class DatabaseService {
         // ignore cleanup errors
       }
       this.restoreInProgress = false;
+      this.logger.log(
+        JSON.stringify({
+          event: 'backup_restore_cleanup_completed',
+          restoreId,
+          durationMs: Date.now() - restoreStartedAt,
+        }),
+      );
     }
   }
 
@@ -541,6 +661,14 @@ export class DatabaseService {
     return this.restoreDatabaseBackup(zipBuffer, user, options);
   }
 
+  async restoreBackupFile(
+    zipPath: string,
+    user?: AuthUser,
+    options: RestoreOptions = {},
+  ) {
+    return this.restoreDatabaseBackup(zipPath, user, options);
+  }
+
   async restoreBackupByFilename(
     filename: string,
     user?: AuthUser,
@@ -551,8 +679,8 @@ export class DatabaseService {
       this.logger.log(
         `[RESTORE][SOURCE=local] Backup directory: ${this.backupStorage.directory}`,
       );
-      const zipBuffer = await this.backupStorage.read(filename);
-      return await this.restoreBackup(zipBuffer, user, {
+      const zipPath = await this.backupStorage.resolveExisting(filename);
+      return await this.restoreBackupFile(zipPath, user, {
         ...options,
         uploadedFilename: path.basename(filename),
       });
@@ -1418,15 +1546,95 @@ export class DatabaseService {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}-${milliseconds}`;
   }
 
+  private assertZipSignature(zipPath: string): void {
+    const descriptor = fs.openSync(zipPath, 'r');
+    const signature = Buffer.alloc(4);
+    try {
+      fs.readSync(descriptor, signature, 0, signature.length, 0);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    const valid =
+      signature.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) ||
+      signature.equals(Buffer.from([0x50, 0x4b, 0x05, 0x06])) ||
+      signature.equals(Buffer.from([0x50, 0x4b, 0x07, 0x08]));
+    if (!valid) {
+      throw new BackupHttpException(
+        400,
+        'BACKUP_INVALID_ZIP',
+        'La signature du fichier ne correspond pas à une archive ZIP.',
+      );
+    }
+  }
+
+  private assertExtractionCapacity(zip: AdmZip, workspace: string): void {
+    const configured = Number(
+      this.config?.get<string>('BACKUP_MAX_EXTRACTED_BYTES'),
+    );
+    const maximum =
+      Number.isSafeInteger(configured) && configured > 0
+        ? configured
+        : 8 * 1024 * 1024 * 1024;
+    const entries = zip.getEntries();
+    const total = entries.reduce(
+      (sum, entry) => sum + Number(entry.header.size || 0),
+      0,
+    );
+    if (entries.length > 100_000 || total > maximum) {
+      throw new BackupHttpException(
+        400,
+        'BACKUP_INVALID_ZIP',
+        `Archive refusée : contenu extrait supérieur à la limite de ${maximum} octets.`,
+      );
+    }
+    for (const entry of entries) {
+      const compressed = Number(entry.header.compressedSize || 0);
+      const expanded = Number(entry.header.size || 0);
+      if (compressed > 0 && expanded / compressed > 1000) {
+        throw new BackupHttpException(
+          400,
+          'BACKUP_INVALID_ZIP',
+          `Archive refusée : taux de compression anormal pour ${entry.entryName}.`,
+        );
+      }
+    }
+    const disk = fs.statfsSync(workspace);
+    const freeBytes = Number(disk.bavail) * Number(disk.bsize);
+    const requiredBytes = Math.ceil(total * 1.1) + 64 * 1024 * 1024;
+    if (freeBytes < requiredBytes) {
+      throw new BackupHttpException(
+        507,
+        'BACKUP_DISK_SPACE_INSUFFICIENT',
+        `Espace disque insuffisant : ${requiredBytes} octets requis.`,
+      );
+    }
+  }
+
+  private isNoSpaceError(error: unknown): boolean {
+    return (
+      !!error &&
+      typeof error === 'object' &&
+      (('code' in error && error.code === 'ENOSPC') ||
+        ('message' in error &&
+          typeof error.message === 'string' &&
+          /no space left|ENOSPC/i.test(error.message)))
+    );
+  }
+
   private assertSafeBackupEntries(zip: AdmZip): void {
+    const seen = new Set<string>();
     for (const entry of zip.getEntries()) {
       const normalized = entry.entryName.replace(/\\/g, '/');
+      const unixMode = (entry.attr >>> 16) & 0xffff;
+      const isSymbolicLink = (unixMode & 0o170000) === 0o120000;
       const isUnsafePath =
         normalized.includes('\0') ||
         normalized.startsWith('/') ||
         normalized.startsWith('\\') ||
         normalized.split('/').includes('..') ||
-        path.isAbsolute(normalized);
+        path.isAbsolute(normalized) ||
+        isSymbolicLink ||
+        seen.has(normalized);
       const isDatabasePayload = [
         'database/postgres.dump',
         'database.dump',
@@ -1459,12 +1667,34 @@ export class DatabaseService {
           `Archive hors périmètre : ${normalized}. Seuls le dump PostgreSQL, le manifest et les objets MinIO sont autorisés.`,
         );
       }
+      seen.add(normalized);
     }
     this.logger.log(`[RESTORE] Archive scope validated: PostgreSQL + MinIO`);
   }
 
-  private extractSafeBackup(zip: AdmZip, extractDir: string): void {
+  private extractSafeBackup(
+    zip: AdmZip,
+    zipPath: string,
+    extractDir: string,
+  ): void {
     fs.mkdirSync(extractDir, { recursive: true, mode: 0o700 });
+    // Paths and expanded sizes were checked from the central directory above.
+    // Native unzip streams entries to disk instead of allocating each entry as
+    // an AdmZip Buffer (notably the potentially multi-gigabyte PostgreSQL dump).
+    const result = spawnSync('unzip', ['-qq', zipPath, '-d', extractDir], {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+    });
+    if (result.error) {
+      throw new InternalServerErrorException(
+        "L'outil unzip est absent du conteneur backend.",
+      );
+    }
+    if (result.status !== 0) {
+      throw new BadRequestException(
+        `Extraction ZIP échouée : ${result.stderr?.trim() || `exit ${result.status ?? 'interrompu'}`}`,
+      );
+    }
     for (const entry of zip.getEntries()) {
       const relative = entry.entryName.replace(/\\/g, '/').replace(/\/$/, '');
       if (!relative) continue;
@@ -1477,15 +1707,8 @@ export class DatabaseService {
           `Chemin ZIP dangereux refusé : ${entry.entryName}`,
         );
       }
-      if (entry.isDirectory) {
-        fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
-      } else {
-        fs.mkdirSync(path.dirname(destination), {
-          recursive: true,
-          mode: 0o700,
-        });
-        fs.writeFileSync(destination, entry.getData(), { mode: 0o600 });
-      }
+      if (fs.existsSync(destination))
+        fs.chmodSync(destination, entry.isDirectory ? 0o700 : 0o600);
     }
   }
 
@@ -1716,7 +1939,19 @@ export class DatabaseService {
   }
 
   private sha256File(filePath: string): string {
-    return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    const hash = createHash('sha256');
+    const descriptor = fs.openSync(filePath, 'r');
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    try {
+      let bytesRead = 0;
+      do {
+        bytesRead = fs.readSync(descriptor, chunk, 0, chunk.length, null);
+        if (bytesRead > 0) hash.update(chunk.subarray(0, bytesRead));
+      } while (bytesRead > 0);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    return hash.digest('hex');
   }
 
   private async assertDatabaseReachable(): Promise<void> {
@@ -2168,10 +2403,7 @@ export class DatabaseService {
     clearExisting = false,
   ): Promise<number> {
     const sourceRoot = path.resolve(sourceDir);
-    const objects = this.walkFiles(sourceRoot).map((filePath) => ({
-      key: path.relative(sourceRoot, filePath).replace(/\\/g, '/'),
-      buffer: fs.readFileSync(filePath),
-    }));
+    const files = this.walkFiles(sourceRoot);
 
     await this.minio.ensureBucketOrThrow(this.minio.bucket);
     if (clearExisting) {
@@ -2183,15 +2415,17 @@ export class DatabaseService {
         `[RESTORE] MinIO: ${existingKeys.length} ancien(s) objet(s) supprimé(s)`,
       );
     }
-    for (const object of objects) {
+    for (const filePath of files) {
+      const key = path.relative(sourceRoot, filePath).replace(/\\/g, '/');
+      const buffer = fs.readFileSync(filePath);
       await this.minio.putObject(
         this.minio.bucket,
-        object.key,
-        object.buffer,
+        key,
+        buffer,
         'application/octet-stream',
       );
     }
-    return objects.length;
+    return files.length;
   }
 
   private async verifyMinioManifest(
@@ -2273,7 +2507,7 @@ export class DatabaseService {
           'manifest.json ou database/postgres.dump absent ou vide',
         );
       }
-      this.extractSafeBackup(zip, verifyDir);
+      this.extractSafeBackup(zip, zipPath, verifyDir);
       this.validateBackupManifest(
         manifestEntry.getData().toString('utf8'),
         verifyDir,

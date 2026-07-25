@@ -10,7 +10,9 @@ import { BackupStorageService } from './backup-storage.service';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    MulterModule.register({ limits: { fileSize: 500 * 1024 * 1024 } }),
+    // Small spreadsheet imports keep the default memory storage. The backup
+    // endpoint overrides this with dedicated disk storage and a configurable limit.
+    MulterModule.register({ limits: { fileSize: 50 * 1024 * 1024 } }),
     AuditLogsModule,
     DocumentsModule,
   ],

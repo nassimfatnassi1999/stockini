@@ -283,15 +283,60 @@ function BackupsTab() {
   } | null>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
   const [restoring, setRestoring] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState(0);
+  const [restoreStep, setRestoreStep] = useState<
+    "upload" | "validation" | "restore"
+  >("upload");
+
+  useEffect(() => {
+    if (!restoring) return;
+    const keepPageOpen = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", keepPageOpen);
+    return () => window.removeEventListener("beforeunload", keepPageOpen);
+  }, [restoring]);
 
   const readRestoreError = (payload: unknown, status: number): string => {
     if (payload && typeof payload === "object") {
+      const code = (payload as { code?: unknown }).code;
+      const restoreId = (payload as { restoreId?: unknown }).restoreId;
+      const messages: Record<string, string> = {
+        BACKUP_UPLOAD_ABORTED:
+          "L’envoi a été interrompu. Vérifiez la connexion puis relancez l’import.",
+        BACKUP_FILE_TOO_LARGE:
+          "Ce backup dépasse la taille maximale autorisée.",
+        BACKUP_INVALID_ZIP:
+          "Le fichier ZIP est invalide, incomplet ou incompatible.",
+        BACKUP_RESTORE_IN_PROGRESS:
+          "Une sauvegarde ou une restauration est déjà en cours.",
+        BACKUP_DISK_SPACE_INSUFFICIENT:
+          "Le serveur ne dispose pas d’assez d’espace disque.",
+        BACKUP_DATABASE_RESTORE_FAILED:
+          "La restauration PostgreSQL a échoué. Le rollback de sécurité a été tenté.",
+        BACKUP_MINIO_RESTORE_FAILED:
+          "La restauration des documents a échoué. Le rollback de sécurité a été tenté.",
+      };
+      if (typeof code === "string" && messages[code]) {
+        return `${messages[code]}${
+          typeof restoreId === "string"
+            ? ` Référence serveur : ${restoreId}.`
+            : ""
+        }`;
+      }
+      if (status >= 500) {
+        return "Le serveur n’a pas pu terminer l’opération. Consultez les logs avec l’identifiant de restauration.";
+      }
       const value =
         (payload as { details?: unknown }).details ??
         (payload as { message?: unknown; error?: unknown }).message ??
         (payload as { error?: unknown }).error;
       if (Array.isArray(value)) return value.join(", ");
       if (typeof value === "string" && value.trim()) return value;
+    }
+    if (status === 0) {
+      return "La connexion avec le serveur a été interrompue. Vous pouvez relancer l’import.";
     }
     return `Erreur HTTP ${status}`;
   };
@@ -389,13 +434,29 @@ function BackupsTab() {
   };
 
   const handleRestoreFile = async (file: File) => {
+    if (restoring) return;
     setRestoring(true);
+    setRestoreProgress(0);
+    setRestoreStep("upload");
     window.sessionStorage.setItem("stockini_restore_in_progress", "1");
     let restoreSucceeded = false;
     try {
       const form = new FormData();
       form.append("file", file);
-      await api.post("/admin/database/restore", form);
+      await api.post("/admin/database/restore", form, {
+        timeout: 0,
+        suppressErrorToast: true,
+        onUploadProgress: (event) => {
+          if (!event.total) return;
+          const progress = Math.min(
+            100,
+            Math.round((event.loaded * 100) / event.total),
+          );
+          setRestoreProgress(progress);
+          if (progress === 100) setRestoreStep("validation");
+        },
+      });
+      setRestoreStep("restore");
 
       restoreSucceeded = true;
       clearAuthSession();
@@ -412,7 +473,7 @@ function BackupsTab() {
         err as { response?: { data?: unknown; status?: number } }
       ).response;
       toast.error(
-        `Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`,
+        `Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 0)}`,
       );
     } finally {
       if (!restoreSucceeded) setRestoring(false);
@@ -421,13 +482,17 @@ function BackupsTab() {
   };
 
   const restoreByFilename = async (filename: string) => {
+    if (restoring) return;
     setRestoring(true);
+    setRestoreProgress(100);
+    setRestoreStep("restore");
     window.sessionStorage.setItem("stockini_restore_in_progress", "1");
     let restoreSucceeded = false;
     try {
       await api.post(
         `/admin/database/backups/${encodeURIComponent(filename)}/restore`,
         {},
+        { timeout: 0, suppressErrorToast: true },
       );
       restoreSucceeded = true;
       clearAuthSession();
@@ -444,7 +509,7 @@ function BackupsTab() {
         err as { response?: { data?: unknown; status?: number } }
       ).response;
       toast.error(
-        `Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 500)}`,
+        `Erreur restauration : ${readRestoreError(response?.data, response?.status ?? 0)}`,
       );
     } finally {
       if (!restoreSucceeded) setRestoring(false);
@@ -462,8 +527,20 @@ function BackupsTab() {
           <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-8 py-7 shadow-xl">
             <RefreshCw className="h-8 w-8 animate-spin text-primary" />
             <p className="text-base font-semibold text-text-primary">
-              Restauration en cours...
+              {restoreStep === "upload"
+                ? `Envoi du backup… ${restoreProgress}%`
+                : restoreStep === "validation"
+                  ? "Validation du ZIP, puis restauration PostgreSQL et MinIO…"
+                  : "Restauration PostgreSQL et MinIO…"}
             </p>
+            {restoreStep === "upload" && (
+              <div className="h-2 w-72 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-[width]"
+                  style={{ width: `${restoreProgress}%` }}
+                />
+              </div>
+            )}
             <p className="text-sm text-text-secondary">
               Ne fermez pas cette page.
             </p>
