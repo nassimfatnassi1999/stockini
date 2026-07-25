@@ -43,7 +43,9 @@ import {
 type MulterFile = Express.Multer.File;
 
 const restoreUploadDirectory = () =>
-  process.env.BACKUP_UPLOAD_DIRECTORY?.trim() || '/opt/stockini/uploads';
+  process.env.UPLOAD_DIRECTORY?.trim() ||
+  process.env.BACKUP_UPLOAD_DIRECTORY?.trim() ||
+  '/app/uploads';
 const restoreUploadLimit = () => {
   const configured = Number(process.env.BACKUP_MAX_UPLOAD_BYTES);
   return Number.isSafeInteger(configured) && configured > 0
@@ -156,30 +158,18 @@ export class DatabaseController {
 
   @RequirePermissions('database.restore')
   @Post('imports/postgresql')
+  @UseFilters(BackupUploadFilter)
   @UseInterceptors(FileInterceptor('file', independentUploadOptions))
   async importPostgresql(
     @UploadedFile() file: MulterFile,
     @CurrentUser() user: AuthUser,
   ) {
     if (!file) throw new BadRequestException('Aucun dump fourni.');
-    if (
-      ![
-        'application/octet-stream',
-        'application/x-pg-dump',
-        'application/x-postgresql-backup',
-      ].includes(file.mimetype)
-    ) {
-      throw new BadRequestException('Type MIME PostgreSQL invalide.');
-    }
-    try {
-      return await this.independentExports.importPostgres(
-        file.path,
-        file.originalname,
-        user,
-      );
-    } finally {
-      if (fs.existsSync(file.path)) fs.rmSync(file.path, { force: true });
-    }
+    return this.independentExports.importPostgres(
+      file.path,
+      file.originalname,
+      user,
+    );
   }
 
   @RequirePermissions('database.restore')
@@ -234,31 +224,18 @@ export class DatabaseController {
 
   @RequirePermissions('database.restore')
   @Post('imports/minio')
+  @UseFilters(BackupUploadFilter)
   @UseInterceptors(FileInterceptor('file', independentUploadOptions))
   async importMinio(
     @UploadedFile() file: MulterFile,
     @CurrentUser() user: AuthUser,
   ) {
     if (!file) throw new BadRequestException('Aucun export ZIP fourni.');
-    if (
-      ![
-        'application/zip',
-        'application/x-zip-compressed',
-        'application/x-zip',
-        'application/octet-stream',
-      ].includes(file.mimetype)
-    ) {
-      throw new BadRequestException('Type MIME ZIP invalide.');
-    }
-    try {
-      return await this.independentExports.importMinio(
-        file.path,
-        file.originalname,
-        user,
-      );
-    } finally {
-      if (fs.existsSync(file.path)) fs.rmSync(file.path, { force: true });
-    }
+    return this.independentExports.importMinio(
+      file.path,
+      file.originalname,
+      user,
+    );
   }
 
   @RequirePermissions('database.restore')
@@ -498,7 +475,7 @@ export class DatabaseController {
     } catch (error) {
       this.throwStructuredError(error, 'Restore failed');
     } finally {
-      fs.rmSync(file.path, { force: true });
+      await fs.promises.rm(file.path, { force: true }).catch(() => undefined);
     }
   }
 

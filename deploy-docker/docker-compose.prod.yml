@@ -58,12 +58,12 @@ services:
       MINIO_PORT: 9000
       TZ: ${TZ:-Africa/Tunis}
       BACKUP_DIRECTORY: /app/backups
-      BACKUP_UPLOAD_DIRECTORY: ${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
+      UPLOAD_DIRECTORY: /app/uploads
       BACKUP_MAX_UPLOAD_BYTES: ${BACKUP_MAX_UPLOAD_BYTES:-2147483648}
       BACKUP_MAX_EXTRACTED_BYTES: ${BACKUP_MAX_EXTRACTED_BYTES:-8589934592}
     volumes:
       - ${BACKUP_HOST_DIRECTORY:-/opt/stockini/backups}:/app/backups
-      - stockini-prod-backup-uploads:${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
+      - ${UPLOAD_HOST_DIRECTORY:-/opt/stockini/uploads}:/app/uploads
     ports:
       - "${BACKEND_HOST_PORT:-4010}:${BACKEND_PORT:-4000}"
     networks:

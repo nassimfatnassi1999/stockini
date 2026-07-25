@@ -1,6 +1,14 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
@@ -129,6 +137,55 @@ describe('IndependentExportsService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('imports and retains a validated PostgreSQL dump', async () => {
+    const upload = path.join(root, 'postgres-upload');
+    validDump(upload);
+    jest
+      .spyOn(service as never, 'validatePostgresDump' as never)
+      .mockImplementation(() => undefined);
+
+    const result = await service.importPostgres(upload, 'backup.dump');
+
+    expect(result.status).toBe('VALIDATED');
+    expect(existsSync(upload)).toBe(false);
+    expect(
+      existsSync(path.join(root, 'temporary', `${result.importId}.dump`)),
+    ).toBe(true);
+  });
+
+  it('removes an invalid PostgreSQL import after validation fails', async () => {
+    const upload = path.join(root, 'postgres-upload');
+    validDump(upload);
+    jest
+      .spyOn(service as never, 'validatePostgresDump' as never)
+      .mockImplementation(() => {
+        throw new BadRequestException(
+          "Le fichier sélectionné n'est pas un dump PostgreSQL valide.",
+        );
+      });
+
+    await expect(
+      service.importPostgres(upload, 'backup.dump'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(existsSync(upload)).toBe(false);
+    expect(readdirSync(path.join(root, 'temporary'))).toEqual([]);
+  });
+
+  it('does not clear an existing PostgreSQL busy state on import conflict', async () => {
+    const upload = path.join(root, 'postgres-upload');
+    validDump(upload);
+    (service as unknown as { postgresBusy: boolean }).postgresBusy = true;
+
+    await expect(
+      service.importPostgres(upload, 'backup.dump'),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect((service as unknown as { postgresBusy: boolean }).postgresBusy).toBe(
+      true,
+    );
+  });
+
   it('exports several MinIO buckets with exact keys and checksums', async () => {
     const manifest = await service.createMinioExport();
     const zip = new AdmZip(service.minioDownloadPath());
@@ -152,6 +209,21 @@ describe('IndependentExportsService', () => {
     await expect(service.importMinio(file, 'bad.zip')).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('imports and retains a valid Stockini MinIO archive', async () => {
+    await service.createMinioExport();
+    const upload = path.join(root, 'minio-upload');
+    copyFileSync(service.minioDownloadPath(), upload);
+
+    const result = await service.importMinio(upload, 'backup.zip');
+
+    expect(result.status).toBe('VALIDATED');
+    expect(result.manifest.objectCount).toBe(2);
+    expect(existsSync(upload)).toBe(false);
+    expect(
+      existsSync(path.join(root, 'temporary', `${result.importId}.zip`)),
+    ).toBe(true);
   });
 
   it('rejects Zip Slip paths before any MinIO restoration', async () => {
@@ -193,6 +265,9 @@ describe('IndependentExportsService', () => {
       .mockImplementation((target: string) => validDump(target, 'safety'));
     const restore = jest
       .spyOn(service as never, 'runPgRestore' as never)
+      .mockImplementation(() => undefined);
+    jest
+      .spyOn(service as never, 'validatePostgresDump' as never)
       .mockImplementation(() => undefined);
     jest
       .spyOn(service as never, 'deployCurrentMigrations' as never)

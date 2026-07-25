@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
@@ -19,6 +20,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { MinioService } from '../documents/minio.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BackupStorageService } from './backup-storage.service';
+import { moveUploadedFileSafely } from './move-uploaded-file-safely';
 
 export type ExportOrigin = 'MANUAL' | 'SCHEDULED';
 export type MinioRestoreMode = 'MERGE' | 'REPLACE';
@@ -236,26 +238,60 @@ export class IndependentExportsService implements OnModuleInit {
     importId: string;
     filename: string;
     size: number;
+    status: 'VALIDATED';
   }> {
-    const extension = path.extname(originalName).toLowerCase();
-    if (!['.dump', '.backup'].includes(extension))
-      throw new BadRequestException('Extension PostgreSQL invalide.');
-    this.assertUpload(filePath);
-    this.assertPostgresDump(filePath);
     const importId = randomUUID();
     const destination = path.join(this.temporaryDir, `${importId}.dump`);
-    fs.renameSync(filePath, destination);
-    const result = {
-      importId,
-      filename: path.basename(originalName),
-      size: fs.statSync(destination).size,
-    };
-    await this.auditEvent(user, 'database.postgresql.imported', {
-      type: 'PostgreSQL',
-      size: result.size,
-      result: 'success',
-    });
-    return result;
+    let keepValidatedImport = false;
+    let lock: string | undefined;
+    let ownsBusyState = false;
+    try {
+      const extension = path.extname(originalName).toLowerCase();
+      if (!['.dump', '.backup'].includes(extension))
+        throw new BadRequestException('Extension PostgreSQL invalide.');
+      if (this.postgresBusy)
+        throw new ConflictException(
+          'Une opération PostgreSQL est déjà en cours.',
+        );
+      lock = this.acquireLock('postgresql', false);
+      this.postgresBusy = true;
+      ownsBusyState = true;
+      await moveUploadedFileSafely(filePath, destination);
+      if ((await fs.promises.stat(destination)).size > this.maxUploadBytes)
+        throw new PayloadTooLargeException(
+          'Le fichier dépasse la taille maximale autorisée.',
+        );
+      try {
+        this.validatePostgresDump(destination);
+      } catch (error) {
+        if (error instanceof InternalServerErrorException) throw error;
+        throw new BadRequestException(
+          "Le fichier sélectionné n'est pas un dump PostgreSQL valide.",
+        );
+      }
+      const result = {
+        importId,
+        filename: path.basename(originalName),
+        size: (await fs.promises.stat(destination)).size,
+        status: 'VALIDATED' as const,
+      };
+      keepValidatedImport = true;
+      await this.auditEvent(user, 'database.postgresql.imported', {
+        type: 'PostgreSQL',
+        size: result.size,
+        status: result.status,
+        result: 'success',
+      });
+      return result;
+    } finally {
+      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      if (!keepValidatedImport)
+        await fs.promises
+          .rm(destination, { force: true })
+          .catch(() => undefined);
+      if (lock) this.releaseLock(lock);
+      if (ownsBusyState) this.postgresBusy = false;
+    }
   }
 
   async restorePostgres(
@@ -274,7 +310,7 @@ export class IndependentExportsService implements OnModuleInit {
       source === 'server'
         ? this.postgresDownloadPath()
         : this.resolveImport(importId, '.dump');
-    this.assertPostgresDump(sourcePath);
+    this.validatePostgresDump(sourcePath);
     const lock = this.acquireLock('postgresql', false);
     this.postgresBusy = true;
     const startedAt = Date.now();
@@ -332,7 +368,10 @@ export class IndependentExportsService implements OnModuleInit {
       });
       throw this.safeServerError(error, 'La restauration PostgreSQL a échoué.');
     } finally {
-      if (source === 'import') fs.rmSync(sourcePath, { force: true });
+      if (source === 'import')
+        await fs.promises
+          .rm(sourcePath, { force: true })
+          .catch(() => undefined);
       this.postgresBusy = false;
       this.releaseLock(lock);
     }
@@ -415,26 +454,59 @@ export class IndependentExportsService implements OnModuleInit {
     importId: string;
     filename: string;
     manifest: MinioManifest;
+    status: 'VALIDATED';
   }> {
-    if (path.extname(originalName).toLowerCase() !== '.zip')
-      throw new BadRequestException('Extension ZIP requise.');
-    this.assertUpload(filePath);
-    const manifest = this.validateMinioArchive(filePath);
     const importId = randomUUID();
     const destination = path.join(this.temporaryDir, `${importId}.zip`);
-    fs.renameSync(filePath, destination);
-    const result = {
-      importId,
-      filename: path.basename(originalName),
-      manifest,
-    };
-    await this.auditEvent(user, 'database.minio.imported', {
-      type: 'MinIO',
-      size: fs.statSync(destination).size,
-      objects: manifest.objectCount,
-      result: 'success',
-    });
-    return result;
+    let keepValidatedImport = false;
+    let lock: string | undefined;
+    let ownsBusyState = false;
+    try {
+      if (path.extname(originalName).toLowerCase() !== '.zip')
+        throw new BadRequestException('Extension ZIP requise.');
+      if (this.minioBusy)
+        throw new ConflictException('Une opération MinIO est déjà en cours.');
+      lock = this.acquireLock('minio', false);
+      this.minioBusy = true;
+      ownsBusyState = true;
+      await moveUploadedFileSafely(filePath, destination);
+      if ((await fs.promises.stat(destination)).size > this.maxUploadBytes)
+        throw new PayloadTooLargeException(
+          'Le fichier dépasse la taille maximale autorisée.',
+        );
+      let manifest: MinioManifest;
+      try {
+        manifest = this.validateMinioArchive(destination);
+      } catch (error) {
+        if (error instanceof InternalServerErrorException) throw error;
+        throw new BadRequestException(
+          "Le fichier sélectionné n'est pas un export MinIO Stockini valide.",
+        );
+      }
+      const result = {
+        importId,
+        filename: path.basename(originalName),
+        manifest,
+        status: 'VALIDATED' as const,
+      };
+      keepValidatedImport = true;
+      await this.auditEvent(user, 'database.minio.imported', {
+        type: 'MinIO',
+        size: (await fs.promises.stat(destination)).size,
+        objects: manifest.objectCount,
+        status: result.status,
+        result: 'success',
+      });
+      return result;
+    } finally {
+      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      if (!keepValidatedImport)
+        await fs.promises
+          .rm(destination, { force: true })
+          .catch(() => undefined);
+      if (lock) this.releaseLock(lock);
+      if (ownsBusyState) this.minioBusy = false;
+    }
   }
 
   async auditDownload(
@@ -506,7 +578,10 @@ export class IndependentExportsService implements OnModuleInit {
       });
       throw this.safeServerError(error, 'La restauration MinIO a échoué.');
     } finally {
-      if (source === 'import') fs.rmSync(sourcePath, { force: true });
+      if (source === 'import')
+        await fs.promises
+          .rm(sourcePath, { force: true })
+          .catch(() => undefined);
       this.minioBusy = false;
       this.releaseLock(lock);
     }
@@ -633,13 +708,23 @@ export class IndependentExportsService implements OnModuleInit {
   }
 
   private validateMinioArchive(zipPath: string): MinioManifest {
-    this.assertZipSignature(zipPath);
-    let zip: AdmZip;
     try {
-      zip = new AdmZip(zipPath);
-    } catch {
-      throw new BadRequestException('Archive ZIP corrompue.');
+      return this.validateMinioArchiveContents(zipPath);
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      if ((error as NodeJS.ErrnoException).code)
+        throw new InternalServerErrorException(
+          'Impossible de préparer le fichier importé.',
+        );
+      throw new BadRequestException(
+        "Le fichier sélectionné n'est pas un export MinIO Stockini valide.",
+      );
     }
+  }
+
+  private validateMinioArchiveContents(zipPath: string): MinioManifest {
+    this.assertZipSignature(zipPath);
+    const zip = new AdmZip(zipPath);
     const entries = zip.getEntries();
     if (entries.length > this.maxArchiveFiles)
       throw new BadRequestException('Archive contenant trop de fichiers.');
@@ -678,6 +763,7 @@ export class IndependentExportsService implements OnModuleInit {
     if (
       manifest.format !== 'stockini-minio-export' ||
       manifest.version !== 1 ||
+      typeof manifest.createdAt !== 'string' ||
       !Array.isArray(manifest.objects) ||
       manifest.objectCount !== manifest.objects.length ||
       !Array.isArray(manifest.buckets) ||
@@ -685,13 +771,24 @@ export class IndependentExportsService implements OnModuleInit {
     )
       throw new BadRequestException('Manifest MinIO incompatible.');
     let declaredSize = 0;
+    const declaredArchivePaths = new Set<string>();
     for (const object of manifest.objects) {
       if (
+        !object ||
+        typeof object.bucket !== 'string' ||
+        typeof object.key !== 'string' ||
+        !Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        typeof object.archivePath !== 'string' ||
+        typeof object.checksumSha256 !== 'string' ||
+        !/^[0-9a-f]{64}$/i.test(object.checksumSha256) ||
         !manifest.buckets.includes(object.bucket) ||
         !this.isSafeRelativePath(object.key) ||
-        object.archivePath !== `objects/${object.bucket}/${object.key}`
+        object.archivePath !== `objects/${object.bucket}/${object.key}` ||
+        declaredArchivePaths.has(object.archivePath)
       )
         throw new BadRequestException('Manifest MinIO incohérent.');
+      declaredArchivePaths.add(object.archivePath);
       const objectEntry = zip.getEntry(object.archivePath);
       if (!objectEntry || objectEntry.header.size !== object.size)
         throw new BadRequestException('Objet absent ou taille incohérente.');
@@ -704,6 +801,17 @@ export class IndependentExportsService implements OnModuleInit {
     }
     if (declaredSize !== manifest.totalSize)
       throw new BadRequestException('Taille totale du manifeste incohérente.');
+    const archivedObjectPaths = entries
+      .filter((archiveEntry) => !archiveEntry.isDirectory)
+      .map((archiveEntry) => archiveEntry.entryName.replace(/\\/g, '/'))
+      .filter((name) => name.startsWith('objects/'));
+    if (
+      archivedObjectPaths.length !== declaredArchivePaths.size ||
+      archivedObjectPaths.some((name) => !declaredArchivePaths.has(name))
+    )
+      throw new BadRequestException(
+        "Le nombre d'objets du manifeste est incohérent.",
+      );
     return manifest;
   }
 
@@ -791,6 +899,22 @@ export class IndependentExportsService implements OnModuleInit {
     );
     if (result.error || result.status !== 0)
       throw new InternalServerErrorException('pg_restore a échoué.');
+  }
+
+  private validatePostgresDump(dumpPath: string): void {
+    this.assertPostgresDump(dumpPath);
+    const result = spawnSync('pg_restore', ['--list', dumpPath], {
+      encoding: 'buffer',
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT')
+      throw new InternalServerErrorException(
+        'Outil de validation PostgreSQL indisponible.',
+      );
+    if (result.error || result.status !== 0)
+      throw new BadRequestException(
+        "Le fichier sélectionné n'est pas un dump PostgreSQL valide.",
+      );
   }
 
   private deployCurrentMigrations(): void {

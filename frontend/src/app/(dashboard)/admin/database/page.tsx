@@ -40,6 +40,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import {
+  buildIndependentImportRequest,
+  independentImportErrorMessage,
+} from "@/lib/independent-import";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -296,6 +300,7 @@ function IndependentExportsPanel() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<"postgres" | "minio" | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [importing, setImporting] = useState<"postgres" | "minio" | null>(null);
   const [coherence, setCoherence] = useState<Record<string, unknown> | null>(
     null,
   );
@@ -314,9 +319,7 @@ function IndependentExportsPanel() {
     setLoading(true);
     try {
       const [pgResponse, minioResponse] = await Promise.all([
-        api.get<PostgreSqlExportInfo[]>(
-          "/admin/database/exports/postgresql",
-        ),
+        api.get<PostgreSqlExportInfo[]>("/admin/database/exports/postgresql"),
         api.get<MinioExportInfo[]>("/admin/database/exports/minio"),
       ]);
       setPostgres(pgResponse.data);
@@ -342,9 +345,7 @@ function IndependentExportsPanel() {
         { timeout: 0 },
       );
       toast.success(
-        kind === "postgres"
-          ? "Dump PostgreSQL créé."
-          : "Export MinIO créé.",
+        kind === "postgres" ? "Dump PostgreSQL créé." : "Export MinIO créé.",
       );
       await reload();
     } catch {
@@ -371,26 +372,29 @@ function IndependentExportsPanel() {
     }
   };
 
-  const importExport = async (
-    kind: "postgres" | "minio",
-    file: File,
-  ) => {
-    const form = new FormData();
-    form.append("file", file);
+  const importExport = async (kind: "postgres" | "minio", file: File) => {
+    if (importing) return;
+    setImporting(kind);
+    const request = buildIndependentImportRequest(file);
     try {
       const { data } = await api.post<{ importId: string }>(
         `/admin/database/imports/${kind === "postgres" ? "postgresql" : "minio"}`,
-        form,
-        { headers: { "Content-Type": "multipart/form-data" }, timeout: 0 },
+        request.data,
+        request.config,
+      );
+      toast.success(
+        kind === "postgres"
+          ? "Dump PostgreSQL importé avec succès."
+          : "Export MinIO importé avec succès.",
       );
       setConfirm({ kind, source: "import", importId: data.importId });
-    } catch {
-      toast.error("Fichier refusé : format, taille ou contenu invalide.");
+    } catch (error) {
+      toast.error(independentImportErrorMessage(error, kind));
     } finally {
+      setImporting(null);
       if (kind === "postgres" && postgresInput.current)
         postgresInput.current.value = "";
-      if (kind === "minio" && minioInput.current)
-        minioInput.current.value = "";
+      if (kind === "minio" && minioInput.current) minioInput.current.value = "";
     }
   };
 
@@ -469,8 +473,8 @@ function IndependentExportsPanel() {
             <div>
               <CardTitle className="text-base">Dumps PostgreSQL</CardTitle>
               <p className="mt-1 text-xs text-text-secondary">
-                Dump custom complet, remplacé atomiquement et recréé chaque
-                jour à 02:00.
+                Dump custom complet, remplacé atomiquement et recréé chaque jour
+                à 02:00.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -489,10 +493,16 @@ function IndependentExportsPanel() {
                   variant="outline"
                   size="sm"
                   onClick={() => postgresInput.current?.click()}
-                  disabled={restoring}
+                  disabled={restoring || !!importing}
                 >
-                  <Upload size={13} className="mr-1.5" />
-                  Importer un dump PostgreSQL
+                  {importing === "postgres" ? (
+                    <RefreshCw size={13} className="mr-1.5 animate-spin" />
+                  ) : (
+                    <Upload size={13} className="mr-1.5" />
+                  )}
+                  {importing === "postgres"
+                    ? "Import en cours…"
+                    : "Importer un dump PostgreSQL"}
                 </Button>
               )}
               <Button
@@ -540,13 +550,9 @@ function IndependentExportsPanel() {
                       {formatBytes(item.size)}
                     </td>
                     <td className="px-4 py-3 text-xs">
-                      {item.origin === "SCHEDULED"
-                        ? "Automatique"
-                        : "Manuel"}
+                      {item.origin === "SCHEDULED" ? "Automatique" : "Manuel"}
                     </td>
-                    <td className="px-4 py-3">
-                      {exportStatus(item.status)}
-                    </td>
+                    <td className="px-4 py-3">{exportStatus(item.status)}</td>
                     <td className="px-4 py-3 text-right">
                       <KebabMenu
                         items={[
@@ -618,10 +624,16 @@ function IndependentExportsPanel() {
                   variant="outline"
                   size="sm"
                   onClick={() => minioInput.current?.click()}
-                  disabled={restoring}
+                  disabled={restoring || !!importing}
                 >
-                  <Upload size={13} className="mr-1.5" />
-                  Importer un export MinIO
+                  {importing === "minio" ? (
+                    <RefreshCw size={13} className="mr-1.5 animate-spin" />
+                  ) : (
+                    <Upload size={13} className="mr-1.5" />
+                  )}
+                  {importing === "minio"
+                    ? "Import en cours…"
+                    : "Importer un export MinIO"}
                 </Button>
               )}
               <Button
@@ -670,12 +682,8 @@ function IndependentExportsPanel() {
                       {formatBytes(item.size)}
                     </td>
                     <td className="px-4 py-3 text-xs">{item.objectCount}</td>
-                    <td className="px-4 py-3 text-xs">
-                      {item.buckets.length}
-                    </td>
-                    <td className="px-4 py-3">
-                      {exportStatus(item.status)}
-                    </td>
+                    <td className="px-4 py-3 text-xs">{item.buckets.length}</td>
+                    <td className="px-4 py-3">{exportStatus(item.status)}</td>
                     <td className="px-4 py-3 text-right">
                       <KebabMenu
                         items={[
@@ -725,8 +733,8 @@ function IndependentExportsPanel() {
               Cohérence PostgreSQL / MinIO
             </p>
             <p className="text-xs text-text-secondary">
-              Détecte les références manquantes et objets orphelins, sans
-              aucune suppression.
+              Détecte les références manquantes et objets orphelins, sans aucune
+              suppression.
             </p>
           </div>
           <Button
@@ -758,15 +766,14 @@ function IndependentExportsPanel() {
               Restaurer les objets MinIO
             </h3>
             <p className="mt-2 text-sm text-text-secondary">
-              PostgreSQL ne sera pas modifié. Une archive de sécurité sera
-              créée avant toute écriture.
+              PostgreSQL ne sera pas modifié. Une archive de sécurité sera créée
+              avant toute écriture.
             </p>
             <div className="mt-4 space-y-2">
               {[
                 {
                   value: "MERGE" as const,
-                  label:
-                    "Fusionner et remplacer les objets ayant la même clé",
+                  label: "Fusionner et remplacer les objets ayant la même clé",
                 },
                 {
                   value: "REPLACE" as const,
@@ -788,8 +795,9 @@ function IndependentExportsPanel() {
               ))}
             </div>
             <p className="mt-4 text-xs text-text-muted">
-              Tapez <strong className="font-mono text-red-600">RESTAURER</strong>{" "}
-              pour confirmer.
+              Tapez{" "}
+              <strong className="font-mono text-red-600">RESTAURER</strong> pour
+              confirmer.
             </p>
             <input
               value={minioTyped}
@@ -826,7 +834,9 @@ function IndependentExportsPanel() {
           <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-border bg-card p-5 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="font-semibold text-text-primary">
-                {coherence ? "Rapport de cohérence" : "Informations de l’export"}
+                {coherence
+                  ? "Rapport de cohérence"
+                  : "Informations de l’export"}
               </h3>
               <Button
                 variant="outline"

@@ -50,12 +50,12 @@ services:
       MINIO_ENDPOINT: minio
       TZ: ${TZ:-Africa/Tunis}
       BACKUP_DIRECTORY: /app/backups
-      BACKUP_UPLOAD_DIRECTORY: ${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
+      UPLOAD_DIRECTORY: /app/uploads
       BACKUP_MAX_UPLOAD_BYTES: ${BACKUP_MAX_UPLOAD_BYTES:-2147483648}
       BACKUP_MAX_EXTRACTED_BYTES: ${BACKUP_MAX_EXTRACTED_BYTES:-8589934592}
     volumes:
       - ${BACKUP_HOST_DIRECTORY:-./storage/backups}:/app/backups
-      - backup_uploads:${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
+      - backup_uploads:/app/uploads
     ports:
       - '${PORT:-3001}:${PORT:-3001}'
     depends_on:
