@@ -152,15 +152,26 @@ run_with_progress() {
         sleep 0.08
     done
 
-    wait "$pid"
-    local rc=$?
+    local rc=0
+    if wait "$pid"; then
+        rc=0
+    else
+        rc=$?
+    fi
 
     elapsed=$(( $(date +%s) - start_time ))
-    printf "\r${GREEN}[████████████████████████████]${RESET} %s ${DIM}%02ds${RESET}\n" \
-        "$message" "$elapsed"
 
-    if (( rc != 0 )); then
-        cat "$log_file" >&2
+    if (( rc == 0 )); then
+        printf "\r${GREEN}[████████████████████████████]${RESET} %s ${DIM}%02ds${RESET}\n" \
+            "$message" "$elapsed"
+    else
+        printf "\r${RED}[████████████████████████████]${RESET} %s ${DIM}%02ds${RESET}\n" \
+            "$message" "$elapsed"
+        error "La commande a échoué avec le code $rc."
+        if [[ -s "$log_file" ]]; then
+            printf "${YELLOW}Détail de l'erreur :${RESET}\n" >&2
+            cat "$log_file" >&2
+        fi
         rm -f "$log_file"
         return "$rc"
     fi
@@ -177,7 +188,8 @@ search_dump_files_internal() {
     shift
     local roots=("$@")
 
-    find "${roots[@]}" \
+    {
+        find "${roots[@]}" \
         -xdev \
         -type f \
         \( \
@@ -216,7 +228,8 @@ search_dump_files_internal() {
         ! -path '*/sys/*' \
         ! -path '*/dev/*' \
         ! -path '*/run/*' \
-        2>/dev/null \
+        2>/dev/null || true
+    } \
     | while IFS= read -r file; do
         printf '%s\t%s\n' "$(stat -c '%Y' "$file" 2>/dev/null || echo 0)" "$file"
     done \
