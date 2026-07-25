@@ -48,12 +48,13 @@ services:
       DATABASE_URL: postgresql://${DB_USER:-stockpro}:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:${DB_PORT:-5432}/${DB_NAME:-stockpro}?schema=public
       # Surcharge MinIO endpoint avec l'hostname docker interne
       MINIO_ENDPOINT: minio
-      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/opt/stockini/backups}
+      TZ: ${TZ:-Africa/Tunis}
+      BACKUP_DIRECTORY: /app/backups
       BACKUP_UPLOAD_DIRECTORY: ${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
       BACKUP_MAX_UPLOAD_BYTES: ${BACKUP_MAX_UPLOAD_BYTES:-2147483648}
       BACKUP_MAX_EXTRACTED_BYTES: ${BACKUP_MAX_EXTRACTED_BYTES:-8589934592}
     volumes:
-      - ${BACKUP_HOST_DIRECTORY:-./storage/backups}:${BACKUP_DIRECTORY:-/opt/stockini/backups}
+      - ${BACKUP_HOST_DIRECTORY:-./storage/backups}:/app/backups
       - backup_uploads:${BACKUP_UPLOAD_DIRECTORY:-/opt/stockini/uploads}
     ports:
       - '${PORT:-3001}:${PORT:-3001}'

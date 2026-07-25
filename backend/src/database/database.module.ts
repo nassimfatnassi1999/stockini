@@ -6,6 +6,7 @@ import { DocumentsModule } from '../documents/documents.module';
 import { DatabaseController } from './database.controller';
 import { DatabaseService } from './database.service';
 import { BackupStorageService } from './backup-storage.service';
+import { IndependentExportsService } from './independent-exports.service';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { BackupStorageService } from './backup-storage.service';
     DocumentsModule,
   ],
   controllers: [DatabaseController],
-  providers: [DatabaseService, BackupStorageService],
-  exports: [DatabaseService],
+  providers: [DatabaseService, BackupStorageService, IndependentExportsService],
+  exports: [DatabaseService, IndependentExportsService],
 })
 export class DatabaseModule {}

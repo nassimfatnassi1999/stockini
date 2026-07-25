@@ -5,8 +5,11 @@ IFS=$'\n\t'
 
 # ============================================================
 # PostgreSQL Docker Restore Assistant
-# Recherche les dumps PostgreSQL sur le VPS et les restaure
-# dans un conteneur PostgreSQL Docker choisi interactivement.
+# - Recherche interactive des dumps PostgreSQL sur le VPS
+# - Exclut les fichiers de migration et les faux positifs courants
+# - Détecte les conteneurs PostgreSQL actifs
+# - Supporte .sql, .dump, .backup et fichiers compressés .gz
+# - Affiche une animation horizontale pendant les opérations longues
 # ============================================================
 
 SCRIPT_NAME="$(basename "$0")"
@@ -17,13 +20,17 @@ DB_USER=""
 DB_NAME=""
 DUMP_FORMAT=""
 RESTORE_MODE=""
+RESTORE_FILE=""
+DOCKER=()
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 BOLD='\033[1m'
+DIM='\033[2m'
 RESET='\033[0m'
 
 info()    { printf "${BLUE}[INFO]${RESET} %s\n" "$*"; }
@@ -50,10 +57,6 @@ EOF
     printf "${RESET}\n"
 }
 
-pause() {
-    read -r -p "Appuyez sur Entrée pour continuer..." _
-}
-
 require_command() {
     command -v "$1" >/dev/null 2>&1 || {
         error "Commande requise introuvable : $1"
@@ -75,7 +78,8 @@ setup_docker_command() {
         return
     fi
 
-    error "Impossible d'accéder à Docker. Vérifiez que Docker est lancé et que votre utilisateur possède les permissions."
+    error "Impossible d'accéder à Docker."
+    error "Vérifiez que Docker est lancé et que votre utilisateur possède les permissions nécessaires."
     exit 1
 }
 
@@ -89,6 +93,182 @@ file_date() {
     stat -c '%y' "$file" 2>/dev/null | cut -d'.' -f1 || printf "Date inconnue"
 }
 
+# ------------------------------------------------------------
+# Animation horizontale
+# Usage :
+#   run_with_progress "Message" commande arg1 arg2...
+# La commande s'exécute en arrière-plan et la barre reste animée.
+# ------------------------------------------------------------
+run_with_progress() {
+    local message="$1"
+    shift
+
+    local log_file
+    log_file="$(mktemp)"
+    local start_time
+    start_time="$(date +%s)"
+
+    "$@" >"$log_file" 2>&1 &
+    local pid=$!
+
+    local width=28
+    local pos=0
+    local direction=1
+    local elapsed=0
+
+    printf "\n"
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local bar=""
+        local i
+
+        for ((i = 0; i < width; i++)); do
+            if (( i == pos )); then
+                bar+="█"
+            elif (( i == pos - 1 || i == pos + 1 )); then
+                bar+="▓"
+            else
+                bar+="░"
+            fi
+        done
+
+        elapsed=$(( $(date +%s) - start_time ))
+
+        printf "\r${CYAN}[%s]${RESET} %s ${DIM}%02ds${RESET}" \
+            "$bar" "$message" "$elapsed"
+
+        if (( direction == 1 )); then
+            ((pos++)) || true
+            if (( pos >= width - 1 )); then
+                direction=-1
+            fi
+        else
+            ((pos--)) || true
+            if (( pos <= 0 )); then
+                direction=1
+            fi
+        fi
+
+        sleep 0.08
+    done
+
+    wait "$pid"
+    local rc=$?
+
+    elapsed=$(( $(date +%s) - start_time ))
+    printf "\r${GREEN}[████████████████████████████]${RESET} %s ${DIM}%02ds${RESET}\n" \
+        "$message" "$elapsed"
+
+    if (( rc != 0 )); then
+        cat "$log_file" >&2
+        rm -f "$log_file"
+        return "$rc"
+    fi
+
+    cat "$log_file"
+    rm -f "$log_file"
+}
+
+# ------------------------------------------------------------
+# Recherche des dumps
+# ------------------------------------------------------------
+search_dump_files_internal() {
+    local output_file="$1"
+    shift
+    local roots=("$@")
+
+    find "${roots[@]}" \
+        -xdev \
+        -type f \
+        \( \
+            -iname '*.sql' \
+            -o -iname '*.dump' \
+            -o -iname '*.backup' \
+            -o -iname '*.sql.gz' \
+            -o -iname '*.dump.gz' \
+            -o -iname '*.backup.gz' \
+        \) \
+        ! -path '*/node_modules/*' \
+        ! -path '*/vendor/*' \
+        ! -path '*/.git/*' \
+        ! -path '*/dist/*' \
+        ! -path '*/build/*' \
+        ! -path '*/coverage/*' \
+        ! -path '*/target/*' \
+        ! -path '*/cache/*' \
+        ! -path '*/caches/*' \
+        ! -path '*/tmp/*' \
+        ! -path '*/temp/*' \
+        ! -path '*/uploads/*' \
+        ! -path '*/storage/framework/*' \
+        ! -path '*/prisma/migrations/*' \
+        ! -path '*/prisma/migration/*' \
+        ! -path '*/database/migrations/*' \
+        ! -path '*/db/migrations/*' \
+        ! -path '*/migrations/*' \
+        ! -path '*/migration/*' \
+        ! -path '*/flyway/*' \
+        ! -path '*/liquibase/*' \
+        ! -path '*/typeorm/*' \
+        ! -path '*/sequelize/*' \
+        ! -path '*/alembic/*' \
+        ! -path '*/proc/*' \
+        ! -path '*/sys/*' \
+        ! -path '*/dev/*' \
+        ! -path '*/run/*' \
+        2>/dev/null \
+    | while IFS= read -r file; do
+        printf '%s\t%s\n' "$(stat -c '%Y' "$file" 2>/dev/null || echo 0)" "$file"
+    done \
+    | sort -rn \
+    | cut -f2- \
+    > "$output_file"
+}
+
+is_likely_postgres_sql_dump() {
+    local file="$1"
+    local sample=""
+
+    if [[ "${file,,}" == *.gz ]]; then
+        sample="$(gzip -dc "$file" 2>/dev/null | head -n 120 || true)"
+    else
+        sample="$(head -n 120 "$file" 2>/dev/null || true)"
+    fi
+
+    [[ -n "$sample" ]] || return 1
+
+    if grep -Eqi \
+        'PostgreSQL database dump|Dumped from database version|Dumped by pg_dump|SET statement_timeout|SET lock_timeout|SET client_encoding|CREATE DATABASE|CREATE TABLE|COPY .+ FROM stdin|INSERT INTO|ALTER TABLE|CREATE SEQUENCE|SELECT pg_catalog\.set_config' \
+        <<< "$sample"; then
+        return 0
+    fi
+
+    return 1
+}
+
+filter_dump_candidates_internal() {
+    local raw_file="$1"
+    local filtered_file="$2"
+
+    : > "$filtered_file"
+
+    while IFS= read -r file; do
+        [[ -f "$file" ]] || continue
+        [[ -s "$file" ]] || continue
+
+        case "${file,,}" in
+            *.dump|*.backup|*.dump.gz|*.backup.gz)
+                printf '%s\n' "$file" >> "$filtered_file"
+                ;;
+            *.sql|*.sql.gz)
+                if is_likely_postgres_sql_dump "$file"; then
+                    printf '%s\n' "$file" >> "$filtered_file"
+                fi
+                ;;
+        esac
+    done < "$raw_file"
+}
+
 find_dumps() {
     local roots=()
     local candidate
@@ -98,10 +278,9 @@ find_dumps() {
         "/var/backups"
         "/srv"
         "/root"
-        "/tmp"
+        "/backup"
+        "/backups"
     )
-
-    info "Recherche des dumps PostgreSQL sur le VPS..."
 
     for candidate in "${default_roots[@]}"; do
         [[ -d "$candidate" ]] && roots+=("$candidate")
@@ -111,43 +290,32 @@ find_dumps() {
         roots=("/")
     fi
 
-    mapfile -t DUMP_FILES < <(
-        find "${roots[@]}" \
-            -xdev \
-            -type f \
-            \( \
-                -iname '*.sql' \
-                -o -iname '*.dump' \
-                -o -iname '*.backup' \
-                -o -iname '*.sql.gz' \
-                -o -iname '*.dump.gz' \
-                -o -iname '*.backup.gz' \
-            \) \
-            ! -path '*/node_modules/*' \
-            ! -path '*/.git/*' \
-            ! -path '*/proc/*' \
-            ! -path '*/sys/*' \
-            ! -path '*/dev/*' \
-            ! -path '*/run/*' \
-            2>/dev/null |
-        while IFS= read -r file; do
-            printf '%s\t%s\n' "$(stat -c '%Y' "$file" 2>/dev/null || echo 0)" "$file"
-        done |
-        sort -rn |
-        cut -f2-
-    )
+    TMP_DIR="$(mktemp -d)"
+    local raw_file="$TMP_DIR/raw-dumps.txt"
+    local filtered_file="$TMP_DIR/filtered-dumps.txt"
+
+    run_with_progress \
+        "Recherche des fichiers dump sur le VPS..." \
+        search_dump_files_internal "$raw_file" "${roots[@]}"
+
+    run_with_progress \
+        "Filtrage des migrations et faux fichiers SQL..." \
+        filter_dump_candidates_internal "$raw_file" "$filtered_file"
+
+    mapfile -t DUMP_FILES < "$filtered_file"
 
     if [[ ${#DUMP_FILES[@]} -eq 0 ]]; then
-        error "Aucun dump PostgreSQL trouvé."
+        error "Aucun dump PostgreSQL valide trouvé."
         printf "\nExtensions recherchées : .sql, .dump, .backup et versions .gz\n"
+        printf "Les répertoires de migrations ont été exclus automatiquement.\n"
         exit 1
     fi
 
-    success "${#DUMP_FILES[@]} dump(s) trouvé(s)."
+    success "${#DUMP_FILES[@]} dump(s) PostgreSQL valide(s) trouvé(s)."
 }
 
 select_dump() {
-    printf "\n${BOLD}Dumps disponibles :${RESET}\n\n"
+    printf "\n${BOLD}Dumps PostgreSQL disponibles :${RESET}\n\n"
     printf "%-5s %-12s %-20s %s\n" "N°" "TAILLE" "DATE" "CHEMIN"
     printf "%-5s %-12s %-20s %s\n" "--" "------" "----" "------"
 
@@ -181,17 +349,23 @@ select_dump() {
     success "Dump sélectionné : $SELECTED_DUMP"
 }
 
-prepare_dump() {
-    TMP_DIR="$(mktemp -d)"
+decompress_dump_internal() {
+    local source="$1"
+    local target="$2"
+    gzip -dc "$source" > "$target"
+}
 
+prepare_dump() {
     case "${SELECTED_DUMP,,}" in
         *.gz)
             require_command gzip
-            info "Décompression temporaire du dump..."
             local decompressed_name
             decompressed_name="$(basename "${SELECTED_DUMP%.gz}")"
-            gzip -dc "$SELECTED_DUMP" > "$TMP_DIR/$decompressed_name"
             RESTORE_FILE="$TMP_DIR/$decompressed_name"
+
+            run_with_progress \
+                "Décompression temporaire du dump..." \
+                decompress_dump_internal "$SELECTED_DUMP" "$RESTORE_FILE"
             ;;
         *)
             RESTORE_FILE="$SELECTED_DUMP"
@@ -208,24 +382,40 @@ prepare_dump() {
     elif grep -Iq . "$RESTORE_FILE" 2>/dev/null; then
         DUMP_FORMAT="sql"
     else
-        error "Format non reconnu. Le fichier n'est ni un SQL texte ni un dump PostgreSQL custom."
+        error "Format non reconnu."
         exit 1
     fi
 
     success "Format détecté : $DUMP_FORMAT"
 }
 
+# ------------------------------------------------------------
+# Détection des conteneurs PostgreSQL
+# ------------------------------------------------------------
+find_postgres_containers_internal() {
+    local output_file="$1"
+
+    : > "$output_file"
+
+    "${DOCKER[@]}" ps \
+        --format '{{.Names}}\t{{.Image}}\t{{.Status}}' \
+    | while IFS=$'\t' read -r name image status; do
+        if [[ "${image,,}" == *postgres* ]] ||
+           "${DOCKER[@]}" exec "$name" sh -c \
+               'command -v psql >/dev/null 2>&1' 2>/dev/null; then
+            printf '%s\t%s\t%s\n' "$name" "$image" "$status" >> "$output_file"
+        fi
+    done
+}
+
 find_postgres_containers() {
-    mapfile -t PG_CONTAINERS < <(
-        "${DOCKER[@]}" ps \
-            --format '{{.Names}}\t{{.Image}}\t{{.Status}}' |
-        while IFS=$'\t' read -r name image status; do
-            if [[ "${image,,}" == *postgres* ]] ||
-               "${DOCKER[@]}" exec "$name" sh -c 'command -v psql >/dev/null 2>&1' 2>/dev/null; then
-                printf '%s\t%s\t%s\n' "$name" "$image" "$status"
-            fi
-        done
-    )
+    local container_file="$TMP_DIR/postgres-containers.txt"
+
+    run_with_progress \
+        "Détection des conteneurs PostgreSQL actifs..." \
+        find_postgres_containers_internal "$container_file"
+
+    mapfile -t PG_CONTAINERS < "$container_file"
 
     if [[ ${#PG_CONTAINERS[@]} -eq 0 ]]; then
         error "Aucun conteneur PostgreSQL actif trouvé."
@@ -257,7 +447,8 @@ select_container() {
 
         if [[ "$choice" =~ ^[0-9]+$ ]] &&
            (( choice >= 1 && choice <= ${#PG_CONTAINERS[@]} )); then
-            IFS=$'\t' read -r SELECTED_CONTAINER _ _ <<< "${PG_CONTAINERS[$((choice - 1))]}"
+            IFS=$'\t' read -r SELECTED_CONTAINER _ _ \
+                <<< "${PG_CONTAINERS[$((choice - 1))]}"
             break
         fi
 
@@ -273,9 +464,7 @@ detect_default_user() {
     detected="$("${DOCKER[@]}" exec "$SELECTED_CONTAINER" sh -c \
         'printf "%s" "${POSTGRES_USER:-}"' 2>/dev/null || true)"
 
-    if [[ -z "$detected" ]]; then
-        detected="postgres"
-    fi
+    [[ -n "$detected" ]] || detected="postgres"
 
     while true; do
         read -r -p "Utilisateur PostgreSQL [$detected] : " DB_USER
@@ -283,7 +472,7 @@ detect_default_user() {
 
         if "${DOCKER[@]}" exec "$SELECTED_CONTAINER" \
             psql -U "$DB_USER" -d postgres -Atqc 'SELECT 1;' >/dev/null 2>&1; then
-            success "Connexion PostgreSQL réussie avec l'utilisateur '$DB_USER'."
+            success "Connexion PostgreSQL réussie avec '$DB_USER'."
             break
         fi
 
@@ -322,9 +511,11 @@ list_databases() {
 
         if [[ "${choice,,}" == "n" ]]; then
             read -r -p "Nom de la base cible : " DB_NAME
+
             if [[ "$DB_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
                 break
             fi
+
             warn "Nom de base invalide."
             continue
         fi
@@ -346,8 +537,7 @@ choose_restore_mode() {
     printf "1) Restaurer dans la base existante\n"
     printf "   Le dump est injecté sans supprimer la base.\n\n"
     printf "2) Nettoyer les objets puis restaurer\n"
-    printf "   pg_restore --clean pour les dumps custom.\n"
-    printf "   Pour un SQL, le script est exécuté tel quel.\n\n"
+    printf "   Pour un dump custom : --clean --if-exists.\n\n"
     printf "3) Supprimer et recréer complètement la base\n"
     printf "   Recommandé pour une restauration complète propre.\n\n"
     printf "0) Quitter\n"
@@ -365,8 +555,8 @@ choose_restore_mode() {
 database_exists() {
     "${DOCKER[@]}" exec "$SELECTED_CONTAINER" \
         psql -U "$DB_USER" -d postgres -Atqc \
-        "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" 2>/dev/null |
-        grep -q '^1$'
+        "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" 2>/dev/null \
+    | grep -q '^1$'
 }
 
 create_database_if_missing() {
@@ -391,17 +581,18 @@ create_database_if_missing() {
 
 show_summary_and_confirm() {
     printf "\n${BOLD}${YELLOW}Résumé de la restauration${RESET}\n"
-    printf "  Dump       : %s\n" "$SELECTED_DUMP"
-    printf "  Format     : %s\n" "$DUMP_FORMAT"
-    printf "  Conteneur  : %s\n" "$SELECTED_CONTAINER"
-    printf "  Utilisateur: %s\n" "$DB_USER"
-    printf "  Base cible : %s\n" "$DB_NAME"
-    printf "  Mode       : %s\n" "$RESTORE_MODE"
+    printf "  Dump        : %s\n" "$SELECTED_DUMP"
+    printf "  Format      : %s\n" "$DUMP_FORMAT"
+    printf "  Conteneur   : %s\n" "$SELECTED_CONTAINER"
+    printf "  Utilisateur : %s\n" "$DB_USER"
+    printf "  Base cible  : %s\n" "$DB_NAME"
+    printf "  Mode        : %s\n" "$RESTORE_MODE"
 
     if [[ "$RESTORE_MODE" == "3" ]]; then
         printf "\n${RED}${BOLD}"
         printf "ATTENTION : la base '%s' sera supprimée avec toutes ses données.\n" "$DB_NAME"
         printf "${RESET}"
+
         read -r -p "Tapez exactement le nom de la base pour confirmer : " confirmation
 
         if [[ "$confirmation" != "$DB_NAME" ]]; then
@@ -411,6 +602,7 @@ show_summary_and_confirm() {
     else
         printf "\n"
         read -r -p "Confirmer la restauration ? [o/N] : " confirmation
+
         if [[ "${confirmation,,}" != "o" && "${confirmation,,}" != "oui" ]]; then
             warn "Restauration annulée."
             exit 0
@@ -428,26 +620,27 @@ terminate_connections() {
               AND pid <> pg_backend_pid();" >/dev/null
 }
 
-recreate_database() {
-    info "Fermeture des connexions à la base..."
+recreate_database_internal() {
     terminate_connections || true
 
-    info "Suppression de la base '$DB_NAME'..."
     "${DOCKER[@]}" exec "$SELECTED_CONTAINER" \
         psql -U "$DB_USER" -d postgres \
         -v ON_ERROR_STOP=1 \
         -c "DROP DATABASE IF EXISTS \"$DB_NAME\";"
 
-    info "Création de la base '$DB_NAME'..."
     "${DOCKER[@]}" exec "$SELECTED_CONTAINER" \
         psql -U "$DB_USER" -d postgres \
         -v ON_ERROR_STOP=1 \
         -c "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_USER\";"
 }
 
-restore_sql() {
-    info "Restauration du dump SQL..."
+recreate_database() {
+    run_with_progress \
+        "Suppression et recréation de la base '$DB_NAME'..." \
+        recreate_database_internal
+}
 
+restore_sql_internal() {
     "${DOCKER[@]}" exec -i "$SELECTED_CONTAINER" \
         psql \
         -U "$DB_USER" \
@@ -456,7 +649,13 @@ restore_sql() {
         < "$RESTORE_FILE"
 }
 
-restore_custom() {
+restore_sql() {
+    run_with_progress \
+        "Restauration du dump SQL dans '$DB_NAME'..." \
+        restore_sql_internal
+}
+
+restore_custom_internal() {
     local args=(
         pg_restore
         -U "$DB_USER"
@@ -471,11 +670,15 @@ restore_custom() {
         args+=(--clean --if-exists)
     fi
 
-    info "Restauration du dump custom PostgreSQL..."
-
     "${DOCKER[@]}" exec -i "$SELECTED_CONTAINER" \
         "${args[@]}" \
         < "$RESTORE_FILE"
+}
+
+restore_custom() {
+    run_with_progress \
+        "Restauration du dump custom dans '$DB_NAME'..." \
+        restore_custom_internal
 }
 
 verify_restore() {
@@ -492,7 +695,7 @@ verify_restore() {
 
     success "Restauration terminée."
     printf "  Base restaurée : %s\n" "$DB_NAME"
-    printf "  Nombre de tables utilisateur détectées : %s\n" "$table_count"
+    printf "  Tables utilisateur détectées : %s\n" "$table_count"
 
     printf "\n${BOLD}Premières tables :${RESET}\n"
     "${DOCKER[@]}" exec "$SELECTED_CONTAINER" \
@@ -502,7 +705,7 @@ verify_restore() {
 
 main() {
     print_header
-    setup_docker_command
+
     require_command find
     require_command stat
     require_command du
@@ -511,7 +714,10 @@ main() {
     require_command sort
     require_command cut
     require_command mktemp
+    require_command date
+    require_command sleep
 
+    setup_docker_command
     find_dumps
     select_dump
     prepare_dump

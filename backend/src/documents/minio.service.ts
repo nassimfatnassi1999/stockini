@@ -60,6 +60,27 @@ export class MinioService implements OnModuleInit {
     });
   }
 
+  async putObjectWithMetadata(
+    bucket: string,
+    objectKey: string,
+    buffer: Buffer,
+    mimeType: string,
+    metadata: Record<string, string> = {},
+  ): Promise<void> {
+    const stream = Readable.from(buffer);
+    await this.client.putObject(bucket, objectKey, stream, buffer.length, {
+      ...metadata,
+      'Content-Type': mimeType,
+    });
+  }
+
+  async statObject(
+    bucket: string,
+    objectKey: string,
+  ): Promise<{ size: number; contentType?: string; metaData?: unknown }> {
+    return this.client.statObject(bucket, objectKey);
+  }
+
   async getObject(bucket: string, objectKey: string): Promise<Buffer> {
     const stream = await this.client.getObject(bucket, objectKey);
     return new Promise((resolve, reject) => {
@@ -89,7 +110,12 @@ export class MinioService implements OnModuleInit {
     destKey: string,
   ): Promise<void> {
     const conditions = new Minio.CopyConditions();
-    await this.client.copyObject(bucket, destKey, `/${bucket}/${sourceKey}`, conditions);
+    await this.client.copyObject(
+      bucket,
+      destKey,
+      `/${bucket}/${sourceKey}`,
+      conditions,
+    );
   }
 
   async moveObject(
@@ -113,7 +139,9 @@ export class MinioService implements OnModuleInit {
     return new Promise((resolve, reject) => {
       const keys: string[] = [];
       const stream = this.client.listObjects(bucket, '', true);
-      stream.on('data', (obj) => { if (obj.name) keys.push(obj.name); });
+      stream.on('data', (obj) => {
+        if (obj.name) keys.push(obj.name);
+      });
       stream.on('end', () => resolve(keys));
       stream.on('error', reject);
     });

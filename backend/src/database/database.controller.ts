@@ -33,6 +33,12 @@ import { randomUUID } from 'crypto';
 import { BackupStorageService } from './backup-storage.service';
 import { BackupUploadFilter } from './backup-upload.filter';
 import { BackupHttpException } from './backup-errors';
+import { IndependentExportsService } from './independent-exports.service';
+import {
+  MinioRestoreDto,
+  PostgresRestoreDto,
+  RecreateExportDto,
+} from './dto/independent-export.dto';
 
 type MulterFile = Express.Multer.File;
 
@@ -86,6 +92,23 @@ const restoreUploadOptions = {
   },
 };
 
+const independentUploadOptions = {
+  storage: diskStorage({
+    destination: (_request, _file, callback) => {
+      const directory = restoreUploadDirectory();
+      try {
+        fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+        callback(null, directory);
+      } catch (error) {
+        callback(error as Error, directory);
+      }
+    },
+    filename: (_request, _file, callback) =>
+      callback(null, `${randomUUID()}.independent-upload`),
+  }),
+  limits: { fileSize: restoreUploadLimit(), files: 1 },
+};
+
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles('ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin')
 @Controller('admin/database')
@@ -95,7 +118,198 @@ export class DatabaseController {
   constructor(
     private readonly db: DatabaseService,
     private readonly backupStorage: BackupStorageService,
+    private readonly independentExports: IndependentExportsService,
   ) {}
+
+  // ─── Independent PostgreSQL exports ─────────────────────────────────────────
+
+  @RequirePermissions('database.backup')
+  @Post('exports/postgresql')
+  createPostgresqlExport(
+    @CurrentUser() user: AuthUser,
+    @Body() _dto: RecreateExportDto,
+  ) {
+    return this.independentExports.createPostgresExport('MANUAL', user);
+  }
+
+  @RequirePermissions('database.view')
+  @Get('exports/postgresql')
+  listPostgresqlExports() {
+    return this.independentExports.listPostgresExports();
+  }
+
+  @RequirePermissions('database.backup')
+  @Get('exports/postgresql/download')
+  downloadPostgresqlExport(
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const filePath = this.independentExports.postgresDownloadPath();
+    return this.streamFixedExport(
+      filePath,
+      'application/octet-stream',
+      user,
+      'database.postgresql.export.downloaded',
+      res,
+    );
+  }
+
+  @RequirePermissions('database.restore')
+  @Post('imports/postgresql')
+  @UseInterceptors(FileInterceptor('file', independentUploadOptions))
+  async importPostgresql(
+    @UploadedFile() file: MulterFile,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!file) throw new BadRequestException('Aucun dump fourni.');
+    if (
+      ![
+        'application/octet-stream',
+        'application/x-pg-dump',
+        'application/x-postgresql-backup',
+      ].includes(file.mimetype)
+    ) {
+      throw new BadRequestException('Type MIME PostgreSQL invalide.');
+    }
+    try {
+      return await this.independentExports.importPostgres(
+        file.path,
+        file.originalname,
+        user,
+      );
+    } finally {
+      if (fs.existsSync(file.path)) fs.rmSync(file.path, { force: true });
+    }
+  }
+
+  @RequirePermissions('database.restore')
+  @Post('restores/postgresql')
+  restorePostgresql(
+    @Body() dto: PostgresRestoreDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.independentExports.restorePostgres(
+      dto.source,
+      dto.confirmation,
+      user,
+      dto.importId,
+    );
+  }
+
+  // ─── Independent MinIO exports ──────────────────────────────────────────────
+
+  @RequirePermissions('database.backup')
+  @Post('exports/minio')
+  createMinioExport(
+    @CurrentUser() user: AuthUser,
+    @Body() _dto: RecreateExportDto,
+  ) {
+    return this.independentExports.createMinioExport(user);
+  }
+
+  @RequirePermissions('database.view')
+  @Get('exports/minio')
+  listMinioExports() {
+    return this.independentExports.listMinioExports();
+  }
+
+  @RequirePermissions('database.view')
+  @Get('exports/minio/manifest')
+  getMinioManifest() {
+    return this.independentExports.getMinioManifest();
+  }
+
+  @RequirePermissions('database.backup')
+  @Get('exports/minio/download')
+  downloadMinioExport(@CurrentUser() user: AuthUser, @Res() res: Response) {
+    const filePath = this.independentExports.minioDownloadPath();
+    return this.streamFixedExport(
+      filePath,
+      'application/zip',
+      user,
+      'database.minio.export.downloaded',
+      res,
+    );
+  }
+
+  @RequirePermissions('database.restore')
+  @Post('imports/minio')
+  @UseInterceptors(FileInterceptor('file', independentUploadOptions))
+  async importMinio(
+    @UploadedFile() file: MulterFile,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!file) throw new BadRequestException('Aucun export ZIP fourni.');
+    if (
+      ![
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/x-zip',
+        'application/octet-stream',
+      ].includes(file.mimetype)
+    ) {
+      throw new BadRequestException('Type MIME ZIP invalide.');
+    }
+    try {
+      return await this.independentExports.importMinio(
+        file.path,
+        file.originalname,
+        user,
+      );
+    } finally {
+      if (fs.existsSync(file.path)) fs.rmSync(file.path, { force: true });
+    }
+  }
+
+  @RequirePermissions('database.restore')
+  @Post('restores/minio')
+  restoreMinio(@Body() dto: MinioRestoreDto, @CurrentUser() user: AuthUser) {
+    return this.independentExports.restoreMinio(
+      dto.source,
+      dto.mode,
+      dto.confirmation,
+      user,
+      dto.importId,
+    );
+  }
+
+  @RequirePermissions('database.view')
+  @Get('coherence')
+  coherenceInformation() {
+    return {
+      destructive: false,
+      description:
+        'Compare les références documentaires PostgreSQL aux objets MinIO sans supprimer de données.',
+    };
+  }
+
+  @RequirePermissions('database.backup')
+  @Post('coherence/check')
+  checkCoherence(@CurrentUser() user: AuthUser) {
+    return this.independentExports.checkCoherence(user);
+  }
+
+  private async streamFixedExport(
+    filePath: string,
+    contentType: string,
+    user: AuthUser,
+    auditAction: string,
+    res: Response,
+  ): Promise<void> {
+    const stat = fs.statSync(filePath);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
+      'Content-Length': String(stat.size),
+    });
+    await this.independentExports.auditDownload(
+      user,
+      auditAction,
+      path.basename(filePath),
+      stat.size,
+    );
+    fs.createReadStream(filePath).pipe(res);
+  }
 
   // ─── Health ───────────────────────────────────────────────────────────────────
 
@@ -314,15 +528,10 @@ export class DatabaseController {
     throw new HttpException(
       {
         success: false,
-        message:
-          original && 'message' in original
-            ? (original as { message: unknown }).message
-            : message,
-        ...(original && 'code' in original
-          ? { code: (original as { code: unknown }).code }
-          : {}),
+        message: original && 'message' in original ? original.message : message,
+        ...(original && 'code' in original ? { code: original.code } : {}),
         ...(original && 'restoreId' in original
-          ? { restoreId: (original as { restoreId: unknown }).restoreId }
+          ? { restoreId: original.restoreId }
           : {}),
         details: safeDetail,
       },

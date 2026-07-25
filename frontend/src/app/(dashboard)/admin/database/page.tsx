@@ -52,6 +52,23 @@ interface BackupInfo {
   status?: "valid" | "invalid" | "missing-sql";
 }
 
+interface PostgreSqlExportInfo {
+  filename: string;
+  size: number;
+  createdAt: string;
+  origin: "MANUAL" | "SCHEDULED";
+  status: "AVAILABLE" | "IN_PROGRESS" | "FAILED";
+}
+
+interface MinioExportInfo {
+  filename: string;
+  size: number;
+  createdAt: string;
+  objectCount: number;
+  buckets: string[];
+  status: "AVAILABLE" | "IN_PROGRESS" | "FAILED";
+}
+
 interface SystemHealth {
   database: { status: "ok" | "error"; message?: string; responseMs?: number };
   minio: { status: "ok" | "error"; message?: string };
@@ -271,6 +288,566 @@ function ConfirmDialog({
 // ═══════════════════════════════════════════════════════════
 // TAB: SAUVEGARDES
 // ═══════════════════════════════════════════════════════════
+
+function IndependentExportsPanel() {
+  const { can } = usePermissions();
+  const [postgres, setPostgres] = useState<PostgreSqlExportInfo[]>([]);
+  const [minio, setMinio] = useState<MinioExportInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState<"postgres" | "minio" | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [coherence, setCoherence] = useState<Record<string, unknown> | null>(
+    null,
+  );
+  const [info, setInfo] = useState<unknown | null>(null);
+  const [confirm, setConfirm] = useState<{
+    kind: "postgres" | "minio";
+    source: "server" | "import";
+    importId?: string;
+  } | null>(null);
+  const [minioMode, setMinioMode] = useState<"MERGE" | "REPLACE">("MERGE");
+  const [minioTyped, setMinioTyped] = useState("");
+  const postgresInput = useRef<HTMLInputElement>(null);
+  const minioInput = useRef<HTMLInputElement>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [pgResponse, minioResponse] = await Promise.all([
+        api.get<PostgreSqlExportInfo[]>(
+          "/admin/database/exports/postgresql",
+        ),
+        api.get<MinioExportInfo[]>("/admin/database/exports/minio"),
+      ]);
+      setPostgres(pgResponse.data);
+      setMinio(minioResponse.data);
+    } catch {
+      toast.error("Impossible de charger les exports indépendants.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const createExport = async (kind: "postgres" | "minio") => {
+    if (creating) return;
+    setCreating(kind);
+    try {
+      await api.post(
+        `/admin/database/exports/${kind === "postgres" ? "postgresql" : "minio"}`,
+        {},
+        { timeout: 0 },
+      );
+      toast.success(
+        kind === "postgres"
+          ? "Dump PostgreSQL créé."
+          : "Export MinIO créé.",
+      );
+      await reload();
+    } catch {
+      toast.error("La création de l’export a échoué.");
+    } finally {
+      setCreating(null);
+    }
+  };
+
+  const download = async (kind: "postgres" | "minio", filename: string) => {
+    try {
+      const response = await api.get(
+        `/admin/database/exports/${kind === "postgres" ? "postgresql" : "minio"}/download`,
+        { responseType: "blob" },
+      );
+      const url = URL.createObjectURL(response.data as Blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Téléchargement impossible.");
+    }
+  };
+
+  const importExport = async (
+    kind: "postgres" | "minio",
+    file: File,
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const { data } = await api.post<{ importId: string }>(
+        `/admin/database/imports/${kind === "postgres" ? "postgresql" : "minio"}`,
+        form,
+        { headers: { "Content-Type": "multipart/form-data" }, timeout: 0 },
+      );
+      setConfirm({ kind, source: "import", importId: data.importId });
+    } catch {
+      toast.error("Fichier refusé : format, taille ou contenu invalide.");
+    } finally {
+      if (kind === "postgres" && postgresInput.current)
+        postgresInput.current.value = "";
+      if (kind === "minio" && minioInput.current)
+        minioInput.current.value = "";
+    }
+  };
+
+  const restore = async () => {
+    if (!confirm || restoring) return;
+    setRestoring(true);
+    try {
+      await api.post(
+        `/admin/database/restores/${confirm.kind === "postgres" ? "postgresql" : "minio"}`,
+        {
+          source: confirm.source,
+          importId: confirm.importId,
+          confirmation: "RESTAURER",
+          ...(confirm.kind === "minio" ? { mode: minioMode } : {}),
+        },
+        { timeout: 0 },
+      );
+      toast.success(
+        confirm.kind === "postgres"
+          ? "PostgreSQL restauré et contrôlé."
+          : "Objets MinIO restaurés avec leurs clés exactes.",
+      );
+      setConfirm(null);
+      await reload();
+    } catch {
+      toast.error("Restauration échouée. Le rollback de sécurité a été tenté.");
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const showManifest = async () => {
+    try {
+      const { data } = await api.get<Record<string, unknown>>(
+        "/admin/database/exports/minio/manifest",
+      );
+      setInfo(data);
+    } catch {
+      toast.error("Manifeste indisponible.");
+    }
+  };
+
+  const checkCoherence = async () => {
+    try {
+      const { data } = await api.post<Record<string, unknown>>(
+        "/admin/database/coherence/check",
+        {},
+        { timeout: 0 },
+      );
+      setCoherence(data);
+      toast.success("Vérification terminée sans modification des données.");
+    } catch {
+      toast.error("La vérification de cohérence a échoué.");
+    }
+  };
+
+  const exportStatus = (status: string) => (
+    <Badge
+      variant="outline"
+      className={cn(
+        "text-[10px]",
+        status === "AVAILABLE"
+          ? "border-green-300 text-green-700"
+          : "border-orange-300 text-orange-700",
+      )}
+    >
+      {status === "AVAILABLE" ? "Disponible" : "En cours"}
+    </Badge>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div>
+              <CardTitle className="text-base">Dumps PostgreSQL</CardTitle>
+              <p className="mt-1 text-xs text-text-secondary">
+                Dump custom complet, remplacé atomiquement et recréé chaque
+                jour à 02:00.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={postgresInput}
+                type="file"
+                accept=".dump,.backup,application/octet-stream"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importExport("postgres", file);
+                }}
+              />
+              {can("database.restore") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => postgresInput.current?.click()}
+                  disabled={restoring}
+                >
+                  <Upload size={13} className="mr-1.5" />
+                  Importer un dump PostgreSQL
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => void createExport("postgres")}
+                disabled={!!creating || restoring}
+              >
+                {creating === "postgres" ? (
+                  <RefreshCw size={13} className="mr-1.5 animate-spin" />
+                ) : (
+                  <Plus size={13} className="mr-1.5" />
+                )}
+                {creating === "postgres"
+                  ? "Création du dump en cours…"
+                  : "Créer un dump PostgreSQL"}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] text-sm">
+              <thead>
+                <tr className="border-y border-border bg-muted/30 text-left text-xs text-text-muted">
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Nom</th>
+                  <th className="px-4 py-3">Date et heure</th>
+                  <th className="px-4 py-3">Taille</th>
+                  <th className="px-4 py-3">Origine</th>
+                  <th className="px-4 py-3">Statut</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {postgres.map((item) => (
+                  <tr key={item.filename} className="border-b border-border/50">
+                    <td className="px-4 py-3">PostgreSQL</td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {item.filename}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {formatDate(item.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {formatBytes(item.size)}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {item.origin === "SCHEDULED"
+                        ? "Automatique"
+                        : "Manuel"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {exportStatus(item.status)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <KebabMenu
+                        items={[
+                          {
+                            label: "Télécharger",
+                            icon: <Download size={14} />,
+                            onClick: () =>
+                              void download("postgres", item.filename),
+                          },
+                          {
+                            label: "Restaurer",
+                            icon: <Upload size={14} />,
+                            onClick: () =>
+                              setConfirm({
+                                kind: "postgres",
+                                source: "server",
+                              }),
+                            hidden: !can("database.restore"),
+                          },
+                          {
+                            label: "Recréer le dump",
+                            icon: <RefreshCw size={14} />,
+                            onClick: () => void createExport("postgres"),
+                          },
+                          {
+                            label: "Afficher les informations",
+                            icon: <Eye size={14} />,
+                            onClick: () => setInfo(item),
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!loading && postgres.length === 0 && (
+            <div className="py-10 text-center text-sm text-text-muted">
+              Aucun dump PostgreSQL disponible.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div>
+              <CardTitle className="text-base">Exports MinIO</CardTitle>
+              <p className="mt-1 text-xs text-text-secondary">
+                Tous les objets applicatifs, leurs clés, métadonnées et
+                checksums dans un ZIP manifesté.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={minioInput}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importExport("minio", file);
+                }}
+              />
+              {can("database.restore") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => minioInput.current?.click()}
+                  disabled={restoring}
+                >
+                  <Upload size={13} className="mr-1.5" />
+                  Importer un export MinIO
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => void createExport("minio")}
+                disabled={!!creating || restoring}
+              >
+                {creating === "minio" ? (
+                  <RefreshCw size={13} className="mr-1.5 animate-spin" />
+                ) : (
+                  <Plus size={13} className="mr-1.5" />
+                )}
+                {creating === "minio"
+                  ? "Création de l’export en cours…"
+                  : "Créer un export MinIO"}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead>
+                <tr className="border-y border-border bg-muted/30 text-left text-xs text-text-muted">
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Nom</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Taille ZIP</th>
+                  <th className="px-4 py-3">Objets</th>
+                  <th className="px-4 py-3">Buckets</th>
+                  <th className="px-4 py-3">Statut</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {minio.map((item) => (
+                  <tr key={item.filename} className="border-b border-border/50">
+                    <td className="px-4 py-3">MinIO</td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {item.filename}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {formatDate(item.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {formatBytes(item.size)}
+                    </td>
+                    <td className="px-4 py-3 text-xs">{item.objectCount}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {item.buckets.length}
+                    </td>
+                    <td className="px-4 py-3">
+                      {exportStatus(item.status)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <KebabMenu
+                        items={[
+                          {
+                            label: "Télécharger",
+                            icon: <Download size={14} />,
+                            onClick: () =>
+                              void download("minio", item.filename),
+                          },
+                          {
+                            label: "Restaurer",
+                            icon: <Upload size={14} />,
+                            onClick: () =>
+                              setConfirm({ kind: "minio", source: "server" }),
+                            hidden: !can("database.restore"),
+                          },
+                          {
+                            label: "Recréer l’export",
+                            icon: <RefreshCw size={14} />,
+                            onClick: () => void createExport("minio"),
+                          },
+                          {
+                            label: "Voir le manifeste",
+                            icon: <Eye size={14} />,
+                            onClick: () => void showManifest(),
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!loading && minio.length === 0 && (
+            <div className="py-10 text-center text-sm text-text-muted">
+              Aucun export MinIO disponible.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
+          <div>
+            <p className="text-sm font-semibold text-text-primary">
+              Cohérence PostgreSQL / MinIO
+            </p>
+            <p className="text-xs text-text-secondary">
+              Détecte les références manquantes et objets orphelins, sans
+              aucune suppression.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void checkCoherence()}
+          >
+            <Shield size={13} className="mr-1.5" />
+            Vérifier la cohérence PostgreSQL / MinIO
+          </Button>
+        </CardContent>
+      </Card>
+
+      <ConfirmDialog
+        open={confirm?.kind === "postgres"}
+        title="Restaurer PostgreSQL ?"
+        message="Toutes les données PostgreSQL actuelles seront remplacées. Un dump de sécurité valide sera obligatoirement créé avant la restauration. MinIO ne sera pas modifié."
+        confirmText={restoring ? "Restauration…" : "Restaurer"}
+        confirmKeyword="RESTAURER"
+        dangerous
+        onConfirm={() => void restore()}
+        onCancel={() => setConfirm(null)}
+      />
+
+      {confirm?.kind === "minio" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl">
+            <h3 className="text-base font-semibold text-text-primary">
+              Restaurer les objets MinIO
+            </h3>
+            <p className="mt-2 text-sm text-text-secondary">
+              PostgreSQL ne sera pas modifié. Une archive de sécurité sera
+              créée avant toute écriture.
+            </p>
+            <div className="mt-4 space-y-2">
+              {[
+                {
+                  value: "MERGE" as const,
+                  label:
+                    "Fusionner et remplacer les objets ayant la même clé",
+                },
+                {
+                  value: "REPLACE" as const,
+                  label:
+                    "Remplacer complètement les objets des buckets concernés",
+                },
+              ].map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer gap-2 rounded-lg border border-border p-3 text-sm"
+                >
+                  <input
+                    type="radio"
+                    checked={minioMode === option.value}
+                    onChange={() => setMinioMode(option.value)}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            <p className="mt-4 text-xs text-text-muted">
+              Tapez <strong className="font-mono text-red-600">RESTAURER</strong>{" "}
+              pour confirmer.
+            </p>
+            <input
+              value={minioTyped}
+              onChange={(event) => setMinioTyped(event.target.value)}
+              placeholder="RESTAURER"
+              className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setMinioTyped("");
+                  setConfirm(null);
+                }}
+              >
+                Annuler
+              </Button>
+              <Button
+                size="sm"
+                className="bg-red-600 text-white hover:bg-red-700"
+                disabled={restoring || minioTyped !== "RESTAURER"}
+                onClick={() => void restore()}
+              >
+                Restaurer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(info || coherence) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-border bg-card p-5 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-semibold text-text-primary">
+                {coherence ? "Rapport de cohérence" : "Informations de l’export"}
+              </h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setInfo(null);
+                  setCoherence(null);
+                }}
+              >
+                Fermer
+              </Button>
+            </div>
+            <pre className="overflow-auto rounded-lg bg-muted p-3 text-xs">
+              {JSON.stringify(coherence || info, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function BackupsTab() {
   const { can } = usePermissions();
@@ -522,6 +1099,9 @@ function BackupsTab() {
 
   return (
     <div className="space-y-4">
+      <IndependentExportsPanel />
+
+      <div className="border-t border-border pt-4" />
       {restoring && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-surface/95 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-8 py-7 shadow-xl">

@@ -19,12 +19,14 @@ export const BACKUP_DIRECTORY_ERROR =
 export class BackupStorageService implements OnModuleInit {
   private readonly logger = new Logger(BackupStorageService.name);
   readonly directory: string;
+  readonly completeDirectory: string;
 
   constructor(config: ConfigService) {
     this.directory = path.resolve(
       config.get<string>('BACKUP_DIRECTORY')?.trim() ||
         DEFAULT_BACKUP_DIRECTORY,
     );
+    this.completeDirectory = path.join(this.directory, 'complete');
   }
 
   async onModuleInit(): Promise<void> {
@@ -40,6 +42,7 @@ export class BackupStorageService implements OnModuleInit {
   async ensureAccessible(): Promise<void> {
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o750 });
+      await mkdir(this.completeDirectory, { recursive: true, mode: 0o750 });
       await access(
         this.directory,
         constants.R_OK | constants.W_OK | constants.X_OK,
@@ -57,17 +60,31 @@ export class BackupStorageService implements OnModuleInit {
   > {
     await this.ensureAccessible();
     try {
-      const entries = await readdir(this.directory, { withFileTypes: true });
+      const roots = [this.completeDirectory, this.directory];
+      const located = (
+        await Promise.all(
+          roots.map(async (root) =>
+            (await readdir(root, { withFileTypes: true })).map((entry) => ({
+              entry,
+              root,
+            })),
+          ),
+        )
+      ).flat();
       return await Promise.all(
-        entries
+        located
           .filter(
-            (entry) =>
+            ({ entry }) =>
               entry.isFile() &&
               entry.name.startsWith('backup-') &&
               entry.name.endsWith('.zip'),
           )
-          .map(async (entry) => {
-            const filePath = path.join(this.directory, entry.name);
+          .filter(
+            ({ entry }, index, all) =>
+              all.findIndex((item) => item.entry.name === entry.name) === index,
+          )
+          .map(async ({ entry, root }) => {
+            const filePath = path.join(root, entry.name);
             const fileStat = await stat(filePath);
             return {
               filename: entry.name,
@@ -84,22 +101,32 @@ export class BackupStorageService implements OnModuleInit {
 
   async destination(filename: string): Promise<string> {
     await this.ensureAccessible();
-    return path.join(this.directory, filename);
+    return path.join(this.completeDirectory, filename);
   }
 
   async resolveExisting(filename: string): Promise<string> {
     const safeFilename = this.assertFilename(filename);
     await this.ensureAccessible();
-    const filePath = path.resolve(this.directory, safeFilename);
-    if (!filePath.startsWith(`${this.directory}${path.sep}`)) {
-      throw new BadRequestException('Nom de fichier invalide');
-    }
+    const candidates = [
+      path.resolve(this.completeDirectory, safeFilename),
+      path.resolve(this.directory, safeFilename),
+    ];
     this.logger.log(`[BACKUP_STORAGE] Fichier demandé: ${safeFilename}`);
-    this.logger.log(`[BACKUP_STORAGE] Chemin local résolu: ${filePath}`);
     try {
-      const fileStat = await stat(filePath);
-      if (!fileStat.isFile()) throw new Error('Not a file');
-      return filePath;
+      for (const filePath of candidates) {
+        try {
+          const fileStat = await stat(filePath);
+          if (fileStat.isFile()) {
+            this.logger.log(
+              `[BACKUP_STORAGE] Chemin local résolu: ${filePath}`,
+            );
+            return filePath;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      throw Object.assign(new Error('Not found'), { code: 'ENOENT' });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new NotFoundException('Sauvegarde introuvable');
