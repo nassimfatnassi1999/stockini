@@ -16,9 +16,10 @@ export interface KebabMenuItem {
 interface KebabMenuProps {
   items: KebabMenuItem[];
   triggerClassName?: string;
+  ariaLabel?: string;
 }
 
-export function KebabMenu({ items, triggerClassName }: KebabMenuProps) {
+export function KebabMenu({ items, triggerClassName, ariaLabel = 'Actions' }: KebabMenuProps) {
   const visibleItems = items.filter((i) => !i.hidden);
   if (visibleItems.length === 0) return null;
 
@@ -27,7 +28,7 @@ export function KebabMenu({ items, triggerClassName }: KebabMenuProps) {
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          aria-label="Actions"
+          aria-label={ariaLabel}
           className={
             triggerClassName ??
             'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 data-[state=open]:bg-muted data-[state=open]:text-text-primary'
