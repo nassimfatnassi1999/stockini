@@ -485,6 +485,12 @@ export const stockiniApi = {
   updateAlert: (id: string, data: Partial<Alert>) =>
     api.patch<Alert>(`/alerts/${id}`, data).then((r) => r.data),
   deleteAlert: (id: string) => api.delete(`/alerts/${id}`).then((r) => r.data),
+  deleteAllAlerts: () =>
+    api
+      .delete<{ success: true; deletedCount: number }>("/alerts/all", {
+        suppressErrorToast: true,
+      })
+      .then((r) => r.data),
   movements: (params?: StockMovementsQueryParams) =>
     api
       .get<
@@ -581,6 +587,13 @@ export const stockiniApi = {
   auditLogs: (query?: AuditLogQuery) =>
     api
       .get<AuditLogPaginatedResult>("/audit-logs", { params: query })
+      .then((r) => r.data),
+  deleteAllAuditLogs: () =>
+    api
+      .delete<{ success: true; deletedCount: number }>("/audit-logs/all", {
+        data: { confirmationText: "SUPPRIMER" },
+        suppressErrorToast: true,
+      })
       .then((r) => r.data),
   auditLogStats: () =>
     api.get<AuditLogStats>("/audit-logs/stats").then((r) => r.data),

@@ -1,10 +1,25 @@
-import { Body, Controller, Get, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Patch,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RequirePermissions } from '../auth/decorators';
+import { RequirePermissions, Roles } from '../auth/decorators';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { AuditLogsService } from './audit-logs.service';
 import { AuditRetentionService } from './audit-retention.service';
-import { AuditLogQueryDto, UpdateRetentionSettingsDto } from './dto/audit-log.dto';
+import {
+  AuditLogQueryDto,
+  DeleteAllAuditLogsDto,
+  UpdateRetentionSettingsDto,
+} from './dto/audit-log.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('audit-logs')
@@ -20,6 +35,17 @@ export class AuditLogsController {
   @Get()
   findAll(@Query() query: AuditLogQueryDto) {
     return this.auditLogsService.findAll(query);
+  }
+
+  @RequirePermissions('audit_logs.delete')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin')
+  @Delete('all')
+  removeAll(
+    @Request() req: { user: { id: string; email?: string } },
+    @Body() _dto: DeleteAllAuditLogsDto,
+  ) {
+    return this.auditLogsService.removeAll(req.user);
   }
 
   // ── Statistiques ──────────────────────────────────────────────────────────

@@ -1,4 +1,11 @@
-import { IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
@@ -49,4 +56,10 @@ export class UpdateRetentionSettingsDto {
   @Type(() => Boolean)
   @IsBoolean()
   compressExport?: boolean;
+}
+
+export class DeleteAllAuditLogsDto {
+  @IsString()
+  @IsIn(['SUPPRIMER'])
+  confirmationText!: string;
 }

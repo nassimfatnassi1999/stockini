@@ -29,11 +29,15 @@ import { SystemMonitorModule } from './system-monitor/system-monitor.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
 import { CommercialDocumentInterceptor } from './common/interceptors/commercial-document.interceptor';
+import { ScheduleModule } from '@nestjs/schedule';
+import { RetentionModule } from './retention/retention.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
+    RetentionModule,
     AuthModule,
     UsersModule,
     ProductsModule,

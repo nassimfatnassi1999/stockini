@@ -11,7 +11,8 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RequirePermissions } from '../auth/decorators';
+import { RequirePermissions, Roles } from '../auth/decorators';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { AlertsService } from './alerts.service';
 import { AlertQueryDto, CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
 
@@ -42,6 +43,14 @@ export class AlertsController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateAlertDto) {
     return this.alertsService.update(id, dto);
+  }
+
+  @RequirePermissions('alerts.delete')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin')
+  @Delete('all')
+  removeAll() {
+    return this.alertsService.removeAll();
   }
 
   @RequirePermissions('alerts.delete')

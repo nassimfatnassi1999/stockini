@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
 import { MulterModule } from '@nestjs/platform-express';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { DocumentsModule } from '../documents/documents.module';
@@ -10,7 +9,6 @@ import { IndependentExportsService } from './independent-exports.service';
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(),
     // Small spreadsheet imports keep the default memory storage. The backup
     // endpoint overrides this with dedicated disk storage and a configurable limit.
     MulterModule.register({ limits: { fileSize: 50 * 1024 * 1024 } }),

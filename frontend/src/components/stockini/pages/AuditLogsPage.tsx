@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { RotateCcw } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { RotateCcw, Trash2 } from 'lucide-react';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime } from '@/lib/stockini/format';
 import type { AuditLog, AuditLogQuery } from '@/lib/stockini/types';
@@ -12,6 +12,10 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { DataTablePagination } from '@/components/ui/DataTablePagination';
 import { useUrlPagination } from '@/hooks/useUrlPagination';
+import { usePermissions } from '@/lib/hooks/usePermissions';
+import { toast } from '@/lib/toast';
+import { BulkDeleteDialog } from '../shared/BulkDeleteDialog';
+import { isAdministratorRole } from '@/lib/bulk-delete';
 
 // ─── Action → badge variant ──────────────────────────────────────────────────
 
@@ -248,9 +252,13 @@ function FilterBar({
 const DEFAULT_QUERY: AuditLogQuery = { page: 1, limit: 10 };
 
 export function AuditLogsPage() {
+  const queryClient = useQueryClient();
+  const { role } = usePermissions();
   const { page, limit, setPage, setLimit } = useUrlPagination();
   const [filters, setFilters] = useState<AuditLogQuery>({});
   const [selected, setSelected] = useState<AuditLog | null>(null);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const isAdmin = isAdministratorRole(role);
   const query: AuditLogQuery = { ...filters, page, limit };
 
   const { data, isLoading, isFetching, error } = useQuery({
@@ -262,6 +270,20 @@ export function AuditLogsPage() {
   const logs = data?.data ?? [];
   const totalPages = data?.totalPages ?? 1;
   const total = data?.total ?? 0;
+  const deleteAllMutation = useMutation({
+    mutationFn: stockiniApi.deleteAllAuditLogs,
+    onSuccess: async ({ deletedCount }) => {
+      setShowDeleteAll(false);
+      setSelected(null);
+      setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ['stockini-audit-logs'] });
+      toast.success(`${deletedCount} log${deletedCount > 1 ? 's ont' : ' a'} été supprimé${deletedCount > 1 ? 's' : ''}.`);
+    },
+    onError: (error: unknown) => {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message ?? "Impossible de supprimer les logs d'audit. Réessayez.");
+    },
+  });
 
   const updateQuery = (patch: Partial<AuditLogQuery>) => {
     if (patch.page !== undefined) setPage(patch.page);
@@ -293,6 +315,20 @@ export function AuditLogsPage() {
           setLimit(DEFAULT_QUERY.limit ?? 10);
         }}
       />
+      {isAdmin && (query.source ?? 'active') === 'active' && (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={total === 0 || deleteAllMutation.isPending}
+            onClick={() => setShowDeleteAll(true)}
+          >
+            <Trash2 />
+            Supprimer tous les logs
+          </Button>
+        </div>
+      )}
 
       {/* Table */}
       {isLoading ? (
@@ -378,6 +414,16 @@ export function AuditLogsPage() {
       {selected && (
         <AuditDetailPanel log={selected} onClose={() => setSelected(null)} />
       )}
+      <BulkDeleteDialog
+        open={showDeleteAll}
+        title="Supprimer tous les logs d’audit ?"
+        message="Cette action supprimera définitivement l’historique des logs d’audit. Elle est irréversible."
+        confirmLabel="Supprimer tous les logs"
+        confirmationText="SUPPRIMER"
+        pending={deleteAllMutation.isPending}
+        onCancel={() => setShowDeleteAll(false)}
+        onConfirm={() => deleteAllMutation.mutate()}
+      />
     </div>
   );
 }

@@ -128,6 +128,7 @@ export const PERMISSIONS = {
   AUDIT_LOGS_VIEW: 'audit_logs.view',
   AUDIT_LOGS_EXPORT: 'audit_logs.export',
   AUDIT_LOGS_ARCHIVE: 'audit_logs.archive',
+  AUDIT_LOGS_DELETE: 'audit_logs.delete',
 
   // ── Permissions ───────────────────────────────────────────────────────────────
   PERMISSIONS_VIEW: 'permissions.view',
@@ -305,6 +306,7 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'audit_logs.view', module: 'audit_logs', action: 'view', label: 'Consulter', description: "Voir les journaux d'audit" },
   { code: 'audit_logs.export', module: 'audit_logs', action: 'export', label: 'Exporter', description: "Exporter les journaux d'audit" },
   { code: 'audit_logs.archive', module: 'audit_logs', action: 'archive', label: 'Archiver', description: "Lancer l'archivage des logs anciens vers MinIO (action irréversible, réservée admin)" },
+  { code: 'audit_logs.delete', module: 'audit_logs', action: 'delete', label: 'Supprimer', description: "Supprimer définitivement tous les journaux d'audit (réservé admin)" },
 
   // ── Permissions ───────────────────────────────────────────────────────────────
   { code: 'permissions.view', module: 'permissions', action: 'view', label: 'Consulter', description: 'Consulter les permissions des rôles' },

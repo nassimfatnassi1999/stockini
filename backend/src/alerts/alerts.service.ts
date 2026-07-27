@@ -3,17 +3,23 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { AlertQueryDto, CreateAlertDto, UpdateAlertDto } from './dto/alert.dto';
 import { buildPaginatedResponse } from '../common/utils/pagination.util';
+import { RetentionService } from '../retention/retention.service';
 
 @Injectable()
 export class AlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly retention: RetentionService,
   ) {}
 
   async create(dto: CreateAlertDto) {
     await this.settings.assertActiveOption('alert_types', dto.type);
-    return this.prisma.alert.create({ data: dto });
+    return this.prisma.$transaction(async (tx) => {
+      const alert = await tx.alert.create({ data: dto });
+      await this.retention.cleanupOldAlerts(tx);
+      return alert;
+    });
   }
 
   async findAll(query: AlertQueryDto) {
@@ -25,8 +31,15 @@ export class AlertsService {
         OR: [
           { title: { contains: query.search, mode: 'insensitive' as const } },
           { message: { contains: query.search, mode: 'insensitive' as const } },
-          { reference: { contains: query.search, mode: 'insensitive' as const } },
-          { designation: { contains: query.search, mode: 'insensitive' as const } },
+          {
+            reference: { contains: query.search, mode: 'insensitive' as const },
+          },
+          {
+            designation: {
+              contains: query.search,
+              mode: 'insensitive' as const,
+            },
+          },
         ],
       }),
     };
@@ -34,7 +47,7 @@ export class AlertsService {
       this.prisma.alert.findMany({
         where,
         include: { product: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -60,5 +73,13 @@ export class AlertsService {
 
   remove(id: string) {
     return this.prisma.alert.delete({ where: { id } });
+  }
+
+  async removeAll() {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.retention.lockAlerts(tx);
+      return tx.alert.deleteMany();
+    });
+    return { success: true, deletedCount: result.count };
   }
 }

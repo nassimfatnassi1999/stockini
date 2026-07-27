@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/utils/pagination.util';
+import { RetentionService } from '../retention/retention.service';
 
 export interface AuditParams {
   action: string;
@@ -29,19 +30,29 @@ export interface AuditFindAllQuery {
   source?: 'active' | 'archive';
 }
 
-const toJson = (v: Record<string, unknown> | null | undefined): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue =>
+const toJson = (
+  v: Record<string, unknown> | null | undefined,
+): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue =>
   v == null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
 
 @Injectable()
 export class AuditLogsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AuditLogsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly retention: RetentionService,
+  ) {}
 
   /**
    * Crée un audit log de façon atomique.
    * Passer `tx` pour l'inclure dans une transaction Prisma existante.
    */
-  async audit(params: AuditParams, tx?: Prisma.TransactionClient): Promise<void> {
-    const client = (tx ?? this.prisma) as Prisma.TransactionClient;
+  async audit(
+    params: AuditParams,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = tx ?? this.prisma;
     await client.auditLog.create({
       data: {
         action: params.action,
@@ -56,6 +67,7 @@ export class AuditLogsService {
         userAgent: params.userAgent ?? null,
       },
     });
+    await this.retention.cleanupOldAuditLogs(client);
   }
 
   /** Backward-compat alias used by legacy callers (users.service, database.service). */
@@ -94,31 +106,42 @@ export class AuditLogsService {
     }
 
     const baseWhere = {
-      ...(query?.entity && { entity: { equals: query.entity, mode: 'insensitive' as const } }),
-      ...(query?.action && { action: { contains: query.action, mode: 'insensitive' as const } }),
+      ...(query?.entity && {
+        entity: { equals: query.entity, mode: 'insensitive' as const },
+      }),
+      ...(query?.action && {
+        action: { contains: query.action, mode: 'insensitive' as const },
+      }),
       ...(query?.userId && { userId: query.userId }),
       ...((query?.dateFrom || query?.dateTo) && {
         createdAt: {
           ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
-          ...(query.dateTo && { lte: new Date(query.dateTo + 'T23:59:59.999Z') }),
+          ...(query.dateTo && {
+            lte: new Date(query.dateTo + 'T23:59:59.999Z'),
+          }),
         },
       }),
       ...(andConditions.length > 0 && { AND: andConditions }),
     };
 
     if (source === 'archive') {
-      const archiveWhere: Prisma.AuditLogArchiveWhereInput = baseWhere as Prisma.AuditLogArchiveWhereInput;
+      const archiveWhere: Prisma.AuditLogArchiveWhereInput =
+        baseWhere as Prisma.AuditLogArchiveWhereInput;
       const [raw, total] = await Promise.all([
         this.prisma.auditLogArchive.findMany({
           where: archiveWhere,
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           skip,
           take: limit,
         }),
         this.prisma.auditLogArchive.count({ where: archiveWhere }),
       ]);
 
-      const data = raw.map((r) => ({ ...r, user: null, _source: 'archive' as const }));
+      const data = raw.map((r) => ({
+        ...r,
+        user: null,
+        _source: 'archive' as const,
+      }));
       return buildPaginatedResponse(data, page, limit, total);
     }
 
@@ -127,8 +150,10 @@ export class AuditLogsService {
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
         where,
-        include: { user: { select: { id: true, fullName: true, email: true } } },
-        orderBy: { createdAt: 'desc' },
+        include: {
+          user: { select: { id: true, fullName: true, email: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
       }),
@@ -136,5 +161,21 @@ export class AuditLogsService {
     ]);
 
     return buildPaginatedResponse(data, page, limit, total);
+  }
+
+  async removeAll(actor: { id: string; email?: string }) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.retention.lockAuditLogs(tx);
+      return tx.auditLog.deleteMany();
+    });
+    // Application logging is intentional: writing into AuditLog here would make
+    // a supposedly empty purge self-recreating and complicate retention.
+    this.logger.warn({
+      event: 'audit_logs.bulk_deleted',
+      actorId: actor.id,
+      actorEmail: actor.email,
+      deletedCount: result.count,
+    });
+    return { success: true, deletedCount: result.count };
   }
 }

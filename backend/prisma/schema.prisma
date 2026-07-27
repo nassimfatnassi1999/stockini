@@ -659,6 +659,7 @@ model Alert {
   @@index([type])
   @@index([isRead])
   @@index([createdAt])
+  @@index([createdAt, id])
   @@index([productId])
 }
 
@@ -742,6 +743,7 @@ model AuditLog {
   @@index([action])
   @@index([entityId])
   @@index([createdAt])
+  @@index([createdAt, id])
 }
 
 model AuditLogArchive {

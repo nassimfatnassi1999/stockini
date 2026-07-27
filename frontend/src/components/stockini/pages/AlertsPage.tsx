@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Plus } from 'lucide-react';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { stockiniApi } from '@/lib/stockini/api';
@@ -20,6 +20,8 @@ import type { FieldConfig } from '../shared/form-utils';
 import { SearchBox } from '../shared/SearchBox';
 import { useUrlPagination } from '@/hooks/useUrlPagination';
 import { getValidPage } from '@/lib/data-table-pagination';
+import { BulkDeleteDialog } from '../shared/BulkDeleteDialog';
+import { isAdministratorRole } from '@/lib/bulk-delete';
 
 function stockValueClass(currentStock: number | null, minimumStock: number | null) {
   if (currentStock === null || minimumStock === null) return 'text-slate-700';
@@ -45,9 +47,11 @@ function AlertStatusBadge({ isRead }: { isRead: boolean }) {
 
 export function AlertsPage() {
   const queryClient = useQueryClient();
-  const { can } = usePermissions();
+  const { can, role } = usePermissions();
   const { page, limit, search, setSearch, urlSearch, updateParams } = useUrlPagination();
   const [editing, setEditing] = useState<Alert | null>(null);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const isAdmin = isAdministratorRole(role);
   const alertTypeOptions = useDropdownOptions('alert_types');
   const fields: FieldConfig[] = [
     { name: 'type', label: 'Type', type: 'select', required: true, options: alertTypeOptions },
@@ -90,12 +94,41 @@ export function AlertsPage() {
       toast.success('Alerte supprimée');
     },
   });
+  const deleteAllMutation = useMutation({
+    mutationFn: stockiniApi.deleteAllAlerts,
+    onSuccess: async ({ deletedCount }) => {
+      setShowDeleteAll(false);
+      updateParams({ page: 1 }, 'replace');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['stockini-alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['stockini-alerts-page'] }),
+      ]);
+      toast.success(`${deletedCount} alerte${deletedCount > 1 ? 's ont' : ' a'} été supprimée${deletedCount > 1 ? 's' : ''}.`);
+    },
+    onError: (error: unknown) => {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(message ?? 'Impossible de supprimer toutes les alertes. Réessayez.');
+    },
+  });
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <PageHeader title="Alertes" subtitle="Alertes de stock, factures impayées, retards achats et système." />
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une alerte…" />
+          {isAdmin && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowDeleteAll(true)}
+              disabled={(pagination?.totalItems ?? 0) === 0 || deleteAllMutation.isPending}
+            >
+              <Trash2 size={14} />
+              <span className="hidden sm:inline">Supprimer toutes les alertes</span>
+              <span className="sm:hidden">Tout supprimer</span>
+            </Button>
+          )}
           <Can permission="alerts.create">
             <Button type="button" size="sm" onClick={() => { setEditing({} as Alert); setForm(emptyForm(fields)); }}>
               <Plus size={14} />
@@ -168,6 +201,15 @@ export function AlertsPage() {
           saving={saveMutation.isPending}
         />
       )}
+      <BulkDeleteDialog
+        open={showDeleteAll}
+        title="Supprimer toutes les alertes ?"
+        message="Cette action supprimera définitivement toutes les alertes actuellement enregistrées. Cette action est irréversible."
+        confirmLabel="Supprimer toutes les alertes"
+        pending={deleteAllMutation.isPending}
+        onCancel={() => setShowDeleteAll(false)}
+        onConfirm={() => deleteAllMutation.mutate()}
+      />
     </>
   );
 }
