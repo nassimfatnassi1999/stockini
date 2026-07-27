@@ -23,6 +23,7 @@ import type {
   DashboardReport,
   CreateExpensePayload,
   Expense,
+  ExpenseDetails,
   ExpensesQueryParams,
   ReportOverview,
   ReportOverviewQuery,
@@ -412,9 +413,11 @@ export const stockiniApi = {
         params: cleanPaginationParams(params),
       })
       .then((r) => r.data),
+  expense: (id: string) =>
+    api.get<ExpenseDetails>(`/expenses/${id}`).then((r) => r.data),
   createExpense: (data: CreateExpensePayload) =>
     api.post<Expense>("/expenses", data).then((r) => r.data),
-  cancelExpense: (id: string, reason?: string) =>
+  deleteExpense: (id: string, reason?: string) =>
     api.patch<Expense>(`/expenses/${id}/cancel`, { reason }).then((r) => r.data),
   paySale: (
     saleId: string,

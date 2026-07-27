@@ -352,8 +352,10 @@ export interface Expense {
   amount: number | string;
   paymentSource: TreasuryAccount;
   category: string;
+  subcategory?: string | null;
   expenseDate: string;
   description: string;
+  observations?: string | null;
   supplierId?: Id | null;
   purchaseId?: Id | null;
   attachmentUrl?: string | null;
@@ -367,6 +369,11 @@ export interface Expense {
   supplier?: Supplier | null;
   purchase?: Pick<Purchase, "id" | "orderNumber"> | null;
   createdBy?: { id: Id; fullName: string; email: string } | null;
+}
+
+export interface ExpenseDetails extends Expense {
+  caisseMovements: CaisseMovement[];
+  auditLogs: AuditLog[];
 }
 
 export interface ExpensesQueryParams {
@@ -387,8 +394,10 @@ export interface CreateExpensePayload {
   amount: number;
   paymentSource: TreasuryAccount;
   category: string;
+  subcategory?: string;
   date: string;
   description: string;
+  observations?: string;
   supplierId?: string;
   purchaseId?: string;
   attachmentUrl?: string;

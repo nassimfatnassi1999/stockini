@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Eye, Plus, Trash2 } from 'lucide-react';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,9 +23,10 @@ import { useUrlPagination } from '@/hooks/useUrlPagination';
 import { stockiniApi } from '@/lib/stockini/api';
 import { dateTime, isPurchaseOrder, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
-import type { CaisseMovement, CaisseMovementType, ExpenseStatus, Purchase, TreasuryAccount } from '@/lib/stockini/types';
+import type { CaisseMovement, CaisseMovementType, Expense, ExpenseStatus, Purchase, TreasuryAccount } from '@/lib/stockini/types';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { ClearHistoryModal } from './shared/ClearHistoryModal';
+import { KebabMenu } from './shared/KebabMenu';
 
 function PageHeader({ title, subtitle, actions }: { title: string; subtitle: string; actions?: React.ReactNode }) {
   return (
@@ -57,6 +58,24 @@ function PaymentMethodLabel({ method }: { method: string }) {
   return <>{labels[method] ?? method}</>;
 }
 
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="border-b border-border pb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">{title}</h3>
+      <div className="grid gap-x-5 gap-y-2 sm:grid-cols-2">{children}</div>
+    </section>
+  );
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-muted/40 px-3 py-2">
+      <div className="text-[11px] text-text-muted">{label}</div>
+      <div className={`mt-0.5 break-words text-sm font-medium text-text-primary ${mono ? 'font-mono' : ''}`}>{value ?? '-'}</div>
+    </div>
+  );
+}
+
 const CAISSE_MOVEMENT_LABELS: Record<CaisseMovementType, string> = {
   ENCAISSEMENT_VENTE: 'Encaissement vente',
   CUSTOMER_CHANGE_OUT: 'Monnaie client',
@@ -68,7 +87,7 @@ const CAISSE_MOVEMENT_LABELS: Record<CaisseMovementType, string> = {
   ANNULATION_VENTE: 'Annulation vente',
   REFUND_OUT: 'Remboursement avoir',
   ANNULATION_ACHAT: 'Annulation achat',
-  ANNULATION_DEPENSE: 'Annulation dépense',
+  ANNULATION_DEPENSE: 'Suppression dépense',
   CASH_RESET: 'Remise à zéro',
 };
 
@@ -94,7 +113,7 @@ const PAYMENT_SOURCE_LABELS: Record<TreasuryAccount, string> = {
 
 const EXPENSE_STATUS_LABELS: Record<ExpenseStatus, string> = {
   ACTIVE: 'Active',
-  CANCELLED: 'Annulée',
+  CANCELLED: 'Supprimée',
 };
 
 const FALLBACK_EXPENSE_CATEGORIES = [
@@ -137,11 +156,13 @@ export function DepensesPage() {
   const { can } = usePermissions();
   const canClearHistory = can('finance.history.clear');
   const canCreateExpense = can('expenses.create');
-  const canCancelExpense = can('expenses.cancel');
+  const canDeleteExpense = can('expenses.delete') || can('expenses.cancel');
+  const canViewExpense = can('expenses.view') || can('expenses.read');
   const [activeTab, setActiveTab] = useState<'general' | 'invoices' | 'history' | 'caisse'>('general');
   const [payTarget, setPayTarget] = useState<Purchase | null>(null);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [cancelExpenseId, setCancelExpenseId] = useState<string | null>(null);
+  const [deleteExpenseTarget, setDeleteExpenseTarget] = useState<Expense | null>(null);
+  const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null);
   const [showClearSupplierModal, setShowClearSupplierModal] = useState(false);
   const [showClearCaisseModal, setShowClearCaisseModal] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', method: 'CASH', note: '' });
@@ -149,8 +170,10 @@ export function DepensesPage() {
     amount: '',
     paymentSource: 'PHYSICAL_CASH' as TreasuryAccount,
     category: '',
+    subcategory: '',
     date: '',
     description: '',
+    observations: '',
     supplierId: '',
     purchaseId: '',
     attachmentUrl: '',
@@ -216,6 +239,11 @@ export function DepensesPage() {
         status: expenseFilters.status || undefined,
       }),
   });
+  const expenseDetailsQuery = useQuery({
+    queryKey: ['stockini-expense-details', selectedExpenseId],
+    queryFn: () => stockiniApi.expense(selectedExpenseId!),
+    enabled: !!selectedExpenseId,
+  });
   const purchaseOptionsQuery = useQuery({
     queryKey: ['stockini-purchases-options', showExpenseModal],
     queryFn: () => stockiniApi.purchases({ page: 1, limit: 100 }),
@@ -264,8 +292,10 @@ export function DepensesPage() {
         amount: Number(expenseForm.amount),
         paymentSource: expenseForm.paymentSource,
         category: expenseForm.category,
+        subcategory: expenseForm.subcategory || undefined,
         date: expenseForm.date,
         description: expenseForm.description,
+        observations: expenseForm.observations || undefined,
         supplierId: expenseForm.supplierId || undefined,
         purchaseId: expenseForm.purchaseId || undefined,
         attachmentUrl: expenseForm.attachmentUrl || undefined,
@@ -279,8 +309,10 @@ export function DepensesPage() {
         amount: '',
         paymentSource: 'PHYSICAL_CASH',
         category: '',
+        subcategory: '',
         date: new Date().toISOString().slice(0, 10),
         description: '',
+        observations: '',
         supplierId: '',
         purchaseId: '',
         attachmentUrl: '',
@@ -293,18 +325,24 @@ export function DepensesPage() {
     },
   });
 
-  const cancelExpenseMutation = useMutation({
-    mutationFn: (id: string) => stockiniApi.cancelExpense(id),
+  const deleteExpenseMutation = useMutation({
+    mutationFn: (id: string) => stockiniApi.deleteExpense(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stockini-expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['stockini-expense-details'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
-      setCancelExpenseId(null);
-      toast.success('Dépense annulée');
+      queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['reports-overview'] });
+      queryClient.invalidateQueries({ predicate: (query) => String(query.queryKey[0]).startsWith('report-') });
+      setDeleteExpenseTarget(null);
+      toast.success('Dépense supprimée et montant recrédité');
     },
     onError: (error: unknown) => {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur lors de l\'annulation de la dépense');
+      toast.error(msg ?? 'Erreur lors de la suppression de la dépense');
     },
   });
 
@@ -345,6 +383,10 @@ export function DepensesPage() {
 
   const caisseIsPositive = (type: CaisseMovementType) =>
     type === 'ENCAISSEMENT_VENTE' || type === 'DEPOT_MANUEL' || type === 'ANNULATION_ACHAT' || type === 'ANNULATION_DEPENSE';
+
+  const expenseDetails = expenseDetailsQuery.data;
+  const initialExpenseMovement = expenseDetails?.caisseMovements.find((movement) => movement.type === 'DEPENSE_GENERALE');
+  const reversalExpenseMovement = expenseDetails?.caisseMovements.find((movement) => movement.type === 'ANNULATION_DEPENSE');
 
   return (
     <>
@@ -417,7 +459,7 @@ export function DepensesPage() {
               <select value={expenseFilters.status} onChange={(e) => setExpenseFilters((f) => ({ ...f, status: e.target.value as '' | ExpenseStatus }))} className="app-select h-9 text-sm">
                 <option value="">Tous statuts</option>
                 <option value="ACTIVE">Active</option>
-                <option value="CANCELLED">Annulée</option>
+                <option value="CANCELLED">Supprimée</option>
               </select>
               <div className="grid grid-cols-2 gap-2">
                 <Input type="date" value={expenseFilters.dateFrom} onChange={(e) => setExpenseFilters((f) => ({ ...f, dateFrom: e.target.value }))} className="h-9" />
@@ -456,11 +498,25 @@ export function DepensesPage() {
                     </TableCell>
                     <TableCell className="text-text-secondary">{expense.createdBy?.fullName ?? '-'}</TableCell>
                     <TableCell className="text-right">
-                      {canCancelExpense && expense.status === 'ACTIVE' ? (
-                        <Button type="button" variant="outline" size="sm" onClick={() => setCancelExpenseId(expense.id)}>
-                          <XCircle size={14} /> Annuler
-                        </Button>
-                      ) : '-'}
+                      <KebabMenu
+                        items={[
+                          {
+                            label: 'Voir les détails',
+                            icon: <Eye size={14} />,
+                            onClick: () => setSelectedExpenseId(expense.id),
+                            hidden: !canViewExpense,
+                          },
+                          { divider: true, hidden: !canDeleteExpense || expense.status !== 'ACTIVE' },
+                          {
+                            label: 'Supprimer la dépense',
+                            icon: <Trash2 size={14} />,
+                            onClick: () => setDeleteExpenseTarget(expense),
+                            variant: 'destructive',
+                            hidden: !canDeleteExpense || expense.status !== 'ACTIVE',
+                          },
+                        ]}
+                        ariaLabel={`Actions pour ${expense.reference}`}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -741,8 +797,16 @@ export function DepensesPage() {
             </select>
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="expense-subcategory">Sous catégorie</Label>
+            <Input id="expense-subcategory" value={expenseForm.subcategory} onChange={(e) => setExpenseForm((f) => ({ ...f, subcategory: e.target.value }))} placeholder="Sous catégorie (optionnel)" />
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="expense-description">Description / note *</Label>
             <Textarea id="expense-description" value={expenseForm.description} onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))} required rows={3} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="expense-observations">Observations</Label>
+            <Textarea id="expense-observations" value={expenseForm.observations} onChange={(e) => setExpenseForm((f) => ({ ...f, observations: e.target.value }))} rows={2} placeholder="Informations complémentaires (optionnel)" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -770,23 +834,119 @@ export function DepensesPage() {
       </SlideOver>
 
       <SlideOver
-        title="Annuler la dépense"
-        subtitle="Un mouvement inverse sera créé"
-        open={!!cancelExpenseId}
-        onClose={() => setCancelExpenseId(null)}
-        width={420}
+        title="Détails de la dépense"
+        subtitle={expenseDetails?.reference}
+        open={!!selectedExpenseId}
+        onClose={() => setSelectedExpenseId(null)}
+        width={720}
+      >
+        {expenseDetailsQuery.isLoading && <p className="py-12 text-center text-sm text-text-secondary">Chargement des détails...</p>}
+        {expenseDetailsQuery.isError && <p className="py-12 text-center text-sm text-red-600">Impossible de charger les détails de la dépense.</p>}
+        {expenseDetails && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between rounded-xl border border-border bg-white p-4 shadow-sm">
+              <div>
+                <div className="font-mono text-sm font-semibold text-primary">{expenseDetails.reference}</div>
+                <div className="mt-1 text-xs text-text-muted">{expenseDetails.category}</div>
+              </div>
+              <Badge className={expenseDetails.status === 'ACTIVE' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}>
+                {EXPENSE_STATUS_LABELS[expenseDetails.status]}
+              </Badge>
+            </div>
+
+            <DetailSection title="Informations générales">
+              <DetailRow label="Référence" value={expenseDetails.reference} mono />
+              <DetailRow label="Date" value={new Date(expenseDetails.expenseDate).toLocaleDateString('fr-TN')} />
+              <DetailRow label="Heure" value={new Date(expenseDetails.expenseDate).toLocaleTimeString('fr-TN', { hour: '2-digit', minute: '2-digit' })} />
+              <DetailRow label="Utilisateur" value={expenseDetails.createdBy?.fullName ?? '-'} />
+              <DetailRow label="Fournisseur" value={expenseDetails.supplier?.name ?? '-'} />
+              <DetailRow label="Catégorie" value={expenseDetails.category} />
+              <DetailRow label="Sous catégorie" value={expenseDetails.subcategory ?? '-'} />
+              <DetailRow label="Description" value={expenseDetails.description} />
+              <DetailRow label="Observations" value={expenseDetails.observations ?? '-'} />
+            </DetailSection>
+
+            <DetailSection title="Informations financières">
+              <DetailRow label="Montant" value={money(expenseDetails.amount)} mono />
+              <DetailRow label="Source paiement" value={PAYMENT_SOURCE_LABELS[expenseDetails.paymentSource]} />
+              <DetailRow label="Caisse physique" value={expenseDetails.paymentSource === 'PHYSICAL_CASH' ? money(expenseDetails.amount) : '-'} mono />
+              <DetailRow label="Banque" value={expenseDetails.paymentSource === 'BANK_TREASURY' ? money(expenseDetails.amount) : '-'} mono />
+              <DetailRow label="Trésorerie" value={PAYMENT_SOURCE_LABELS[expenseDetails.paymentSource]} />
+            </DetailSection>
+
+            <DetailSection title="Impact financier">
+              <DetailRow label="Avant opération" value={initialExpenseMovement ? money(initialExpenseMovement.ancienSolde) : '-'} mono />
+              <DetailRow label="Mouvement effectué" value={`-${money(expenseDetails.amount)}`} mono />
+              <DetailRow label="Solde après opération" value={initialExpenseMovement ? money(initialExpenseMovement.nouveauSolde) : '-'} mono />
+              <DetailRow label="Contre-écriture" value={reversalExpenseMovement ? `+${money(reversalExpenseMovement.montant)}` : '-'} mono />
+            </DetailSection>
+
+            <DetailSection title="Traçabilité">
+              <DetailRow label="ID" value={expenseDetails.id} mono />
+              <DetailRow label="Date création" value={dateTime(expenseDetails.createdAt)} />
+              <DetailRow label="Dernière modification" value={dateTime(expenseDetails.updatedAt)} />
+              <DetailRow label="Journal d’audit" value={`${expenseDetails.auditLogs.length} événement(s)`} />
+            </DetailSection>
+
+            <section className="space-y-2">
+              <h3 className="border-b border-border pb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">Journal d’audit</h3>
+              {expenseDetails.auditLogs.length === 0 ? (
+                <p className="rounded-lg bg-muted/40 px-3 py-4 text-center text-sm text-text-muted">Aucun événement d’audit.</p>
+              ) : (
+                <div className="space-y-2">
+                  {expenseDetails.auditLogs.map((log) => (
+                    <div key={log.id} className="rounded-lg border border-border px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-mono font-semibold text-text-primary">{log.action}</span>
+                        <span className="text-xs text-text-muted">{dateTime(log.createdAt)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-text-secondary">{log.user?.fullName ?? log.userName ?? 'Système'}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </SlideOver>
+
+      <SlideOver
+        title="Supprimer cette dépense ?"
+        subtitle={deleteExpenseTarget?.reference}
+        open={!!deleteExpenseTarget}
+        onClose={() => setDeleteExpenseTarget(null)}
+        width={460}
         footer={
           <>
-            <Button type="button" variant="outline" size="sm" onClick={() => setCancelExpenseId(null)}>Retour</Button>
-            <Button type="button" size="sm" disabled={cancelExpenseMutation.isPending || !cancelExpenseId} onClick={() => cancelExpenseId && cancelExpenseMutation.mutate(cancelExpenseId)}>
-              <XCircle size={14} />{cancelExpenseMutation.isPending ? 'Annulation...' : 'Confirmer'}
+            <Button type="button" variant="outline" size="sm" disabled={deleteExpenseMutation.isPending} onClick={() => setDeleteExpenseTarget(null)}>Annuler</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={deleteExpenseMutation.isPending || !deleteExpenseTarget}
+              onClick={() => deleteExpenseTarget && deleteExpenseMutation.mutate(deleteExpenseTarget.id)}
+            >
+              <Trash2 size={14} />{deleteExpenseMutation.isPending ? 'Suppression...' : 'Supprimer'}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-text-secondary">
-          La dépense sera conservée avec le statut annulé. Le solde de la source de paiement sera régularisé par un mouvement inverse.
-        </p>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+            <AlertTriangle className="mt-0.5 shrink-0 text-red-700" size={20} />
+            <p className="text-sm leading-6 text-red-900">
+              Cette opération supprimera la dépense et recréditera automatiquement le montant dans la source de paiement utilisée.
+            </p>
+          </div>
+          {deleteExpenseTarget && (
+            <div className="rounded-xl border border-border p-4 text-sm">
+              <div className="flex justify-between gap-4"><span className="text-text-muted">Référence</span><span className="font-mono font-semibold">{deleteExpenseTarget.reference}</span></div>
+              <div className="mt-2 flex justify-between gap-4"><span className="text-text-muted">Montant recrédité</span><span className="font-mono font-semibold text-emerald-600">+{money(deleteExpenseTarget.amount)}</span></div>
+              <div className="mt-2 flex justify-between gap-4"><span className="text-text-muted">Source</span><span className="font-medium">{PAYMENT_SOURCE_LABELS[deleteExpenseTarget.paymentSource]}</span></div>
+            </div>
+          )}
+          <p className="text-sm text-text-secondary">Cette action sera enregistrée dans l’audit.</p>
+        </div>
       </SlideOver>
 
       {/* Modal paiement fournisseur */}

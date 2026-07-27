@@ -64,11 +64,19 @@ export class CreateExpenseDto {
   @IsString()
   category!: string;
 
+  @IsOptional()
+  @IsString()
+  subcategory?: string;
+
   @IsDateString()
   date!: string;
 
   @IsString()
   description!: string;
+
+  @IsOptional()
+  @IsString()
+  observations?: string;
 
   @IsOptional()
   @IsString()

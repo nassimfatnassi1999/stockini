@@ -616,8 +616,10 @@ model Expense {
   amount          Decimal          @db.Decimal(12, 3)
   paymentSource   TreasuryAccount
   category        String
+  subcategory     String?
   expenseDate     DateTime
   description     String
+  observations    String?
   supplierId      String?
   purchaseId      String?
   attachmentUrl   String?

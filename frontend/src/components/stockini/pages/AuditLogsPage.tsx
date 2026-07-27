@@ -22,10 +22,11 @@ import { isAdministratorRole } from '@/lib/bulk-delete';
 type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'danger' | 'muted' | 'outline' | 'active' | 'inactive' | 'admin' | 'stock' | 'seller' | 'purchase';
 
 function actionVariant(action: string): BadgeVariant {
-  if (action.includes('created')) return 'success';
-  if (action.includes('validated')) return 'active';
-  if (action.includes('deleted') || action.includes('cancelled') || action.includes('annulation')) return 'danger';
-  if (action.includes('reset') || action.includes('cleared')) return 'warning';
+  const normalized = action.toLowerCase();
+  if (normalized.includes('created')) return 'success';
+  if (normalized.includes('validated')) return 'active';
+  if (normalized.includes('delete') || normalized.includes('cancelled') || normalized.includes('annulation')) return 'danger';
+  if (normalized.includes('reset') || normalized.includes('cleared')) return 'warning';
   if (action.startsWith('caisse.')) return 'purchase';
   if (action.startsWith('stock.')) return 'stock';
   if (action.startsWith('payment.')) return 'seller';
@@ -47,12 +48,14 @@ function actionLabel(action: string): string {
     'payment.sale_payment': 'Paiement client',
     'payment.purchase_payment': 'Paiement fournisseur',
     'payment.deleted': 'Paiement supprimé',
+    DELETE_EXPENSE: 'Dépense supprimée',
     'caisse.encaissement_vente': 'Encaissement',
     'caisse.decaissement_achat': 'Décaissement',
     'caisse.depot': 'Dépôt manuel',
     'caisse.retrait': 'Retrait manuel',
     'caisse.annulation_vente': 'Annulation encaissement',
     'caisse.annulation_achat': 'Annulation décaissement',
+    'caisse.annulation_depense': 'Contre-écriture dépense',
     'caisse.reset': 'Remise à zéro',
     'caisse.history_cleared': 'Historique effacé',
     'stock.entry': 'Entrée stock',
