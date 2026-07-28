@@ -665,7 +665,8 @@ export class SalesService {
           item.unitPrice ?? this.salePriceHt(product);
         const calculation = calculateSalesLine({
           purchasePriceHt,
-          ...(purchasePriceHt <= 0 && {
+          purchasePriceTtc: product.purchasePriceTtc?.toString(),
+          ...((purchasePriceHt <= 0 || allowEditUnitPriceHt) && {
             grossSalePriceHt: submittedGrossPriceHt,
           }),
           marginPercent,
@@ -673,6 +674,22 @@ export class SalesService {
           taxPercent: tvaRate,
           quantity: item.quantity,
         });
+        this.logger.debug(JSON.stringify({
+          event: 'sale.price_resolution',
+          productId: product.id,
+          reference: product.reference,
+          purchasePriceHt: product.purchasePrice.toString(),
+          purchasePriceTtc: product.purchasePriceTtc?.toString() ?? null,
+          storedSalePriceHt: product.salePrice.toString(),
+          storedSalePriceTtc: salesRound3(Number(product.salePrice) * (1 + tvaRate / 100)),
+          defaultMarginPercent: marginPercent,
+          resolvedSalePriceHt: calculation.grossSalePriceHt,
+          resolvedSalePriceTtc: calculation.grossSalePriceTtc,
+          saleDiscountPercent: discountPercent,
+          resolvedNetSalePriceHt: calculation.netSalePriceHt,
+          resolvedNetSalePriceTtc: calculation.netSalePriceTtc,
+          vatRate: tvaRate,
+        }));
         const unitPrice = calculation.grossSalePriceHt;
         if (unitPrice < 0) {
           throw new BadRequestException(
@@ -733,6 +750,7 @@ export class SalesService {
             purchasePriceHt: Number(
               productsById.get(item.productId)!.purchasePrice,
             ),
+            purchasePriceTtc: productsById.get(item.productId)!.purchasePriceTtc?.toString(),
             grossSalePriceHt: item.unitPrice,
             marginPercent: item.marginPercent,
             discountPercent: item.discountPercent,
@@ -1431,7 +1449,8 @@ export class SalesService {
         const tvaRate = Number(product.tva ?? 0);
         const values = calculateSalesLine({
           purchasePriceHt,
-          ...(purchasePriceHt <= 0 && { grossSalePriceHt: item.unitPrice }),
+          purchasePriceTtc: product.purchasePriceTtc?.toString(),
+          ...((purchasePriceHt <= 0 || allowEditUnitPriceHt) && { grossSalePriceHt: item.unitPrice }),
           marginPercent,
           discountPercent,
           taxPercent: tvaRate,

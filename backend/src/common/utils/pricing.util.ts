@@ -1,14 +1,20 @@
+import Decimal from 'decimal.js';
+
 export const DEFAULT_TVA = 19;
 export const MARGIN_RATE = 1.4;
+Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
+const r3 = (value: Decimal.Value) => new Decimal(value).toDecimalPlaces(3, Decimal.ROUND_HALF_UP).toNumber();
 
 export function calcPurchasePriceTtc(
   priceHt: number,
   tva: number = DEFAULT_TVA,
 ): number {
-  return Math.round(priceHt * (1 + tva / 100) * 1000) / 1000;
+  return r3(new Decimal(priceHt).mul(new Decimal(1).plus(new Decimal(tva).div(100))));
 }
 
-/** salePrice stored in DB is always HT: purchaseHT × MARGIN_RATE (tva param kept for signature compat) */
-export function calcSalePrice(priceHt: number, _tva?: number): number {
-  return Math.round(priceHt * MARGIN_RATE * 1000) / 1000;
+/** Prix catalogue HT dérivé de la règle métier appliquée au PA TTC arrondi. */
+export function calcSalePrice(priceHt: number, tva: number = DEFAULT_TVA): number {
+  const vatFactor = new Decimal(1).plus(new Decimal(tva).div(100));
+  const purchaseTtc = new Decimal(calcPurchasePriceTtc(priceHt, tva));
+  return r3(purchaseTtc.mul(MARGIN_RATE).div(vatFactor));
 }

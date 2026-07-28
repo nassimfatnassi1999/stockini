@@ -43,6 +43,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
 
   const handleProductSelect = (product: Product) => {
     const purchasePriceHt = round3(Number(product.purchasePrice));
+    const purchasePriceTtc = round3(Number(product.purchasePriceTtc));
     // salePrice is stored as HT; use it directly when no purchasePrice is available
     const puHt = purchasePriceHt > 0
       ? 0 // will be computed by recalculateSaleLine from defaultMarginPercent
@@ -57,6 +58,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
         brand: product.brand?.name ?? product.category?.name ?? '',
         puHt,
         purchasePriceHt,
+        purchasePriceTtc,
         defaultMarginPercent: DEFAULT_MARGIN_PERCENT,
         remisePercent: 0,
         quantity: Math.max(line.quantity, 1),
@@ -158,7 +160,7 @@ export function ProductLineRow({ line, lineNumber, hasLowMarginPermission, canEd
         />
       </td>
 
-      {/* PU HT — éditable si canEditUnitPriceHt, sinon lecture seule */}
+      {/* PU HT brut — immuable pendant l'application d'une remise */}
       <td className={`min-w-[80px] ${CELL}`}>
         {canEditUnitPriceHt ? (
           <input

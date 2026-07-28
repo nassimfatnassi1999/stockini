@@ -20,6 +20,8 @@ export interface RegisterLine {
   quantity: number;
   puHt: number;
   purchasePriceHt: number;
+  /** Coût d'achat TTC net, distinct du coût HT. */
+  purchasePriceTtc: number;
   /** Base margin % before discount (stored per-line, independent of other lines) */
   defaultMarginPercent: number;
   remisePercent: number;
@@ -85,6 +87,7 @@ export function createEmptyLine(id: string = generateClientId()): RegisterLine {
     quantity: 1,
     puHt: 0,
     purchasePriceHt: 0,
+    purchasePriceTtc: 0,
     defaultMarginPercent: DEFAULT_MARGIN_PERCENT,
     remisePercent: 0,
     tvaPercent: 19,
@@ -121,6 +124,7 @@ export function recalculateSaleLine(line: RegisterLine): RegisterLine {
   if (line.purchasePriceHt > 0) {
     const result = calculateSalesLine({
       purchasePriceHt: line.purchasePriceHt,
+      purchasePriceTtc: line.purchasePriceTtc,
       ...(line.manualUnitPriceHt && { grossSalePriceHt: line.puHt }),
       marginPercent: line.defaultMarginPercent,
       discountPercent: line.remisePercent,
@@ -152,6 +156,7 @@ export function calculateSalesDocumentTotals(lines: RegisterLine[]): DocumentTot
   const filled = lines.filter(isFilledLine);
   const calculations = filled.map((line) => calculateSalesLine({
     purchasePriceHt: line.purchasePriceHt,
+    purchasePriceTtc: line.purchasePriceTtc,
     grossSalePriceHt: line.puHt,
     marginPercent: line.defaultMarginPercent,
     discountPercent: line.remisePercent,

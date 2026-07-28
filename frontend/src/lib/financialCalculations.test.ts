@@ -24,7 +24,7 @@ test('frontend: remises limites et seuil de marge', () => {
 
   const restoredNetPu = calculateSalesLine({ purchasePriceHt: 68.989, grossSalePriceHt: 82.787,
     marginPercent: 40, discountPercent: 20, taxPercent: 19, quantity: 1 });
-  assert.equal(restoredNetPu.netSalePriceHt, 77.268);
+  assert.equal(restoredNetPu.netSalePriceHt, 66.23);
 });
 
 test('frontend: le rechargement du brouillon ne réapplique pas la remise', () => {
@@ -32,6 +32,7 @@ test('frontend: le rechargement du brouillon ne réapplique pas la remise', () =
     ...createEmptyLine('draft-line'),
     productId: 'product-1',
     purchasePriceHt: 68.989,
+    purchasePriceTtc: 82.097,
     puHt: 82.787,
     defaultMarginPercent: 40,
     remisePercent: 20,
@@ -42,7 +43,23 @@ test('frontend: le rechargement du brouillon ne réapplique pas la remise', () =
   const restoredAgain = recalculateSaleLine(restored);
   assert.deepEqual({ puHt: restoredAgain.puHt, marginPct: restoredAgain.margePercent,
     margin: restoredAgain.margeAmount, netHt: restoredAgain.netHt, netTtc: restoredAgain.netTtc },
-  { puHt: 96.585, marginPct: 12, margin: 8.279, netHt: 77.268, netTtc: 91.949 });
+  { puHt: 82.787, marginPct: -3.999, margin: -2.759, netHt: 66.23, netTtc: 78.814 });
+});
+
+test('frontend: PA TTC 70, majoration 40% et remise réversible de 15%', () => {
+  const base = recalculateSaleLine({ ...createEmptyLine('focal'), productId: 'p', purchasePriceHt: 58.824, purchasePriceTtc: 70, defaultMarginPercent: 40, tvaPercent: 19, quantity: 1, manualUnitPriceHt: false });
+  const discounted = recalculateSaleLine({ ...base, remisePercent: 15 });
+  const restored = recalculateSaleLine({ ...discounted, remisePercent: 0 });
+  assert.deepEqual({ grossHt: base.puHt, grossTtc: base.netTtc, netHt: discounted.netHt, netTtc: discounted.netTtc }, { grossHt: 82.353, grossTtc: 98, netHt: 70, netTtc: 83.3 });
+  assert.equal(restored.puHt, 82.353);
+  assert.equal(restored.netTtc, 98);
+});
+
+test('frontend: changer la quantité ne modifie pas le prix unitaire', () => {
+  const one = recalculateSaleLine({ ...createEmptyLine('qty'), productId: 'p', purchasePriceHt: 100, purchasePriceTtc: 119, defaultMarginPercent: 40, tvaPercent: 19, quantity: 1, manualUnitPriceHt: false });
+  const three = recalculateSaleLine({ ...one, quantity: 3 });
+  assert.equal(three.puHt, one.puHt);
+  assert.equal(three.netTtc, Number((one.netTtc * 3).toFixed(3)));
 });
 
 test('frontend: achat, somme des lignes et timbre saisi', () => {

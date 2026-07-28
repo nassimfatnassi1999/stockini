@@ -1,6 +1,34 @@
-import { calculateMarginAmount, calculateMarginOnCostPercent, calculateMarkupPercent, calculateSalesLine, calculateSalesTotals } from './sales-calculations';
+import { calculateMarginAmount, calculateMarginOnCostPercent, calculateMarkupPercent, calculateSalePriceFromPurchaseTtc, calculateSalesLine, calculateSalesTotals, salesRound3 } from './sales-calculations';
 
 describe('canonical sales calculations', () => {
+  it('calcule FD01B13120L depuis le PA TTC sans confusion HT/TTC', () => {
+    expect(calculateSalePriceFromPurchaseTtc({ purchaseTtc: 70, markupPercent: 40, discountPercent: 15, vatPercent: 19 })).toEqual({
+      saleTtcGross: 98,
+      saleHtGross: 82.353,
+      discountAmountTtc: 14.7,
+      saleTtcNet: 83.3,
+      saleHtNet: 70,
+    });
+    expect(calculateSalesLine({ purchasePriceHt: 58.824, purchasePriceTtc: 70, marginPercent: 40, discountPercent: 15, taxPercent: 19, quantity: 1 })).toMatchObject({
+      grossSalePriceHt: 82.353,
+      grossSalePriceTtc: 98,
+      netSalePriceHt: 70,
+      netSalePriceTtc: 83.3,
+      discountAmountTtc: 14.7,
+      totalTtc: 83.3,
+    });
+  });
+
+  it('conserve le cas PA HT=100 et applique la remise au brut TTC', () => {
+    const line = calculateSalesLine({ purchasePriceHt: 100, purchasePriceTtc: 119, marginPercent: 40, discountPercent: 15, taxPercent: 19, quantity: 1 });
+    expect(line).toMatchObject({ grossSalePriceHt: 140, grossSalePriceTtc: 166.6, netSalePriceTtc: 141.61, netSalePriceHt: 119 });
+  });
+
+  it('respecte un prix brut manuel explicite et ne le dérive pas à nouveau', () => {
+    const line = calculateSalesLine({ purchasePriceHt: 100, purchasePriceTtc: 119, grossSalePriceHt: 150, marginPercent: 40, discountPercent: 10, taxPercent: 19, quantity: 2 });
+    expect(line.grossSalePriceHt).toBe(150);
+    expect(line.totalTtc).toBe(321.3);
+  });
   it.each([
     ['sans remise', 100, 120, 20, 20],
     ['remise fournisseur BATTERIE L2', 207.742, 227.063, 19.321, 9.3],
@@ -67,7 +95,7 @@ describe('canonical sales calculations', () => {
     expect(line.marginPercentOnCost).toBe(expectedMargin);
   });
 
-  it('utilise la marge comme source du prix catalogue lorsque le coût est connu', () => {
+  it('donne priorité au prix catalogue explicite lorsque le coût est connu', () => {
     const line = calculateSalesLine({
       purchasePriceHt: 68.989,
       grossSalePriceHt: 82.787,
@@ -76,9 +104,9 @@ describe('canonical sales calculations', () => {
       taxPercent: 19,
       quantity: 1,
     });
-    expect(line.netSalePriceHt).toBe(77.268);
-    expect(line.totalHt).toBe(77.268);
-    expect(line.marginAmount).toBe(8.279);
+    expect(line.grossSalePriceHt).toBe(82.787);
+    expect(line.netSalePriceHt).toBe(66.23);
+    expect(line.totalHt).toBe(66.23);
   });
 
   it('calcule les cas financiers de référence sans remise et avec remise', () => {
@@ -129,6 +157,8 @@ describe('canonical sales calculations', () => {
       lines.reduce((sum, line) => sum + line.totalHt, 0),
       3,
     );
-    expect(totals.totalToPay).toBe(2.187);
+    expect(totals.totalToPay).toBe(
+      salesRound3(lines.reduce((sum, line) => sum + line.lineTtc, 0) + totals.fiscalStamp),
+    );
   });
 });

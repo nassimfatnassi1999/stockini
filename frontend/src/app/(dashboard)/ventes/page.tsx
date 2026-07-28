@@ -929,6 +929,7 @@ export default function VentesPage() {
               quantity: Number(line.quantity) || 0,
               puHt: Number(line.puHt) || 0,
               purchasePriceHt: Number(line.purchasePriceHt) || 0,
+              purchasePriceTtc: Number(line.purchasePriceTtc) || 0,
               remisePercent: Number(line.remisePercent) || 0,
               tvaPercent: Number(line.tvaPercent) || 0,
             }),
@@ -998,6 +999,10 @@ export default function VentesPage() {
           puHt: Number(item.unitPrice),
           purchasePriceHt: Number(
             item.unitPurchaseCostHt ?? item.product?.purchasePrice ?? 0,
+          ),
+          purchasePriceTtc: round3(
+            Number(item.unitPurchaseCostHt ?? item.product?.purchasePrice ?? 0) *
+              (1 + Number(item.tvaPercent ?? item.product?.tva ?? 0) / 100),
           ),
           defaultMarginPercent: Number(item.marginPercent ?? 40),
           remisePercent: Number(item.discountPercent ?? 0),

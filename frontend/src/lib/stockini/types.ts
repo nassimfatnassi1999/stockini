@@ -192,6 +192,8 @@ export interface SaleItemDetail {
     reference: string;
     name: string;
     purchasePrice: number | string;
+    purchasePriceTtc?: number | string;
+    tva?: number | string;
   } | null;
 }
 

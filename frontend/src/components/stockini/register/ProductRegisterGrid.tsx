@@ -24,7 +24,7 @@ const HEADERS = [
   { label: 'Emplacement', className: 'min-w-[80px]' },
   { label: 'Marque / Famille', className: 'min-w-[90px]' },
   { label: 'Qté', className: 'min-w-[55px] text-right' },
-  { label: 'PU HT', className: 'min-w-[80px] text-right' },
+  { label: 'PU HT brut', className: 'min-w-[80px] text-right' },
   { label: 'Marge %', className: 'min-w-[70px] text-right' },
   { label: 'Marge DT', className: 'min-w-[80px] text-right' },
   { label: 'Remise %', className: 'min-w-[60px] text-right' },

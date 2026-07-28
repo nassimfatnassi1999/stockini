@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { calculateSalePriceFromPurchaseTtc } from '../common/utils/sales-calculations';
 
 config({ quiet: true });
 if (!process.env.DATABASE_URL) config({ path: resolve(process.cwd(), '../.env'), quiet: true });
@@ -22,7 +23,7 @@ async function main() {
       where: { OR: [{ unitPurchaseCostHt: null }, { purchaseCostEstimated: true }] },
       include: { sale: { select: { invoiceNumber: true, createdAt: true } } },
     }),
-    prisma.product.findMany({ where: { deletedAt: null }, select: { id: true, reference: true, purchasePrice: true } }),
+    prisma.product.findMany({ where: { deletedAt: null }, select: { id: true, reference: true, purchasePrice: true, purchasePriceTtc: true, tva: true } }),
     prisma.stockMovement.findMany({
       where: { type: { in: ['ENTRY', 'ADJUSTMENT', 'INVENTORY_CORRECTION', 'CUSTOMER_RETURN', 'RETURN_IN'] } },
       select: { productId: true },
@@ -75,7 +76,20 @@ async function main() {
     await prisma.$transaction([
       ...purchaseChanges.map(({ item, net, line, unitDiscount }) => prisma.purchaseItem.update({ where: { id: item.id }, data: { unitCostHtNet: net, lineTotalHtNet: line, discountAmount: unitDiscount } })),
       ...saleChanges.map(({ item, newCost }) => prisma.saleItem.update({ where: { id: item.id }, data: { unitPurchaseCostHt: newCost, purchaseCostEstimated: false } })),
-      ...productChanges.map(({ product, cump }) => prisma.product.update({ where: { id: product.id }, data: { purchasePrice: cump } })),
+      ...productChanges.map(({ product, cump }) => {
+        const derivedPurchasePriceTtc = money(cump.mul(D(1).plus(D(product.tva).div(100))));
+        // Un écart maximal d'un millime provient souvent de la conversion d'un
+        // TTC fournisseur exact vers un HT à trois décimales. Préserver ce TTC.
+        const purchasePriceTtc = D(product.purchasePriceTtc).minus(derivedPurchasePriceTtc).abs().lte(0.001)
+          ? product.purchasePriceTtc
+          : derivedPurchasePriceTtc;
+        const resolvedSale = calculateSalePriceFromPurchaseTtc({ purchaseTtc: purchasePriceTtc.toString(), markupPercent: 40, discountPercent: 0, vatPercent: product.tva.toString() });
+        return prisma.product.update({ where: { id: product.id }, data: {
+          purchasePrice: cump,
+          purchasePriceTtc,
+          salePrice: resolvedSale.saleHtGross,
+        } });
+      }),
     ]);
   } else console.log('Aucune écriture. Sauvegardez la base puis relancez avec --apply.');
 }

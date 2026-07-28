@@ -17,6 +17,7 @@ import {
   StockMovementQueryDto,
 } from './dto/stock.dto';
 import { calculateWeightedAverageCost } from '../common/utils/purchase-calculations';
+import { calcSalePrice } from '../common/utils/pricing.util';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
 
@@ -364,6 +365,7 @@ export class StockService {
           purchasePriceTtc: averageCost
             .mul(new Prisma.Decimal(1).plus(new Prisma.Decimal(product.tva).div(100)))
             .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP),
+          salePrice: calcSalePrice(averageCost.toNumber(), Number(product.tva)),
         }),
       },
     });

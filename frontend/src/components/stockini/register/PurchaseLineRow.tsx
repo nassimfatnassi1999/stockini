@@ -43,6 +43,7 @@ export function PurchaseLineRow({ line, lineNumber, onChange, onDelete }: Props)
         brand: product.brand?.name ?? product.category?.name ?? '',
         puHt,
         purchasePriceHt: puHt,
+        purchasePriceTtc: round3(Number(product.purchasePriceTtc)),
         remisePercent: 0,
         quantity: Math.max(line.quantity, 1),
       }),
