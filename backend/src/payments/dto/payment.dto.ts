@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsDateString,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -84,6 +85,10 @@ export class PaySaleDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  acceptAsFullyPaid?: boolean;
 }
 
 export class PayPurchaseDto {

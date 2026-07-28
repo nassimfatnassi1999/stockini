@@ -238,9 +238,10 @@ export class PaymentsService {
       if (payment.saleId && payment.sale) {
         const agg = await tx.payment.aggregate({
           where: { saleId: payment.saleId, deletedAt: null },
-          _sum: { amountApplied: true },
+          _sum: { amountApplied: true, acceptedDifference: true },
         });
         let historicalPaid = new Prisma.Decimal(0);
+        let historicalAcceptedDifference = new Prisma.Decimal(0);
         if (payment.sale.isConsolidated) {
           const sourcePayments = await tx.payment.aggregate({
             where: {
@@ -251,14 +252,20 @@ export class PaymentsService {
                 },
               },
             },
-            _sum: { amountApplied: true },
+            _sum: { amountApplied: true, acceptedDifference: true },
           });
           historicalPaid = new Prisma.Decimal(
             sourcePayments._sum.amountApplied ?? 0,
           );
+          historicalAcceptedDifference = new Prisma.Decimal(
+            sourcePayments._sum.acceptedDifference ?? 0,
+          );
         }
         const newPaid = historicalPaid
           .plus(agg._sum.amountApplied ?? 0)
+          .toNumber();
+        const acceptedDifference = historicalAcceptedDifference
+          .plus(agg._sum.acceptedDifference ?? 0)
           .toNumber();
         const saleTotal =
           commercialTotalFinal(payment.sale.total, payment.sale.stampDuty) -
@@ -267,8 +274,11 @@ export class PaymentsService {
           where: { id: payment.saleId },
           data: {
             paidAmount: newPaid,
-            remainingAmount: Math.max(saleTotal - newPaid, 0),
-            paymentStatus: this.computePaymentStatus(saleTotal, newPaid),
+            remainingAmount: Math.max(saleTotal - newPaid - acceptedDifference, 0),
+            paymentStatus: this.computePaymentStatus(
+              saleTotal,
+              newPaid + acceptedDifference,
+            ),
           },
         });
       }
@@ -433,21 +443,48 @@ export class PaymentsService {
                     deletedAt: null,
                     type: PaymentType.CUSTOMER_PAYMENT,
                   },
-                  _sum: { amountApplied: true, amount: true },
+                  _sum: { amountApplied: true, amount: true, acceptedDifference: true },
                 })
               : {
                   _sum: {
                     amountApplied: sale.paidAmount,
                     amount: sale.paidAmount,
+                    acceptedDifference: 0,
                   },
                 };
+          let historicalApplied = tnd(0);
+          let historicalAcceptedDifference = tnd(0);
+          if (sale.isConsolidated && typeof tx.payment.aggregate === 'function') {
+            const sourcePayments = await tx.payment.aggregate({
+              where: {
+                deletedAt: null,
+                type: PaymentType.CUSTOMER_PAYMENT,
+                sale: {
+                  consolidationMemberships: {
+                    some: { consolidatedSaleId: saleId, active: true },
+                  },
+                },
+              },
+              _sum: { amountApplied: true, acceptedDifference: true },
+            });
+            historicalApplied = tnd(sourcePayments._sum.amountApplied ?? 0);
+            historicalAcceptedDifference = tnd(
+              sourcePayments._sum.acceptedDifference ?? 0,
+            );
+          }
           const appliedBefore = tnd(
             activePayments._sum.amountApplied ??
               activePayments._sum.amount ??
               sale.paidAmount,
-          );
+          ).plus(historicalApplied);
+          const acceptedBefore = tnd(
+            activePayments._sum.acceptedDifference ?? 0,
+          ).plus(historicalAcceptedDifference);
           const remainingBefore = tnd(
-            Prisma.Decimal.max(netAfterCredits.minus(appliedBefore), 0),
+            Prisma.Decimal.max(
+              netAfterCredits.minus(appliedBefore).minus(acceptedBefore),
+              0,
+            ),
           );
           let allocation;
           try {
@@ -457,6 +494,7 @@ export class PaymentsService {
               method: dto.method,
               surplusDisposition: dto.surplusDisposition,
               hasCustomer: Boolean(sale.customerId),
+              acceptAsFullyPaid: dto.acceptAsFullyPaid,
             });
           } catch (error) {
             if (error instanceof BadRequestException) {
@@ -499,6 +537,7 @@ export class PaymentsService {
             amountApplied: allocation.amountApplied.toFixed(3),
             changeReturned: allocation.changeReturned.toFixed(3),
             remainingAfter: allocation.remainingAfter.toFixed(3),
+            acceptedDifference: allocation.acceptedDifference.toFixed(3),
           });
           const newPaidAmount = tnd(
             appliedBefore.plus(allocation.amountApplied),
@@ -520,6 +559,13 @@ export class PaymentsService {
                 allocation.customerCreditCreated.toNumber(),
               remainingBefore: allocation.remainingBefore.toNumber(),
               remainingAfter: allocation.remainingAfter.toNumber(),
+              acceptedDifference: allocation.acceptedDifference.toNumber(),
+              settlementMode: allocation.settlementMode,
+              acceptanceReason: allocation.acceptedDifference.gt(0)
+                ? 'Règlement accepté comme définitif'
+                : undefined,
+              acceptedById: allocation.acceptedDifference.gt(0) ? userId : undefined,
+              acceptedAt: allocation.acceptedDifference.gt(0) ? new Date() : undefined,
               surplusDisposition: allocation.surplusDisposition,
               idempotencyKey: dto.idempotencyKey,
               cashImpactDone: true,
@@ -588,7 +634,9 @@ export class PaymentsService {
 
           await this.auditLogs.audit(
             {
-              action: 'payment.sale_payment',
+              action: allocation.acceptedDifference.gt(0)
+                ? 'PAYMENT_ACCEPTED_AS_FULL'
+                : 'payment.sale_payment',
               entity: 'Payment',
               entityId: payment.id,
               userId,
@@ -601,6 +649,10 @@ export class PaymentsService {
                 retainedSurplus: allocation.retainedSurplus.toNumber(),
                 customerCreditCreated:
                   allocation.customerCreditCreated.toNumber(),
+                acceptedDifference: allocation.acceptedDifference.toNumber(),
+                settlementMode: allocation.settlementMode,
+                remainingBefore: allocation.remainingBefore.toNumber(),
+                remainingAfter: allocation.remainingAfter.toNumber(),
                 method: dto.method,
                 type: PaymentType.CUSTOMER_PAYMENT,
               },
@@ -609,6 +661,13 @@ export class PaymentsService {
                 reference: payRef,
                 amountReceived: allocation.amountReceived.toNumber(),
                 amountApplied: allocation.amountApplied.toNumber(),
+                totalPayable: saleTotalFinal.toNumber(),
+                acceptedDifference: allocation.acceptedDifference.toNumber(),
+                previousRemaining: allocation.remainingBefore.toNumber(),
+                newRemaining: allocation.remainingAfter.toNumber(),
+                reason: allocation.acceptedDifference.gt(0)
+                  ? 'Règlement accepté comme définitif'
+                  : null,
                 surplusDisposition: allocation.surplusDisposition,
                 method: dto.method,
                 saleId,

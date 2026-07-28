@@ -158,6 +158,7 @@ describe('PaymentsService.paySale', () => {
       stampDuty?: number;
       documentType?: string;
       status?: string;
+      isConsolidated?: boolean;
     },
     opts: {
       caisseThrows?: boolean;
@@ -290,6 +291,71 @@ describe('PaymentsService.paySale', () => {
         },
       }),
     );
+  });
+
+  it('écart accepté → paiement réel en caisse, différence tracée et dette soldée', async () => {
+    const { service, tx, caisseService } = buildSaleService({
+      total: 134.106,
+      paidAmount: 0,
+      remainingAmount: 134.106,
+    });
+
+    await service.paySale('sale-1', {
+      amountReceived: 130,
+      method: 'CASH' as any,
+      acceptAsFullyPaid: true,
+    }, 'admin-1');
+
+    expect(tx.payment.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        amountApplied: 130,
+        acceptedDifference: 4.106,
+        settlementMode: 'ACCEPTED_DIFFERENCE',
+        acceptedById: 'admin-1',
+      }),
+    }));
+    expect(tx.sale.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        paidAmount: 130,
+        remainingAmount: 0,
+        paymentStatus: PaymentStatus.PAID,
+      }),
+    }));
+    expect(caisseService.recordMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ montant: 130 }),
+    );
+  });
+
+  it('document consolidé → tient compte des paiements sources sans les dupliquer', async () => {
+    const { service, tx } = buildSaleService({
+      total: 100,
+      paidAmount: 40,
+      remainingAmount: 60,
+      isConsolidated: true,
+    });
+    tx.payment.aggregate = jest
+      .fn()
+      .mockResolvedValueOnce({
+        _sum: { amountApplied: 0, amount: 0, acceptedDifference: 0 },
+      })
+      .mockResolvedValueOnce({
+        _sum: { amountApplied: 40, acceptedDifference: 0 },
+      });
+
+    await service.paySale('sale-1', {
+      amountReceived: 50,
+      method: 'CASH' as any,
+    });
+
+    expect(tx.payment.create).toHaveBeenCalledTimes(1);
+    expect(tx.sale.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        paidAmount: 90,
+        remainingAmount: 10,
+        paymentStatus: PaymentStatus.PARTIAL,
+      }),
+    }));
   });
 
   it('inclut le timbre une seule fois dans le total à payer', async () => {

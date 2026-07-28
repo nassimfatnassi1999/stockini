@@ -427,6 +427,7 @@ export const stockiniApi = {
       surplusDisposition?: 'RETURNED' | 'CUSTOMER_CREDIT' | 'CASH_SURPLUS';
       idempotencyKey?: string;
       note?: string;
+      acceptAsFullyPaid?: boolean;
     },
   ) => {
     validatePayment({ amount: data.amountReceived, method: data.method });

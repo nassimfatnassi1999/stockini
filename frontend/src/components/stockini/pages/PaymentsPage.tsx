@@ -24,6 +24,7 @@ import { usePermissions } from '@/lib/hooks/usePermissions';
 import { PageHeader } from '../shared/PageHeader';
 import { useDropdownOptions } from '../shared/form-utils';
 import { ClearHistoryModal } from '../shared/ClearHistoryModal';
+import { AcceptedDifferenceOption } from '../payments/AcceptedDifferenceOption';
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -191,6 +192,9 @@ function historyColumns(onViewSale: (id: string) => void): ColumnDef<Payment>[] 
           {Number(row.retainedSurplus ?? 0) > 0 && (
             <div className="text-xs text-fuchsia-600">écart {money(row.retainedSurplus)}</div>
           )}
+          {Number(row.acceptedDifference ?? 0) > 0 && (
+            <div className="text-xs font-medium text-amber-700">payé avec écart accepté de {money(row.acceptedDifference)}</div>
+          )}
         </div>
       ),
     },
@@ -238,8 +242,10 @@ export function PaymentsPage() {
     method: 'CASH',
     note: '',
     idempotencyKey: '',
+    acceptAsFullyPaid: false,
   });
   const [confirmOverpayment, setConfirmOverpayment] = useState(false);
+  const [confirmAcceptedDifference, setConfirmAcceptedDifference] = useState(false);
   const [surplusDisposition, setSurplusDisposition] =
     useState<SurplusDisposition>('NONE');
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
@@ -248,6 +254,7 @@ export function PaymentsPage() {
   const canViewSales        = can('sales.view');
   const canViewPayments     = can('payments.view');
   const canReceivePayment   = can('payments.receive_client_payment');
+  const canAcceptDifference = can('payments.accept_difference');
   const canClearHistory     = can('finance.history.clear');
 
   const [showClearModal, setShowClearModal] = useState(false);
@@ -336,6 +343,7 @@ export function PaymentsPage() {
           paymentPreview.changeDue.gt(0) ? disposition : undefined,
         idempotencyKey: payForm.idempotencyKey,
         note: payForm.note || undefined,
+        acceptAsFullyPaid: payForm.acceptAsFullyPaid,
       });
     },
     onSuccess: () => {
@@ -347,8 +355,9 @@ export function PaymentsPage() {
       queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
       setPayTarget(null);
-      setPayForm({ amountReceived: '', method: 'CASH', note: '', idempotencyKey: '' });
+      setPayForm({ amountReceived: '', method: 'CASH', note: '', idempotencyKey: '', acceptAsFullyPaid: false });
       setConfirmOverpayment(false);
+      setConfirmAcceptedDifference(false);
       setSurplusDisposition('NONE');
       toast.success('Paiement enregistré avec succès');
     },
@@ -362,6 +371,7 @@ export function PaymentsPage() {
   const paymentPreview = calculateCustomerPayment(
     remaining.toFixed(3),
     payForm.amountReceived || '0',
+    payForm.acceptAsFullyPaid,
   );
   const isOverpayment = paymentPreview.changeDue.gt(0);
   const nonCashOverpayment = payForm.method !== 'CASH' && isOverpayment;
@@ -418,8 +428,10 @@ export function PaymentsPage() {
                 method: 'CASH',
                 note: '',
                 idempotencyKey: generateClientId('payment'),
+                acceptAsFullyPaid: false,
               });
               setConfirmOverpayment(false);
+              setConfirmAcceptedDifference(false);
               setSurplusDisposition(sale.customer?.id ? 'CUSTOMER_CREDIT' : 'CASH_SURPLUS');
             })}
             data={salesData}
@@ -510,10 +522,17 @@ export function PaymentsPage() {
         title="Payer"
         subtitle={payTarget?.invoiceNumber}
         open={!!payTarget}
-        onClose={() => { setPayTarget(null); setConfirmOverpayment(false); }}
+        onClose={() => { setPayTarget(null); setConfirmOverpayment(false); setConfirmAcceptedDifference(false); }}
         width={480}
         footer={
-          confirmOverpayment ? (
+          confirmAcceptedDifference ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={() => setConfirmAcceptedDifference(false)}>Annuler</Button>
+              <Button type="button" size="sm" disabled={payMutation.isPending} onClick={() => payMutation.mutate(undefined)}>
+                {payMutation.isPending ? 'Enregistrement...' : 'Confirmer le règlement'}
+              </Button>
+            </>
+          ) : confirmOverpayment ? (
             <>
               <Button type="button" variant="outline" size="sm" onClick={() => setConfirmOverpayment(false)}>
                 Retour
@@ -601,12 +620,24 @@ export function PaymentsPage() {
                 </fieldset>
               </div>
             )}
-            {!confirmOverpayment && <form
+            {confirmAcceptedDifference && (
+              <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-sm">
+                <p className="mb-3 font-semibold text-amber-950">Confirmer le règlement définitif</p>
+                <div className="space-y-1">
+                  <div className="flex justify-between"><span>Montant total du document</span><strong>{money(paymentPreview.remainingBefore.toFixed(3))}</strong></div>
+                  <div className="flex justify-between"><span>Montant réellement encaissé</span><strong>{money(paymentPreview.amountApplied.toFixed(3))}</strong></div>
+                  <div className="flex justify-between text-amber-900"><span>Différence abandonnée</span><strong>{money(paymentPreview.acceptedDifference.toFixed(3))}</strong></div>
+                </div>
+                <p className="mt-3 border-t border-amber-200 pt-3 text-xs text-amber-900">Cette opération marquera définitivement le document comme payé et aucune dette ne sera créée.</p>
+              </div>
+            )}
+            {!confirmOverpayment && !confirmAcceptedDifference && <form
               id={payFormId}
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!amountValid) return;
                 if (isOverpayment) setConfirmOverpayment(true);
+                else if (payForm.acceptAsFullyPaid) setConfirmAcceptedDifference(true);
                 else payMutation.mutate(undefined);
               }}
               className="space-y-4"
@@ -619,7 +650,16 @@ export function PaymentsPage() {
                   min="0.001"
                   step="0.001"
                   value={payForm.amountReceived}
-                  onChange={(e) => setPayForm((f) => ({ ...f, amountReceived: e.target.value }))}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setPayForm((f) => ({
+                      ...f,
+                      amountReceived: value,
+                      acceptAsFullyPaid: Number(value) > 0 && Number(value) < remaining
+                        ? f.acceptAsFullyPaid
+                        : false,
+                    }));
+                  }}
                   required
                   className={payForm.amountReceived && !amountValid ? 'border-red-400' : ''}
                 />
@@ -636,6 +676,7 @@ export function PaymentsPage() {
                   <div className="flex justify-between"><span>Montant dû</span><span>{money(paymentPreview.remainingBefore.toFixed(3))}</span></div>
                   <div className="flex justify-between"><span>Montant reçu</span><span>{money(paymentPreview.amountReceived.toFixed(3))}</span></div>
                   <div className="flex justify-between"><span>Montant encaissé</span><span>{money(paymentPreview.amountApplied.toFixed(3))}</span></div>
+                  {payForm.acceptAsFullyPaid && <div className="flex justify-between text-amber-800"><span>Écart accepté</span><strong>{money(paymentPreview.acceptedDifference.toFixed(3))}</strong></div>}
                   <div className="flex justify-between font-semibold"><span>Nouveau reste à payer</span><span>{money(paymentPreview.remainingAfter.toFixed(3))}</span></div>
                   {isOverpayment && (
                     <div className="mt-2 flex justify-between rounded border border-amber-300 bg-amber-100 p-2 font-bold text-amber-900">
@@ -644,6 +685,14 @@ export function PaymentsPage() {
                   )}
                 </div>
               )}
+              <AcceptedDifferenceOption
+                checked={payForm.acceptAsFullyPaid}
+                disabled={!canAcceptDifference || !amountValid || amountNum >= remaining || remaining <= 0}
+                difference={paymentPreview.acceptedDifference.gt(0)
+                  ? paymentPreview.acceptedDifference
+                  : paymentPreview.remainingBefore.minus(paymentPreview.amountApplied)}
+                onCheckedChange={(checked) => setPayForm((form) => ({ ...form, acceptAsFullyPaid: checked }))}
+              />
               <div className="space-y-1.5">
                 <Label htmlFor="pay-method">Mode de paiement *</Label>
                 <select

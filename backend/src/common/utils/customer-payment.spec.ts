@@ -17,6 +17,32 @@ describe('allocateCustomerPayment', () => {
     expect(result.paymentStatus).toBe(status);
   });
 
+  it('solde le document sans gonfler le montant encaissé lorsque l’écart est accepté', () => {
+    const result = allocateCustomerPayment({
+      remainingBefore: '134.106',
+      amountReceived: '130.000',
+      method: PaymentMethod.CASH,
+      hasCustomer: true,
+      acceptAsFullyPaid: true,
+    });
+    expect(result.amountReceived.toFixed(3)).toBe('130.000');
+    expect(result.amountApplied.toFixed(3)).toBe('130.000');
+    expect(result.acceptedDifference.toFixed(3)).toBe('4.106');
+    expect(result.remainingAfter.toFixed(3)).toBe('0.000');
+    expect(result.paymentStatus).toBe(PaymentStatus.PAID);
+    expect(result.settlementMode).toBe('ACCEPTED_DIFFERENCE');
+  });
+
+  it('refuse l’option lorsque le montant atteint ou dépasse le reste', () => {
+    expect(() => allocateCustomerPayment({
+      remainingBefore: '100.000',
+      amountReceived: '100.000',
+      method: PaymentMethod.CASH,
+      hasCustomer: true,
+      acceptAsFullyPaid: true,
+    })).toThrow(/montant inférieur/);
+  });
+
   it.each([
     [SurplusDisposition.RETURNED, '0.451', '0.000', '0.000'],
     [SurplusDisposition.CASH_SURPLUS, '0.000', '0.451', '0.000'],

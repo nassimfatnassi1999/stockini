@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { PaymentMethod, PaymentStatus, Prisma, SurplusDisposition } from '@prisma/client';
+import { PaymentMethod, PaymentStatus, Prisma, SettlementMode, SurplusDisposition } from '@prisma/client';
 
 export const TND_SCALE = 3;
 const ZERO = new Prisma.Decimal(0);
@@ -20,6 +20,8 @@ export interface CustomerPaymentAllocation {
   customerCreditCreated: Prisma.Decimal;
   remainingBefore: Prisma.Decimal;
   remainingAfter: Prisma.Decimal;
+  acceptedDifference: Prisma.Decimal;
+  settlementMode: SettlementMode;
   surplusDisposition: SurplusDisposition;
   paymentStatus: PaymentStatus;
 }
@@ -30,6 +32,7 @@ export function allocateCustomerPayment(input: {
   method: PaymentMethod;
   surplusDisposition?: SurplusDisposition;
   hasCustomer: boolean;
+  acceptAsFullyPaid?: boolean;
 }): CustomerPaymentAllocation {
   const remainingBefore = tnd(Prisma.Decimal.max(tnd(input.remainingBefore), ZERO));
   const amountReceived = tnd(input.amountReceived);
@@ -41,6 +44,11 @@ export function allocateCustomerPayment(input: {
   }
 
   const amountApplied = tnd(Prisma.Decimal.min(amountReceived, remainingBefore));
+  if (input.acceptAsFullyPaid && amountApplied.gte(remainingBefore)) {
+    throw new BadRequestException(
+      "L'acceptation d'un écart est réservée à un montant inférieur au reste à payer",
+    );
+  }
   const changeDue = tnd(Prisma.Decimal.max(amountReceived.minus(amountApplied), ZERO));
   const disposition = changeDue.isZero()
     ? SurplusDisposition.NONE
@@ -77,7 +85,11 @@ export function allocateCustomerPayment(input: {
   const remainingAfter = tnd(
     Prisma.Decimal.max(remainingBefore.minus(amountApplied), ZERO),
   );
-  const paymentStatus = remainingAfter.isZero()
+  const acceptedDifference = input.acceptAsFullyPaid
+    ? tnd(remainingBefore.minus(amountApplied))
+    : ZERO;
+  const finalRemaining = acceptedDifference.gt(ZERO) ? ZERO : remainingAfter;
+  const paymentStatus = finalRemaining.isZero()
     ? PaymentStatus.PAID
     : PaymentStatus.PARTIAL;
 
@@ -99,7 +111,11 @@ export function allocateCustomerPayment(input: {
     retainedSurplus,
     customerCreditCreated,
     remainingBefore,
-    remainingAfter,
+    remainingAfter: finalRemaining,
+    acceptedDifference,
+    settlementMode: acceptedDifference.gt(ZERO)
+      ? SettlementMode.ACCEPTED_DIFFERENCE
+      : SettlementMode.NORMAL,
     surplusDisposition: disposition ?? SurplusDisposition.NONE,
     paymentStatus,
   };

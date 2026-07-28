@@ -335,6 +335,9 @@ export interface Payment {
   customerCreditCreated?: number | string;
   remainingBefore?: number | string;
   remainingAfter?: number | string;
+  acceptedDifference?: number | string;
+  settlementMode?: 'NORMAL' | 'ACCEPTED_DIFFERENCE';
+  acceptanceReason?: string | null;
   surplusDisposition?: string;
   note?: string | null;
   createdAt: string;

@@ -14,3 +14,11 @@ test("conserve une dette positive pour un paiement partiel", () => {
   assert.equal(result.amountApplied.toFixed(3), "200.000");
   assert.equal(result.remainingAfter.toFixed(3), "129.549");
 });
+
+test("sépare l'encaissement réel de l'écart accepté", () => {
+  const result = calculateCustomerPayment("134.106", "130.000", true);
+  assert.equal(result.amountApplied.toFixed(3), "130.000");
+  assert.equal(result.acceptedDifference.toFixed(3), "4.106");
+  assert.equal(result.remainingAfter.toFixed(3), "0.000");
+  assert.equal(result.settlementMode, "ACCEPTED_DIFFERENCE");
+});

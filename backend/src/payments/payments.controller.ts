@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -29,7 +30,20 @@ export class PaymentsController {
     @Body() dto: PaySaleDto,
     @CurrentUser() user?: AuthUser,
   ) {
+    if (dto.acceptAsFullyPaid && !this.canAcceptDifference(user)) {
+      throw new ForbiddenException(
+        "Vous n'avez pas la permission d'abandonner un reliquat.",
+      );
+    }
     return this.paymentsService.paySale(saleId, dto, user?.id);
+  }
+
+  private canAcceptDifference(user?: AuthUser): boolean {
+    if (!user) return false;
+    if (['ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin'].includes(user.role)) return true;
+    return user.permissions.includes('*') ||
+      user.permissions.includes('payments.*') ||
+      user.permissions.includes('payments.accept_difference');
   }
 
   @RequirePermissions('expenses.pay_supplier')

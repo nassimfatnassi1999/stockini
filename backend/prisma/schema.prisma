@@ -116,6 +116,11 @@ enum SurplusDisposition {
   UNRESOLVED_OVERPAYMENT
 }
 
+enum SettlementMode {
+  NORMAL
+  ACCEPTED_DIFFERENCE
+}
+
 enum AlertType {
   LOW_STOCK
   OUT_OF_STOCK
@@ -210,6 +215,7 @@ model User {
   creditNotes           CreditNote[]
   productPriceHistories ProductPriceHistory[]
   historyClearLogs      HistoryClearLog[]
+  acceptedPayments      Payment[]             @relation("AcceptedPaymentDifferences")
 
   @@index([roleId])
 }
@@ -579,6 +585,11 @@ model Payment {
   customerCreditCreated Decimal            @default(0) @db.Decimal(12, 3)
   remainingBefore       Decimal            @default(0) @db.Decimal(12, 3)
   remainingAfter        Decimal            @default(0) @db.Decimal(12, 3)
+  acceptedDifference    Decimal            @default(0) @db.Decimal(12, 3)
+  settlementMode        SettlementMode     @default(NORMAL)
+  acceptanceReason      String?
+  acceptedById          String?
+  acceptedAt            DateTime?
   surplusDisposition    SurplusDisposition @default(NONE)
   idempotencyKey        String?            @unique
   cashImpactDone        Boolean            @default(false)
@@ -598,6 +609,7 @@ model Payment {
   customer              Customer?          @relation(fields: [customerId], references: [id])
   supplier              Supplier?          @relation(fields: [supplierId], references: [id])
   creditNote            CreditNote?        @relation(fields: [creditNoteId], references: [id])
+  acceptedBy            User?              @relation("AcceptedPaymentDifferences", fields: [acceptedById], references: [id], onDelete: SetNull)
 
   @@index([saleId])
   @@index([purchaseId])
@@ -608,6 +620,8 @@ model Payment {
   @@index([reference])
   @@index([deletedAt])
   @@index([surplusDisposition])
+  @@index([settlementMode])
+  @@index([acceptedById])
 }
 
 model Expense {

@@ -84,6 +84,7 @@ export const PERMISSIONS = {
   PAYMENTS_UPDATE: 'payments.update',
   PAYMENTS_DELETE: 'payments.delete',
   PAYMENTS_RECEIVE_CLIENT: 'payments.receive_client_payment',
+  PAYMENTS_ACCEPT_DIFFERENCE: 'payments.accept_difference',
   PAYMENTS_EXPORT: 'payments.export',
 
   // ── Caisse ────────────────────────────────────────────────────────────────────
@@ -262,6 +263,7 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'payments.update', module: 'payments', action: 'update', label: 'Modifier', description: 'Modifier un paiement' },
   { code: 'payments.delete', module: 'payments', action: 'delete', label: 'Supprimer', description: 'Supprimer un paiement' },
   { code: 'payments.receive_client_payment', module: 'payments', action: 'receive_client_payment', label: 'Encaisser client', description: 'Encaisser un paiement client' },
+  { code: 'payments.accept_difference', module: 'payments', action: 'accept_difference', label: 'Abandonner un reliquat', description: 'Accepter un paiement partiel comme règlement définitif' },
   { code: 'payments.export', module: 'payments', action: 'export', label: 'Exporter', description: 'Exporter les paiements' },
 
   // ── Caisse ────────────────────────────────────────────────────────────────────

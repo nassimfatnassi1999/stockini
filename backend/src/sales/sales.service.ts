@@ -587,6 +587,24 @@ export class SalesService {
         `Le type ${documentType} n'accepte pas de paiement à la création`,
       );
     }
+    if (
+      dto.acceptAsFullyPaid &&
+      !this.hasPermission(user, 'payments.accept_difference')
+    ) {
+      throw new ForbiddenException(
+        "Vous n'avez pas la permission d'abandonner un reliquat.",
+      );
+    }
+    if (
+      dto.acceptAsFullyPaid &&
+      (!acceptsPayment ||
+        dto.paymentMethod === 'CREDIT' ||
+        new Prisma.Decimal(dto.paidAmount ?? 0).lte(0))
+    ) {
+      throw new BadRequestException(
+        "L'acceptation d'un écart exige un montant réellement encaissé supérieur à zéro sur un document payable.",
+      );
+    }
 
     const allowLowMargin = this.hasPermission(user, 'sales.allow_low_margin');
     const allowEditUnitPriceHt = this.hasPermission(
@@ -743,6 +761,7 @@ export class SalesService {
             method: dto.paymentMethod!,
             surplusDisposition: dto.surplusDisposition,
             hasCustomer: Boolean(resolvedCustomerId),
+            acceptAsFullyPaid: dto.acceptAsFullyPaid,
           })
         : null;
       const paidAmount = allocation?.amountApplied.toNumber() ?? 0;
@@ -754,10 +773,10 @@ export class SalesService {
         );
       }
 
-      const remainingAmount = Math.max(totalFinal - paidAmount, 0);
+      const remainingAmount = allocation?.remainingAfter.toNumber() ?? totalFinal;
       // Only FACTURE carries a payment status; other document types are not payable
       const paymentStatus = acceptsPayment
-        ? this.paymentStatus(totalFinal, paidAmount)
+        ? (allocation?.paymentStatus ?? this.paymentStatus(totalFinal, paidAmount))
         : null;
       const items = rawItems.map((item) => {
         return {
@@ -841,7 +860,7 @@ export class SalesService {
       // Initial payment: create Payment + CaisseMovement atomically
       if (!isDevis && allocation && dto.paymentMethod) {
         const payRef = await this.references.generate('PAY', 'payment', tx);
-        await tx.payment.create({
+        const initialPayment = await tx.payment.create({
           data: {
             reference: payRef,
             type: PaymentType.CUSTOMER_PAYMENT,
@@ -856,6 +875,13 @@ export class SalesService {
               allocation.customerCreditCreated.toNumber(),
             remainingBefore: allocation.remainingBefore.toNumber(),
             remainingAfter: allocation.remainingAfter.toNumber(),
+            acceptedDifference: allocation.acceptedDifference.toNumber(),
+            settlementMode: allocation.settlementMode,
+            acceptanceReason: allocation.acceptedDifference.gt(0)
+              ? 'Règlement accepté comme définitif'
+              : undefined,
+            acceptedById: allocation.acceptedDifference.gt(0) ? sellerId : undefined,
+            acceptedAt: allocation.acceptedDifference.gt(0) ? new Date() : undefined,
             surplusDisposition: allocation.surplusDisposition,
             cashImpactDone: true,
             saleId: sale.id,
@@ -903,6 +929,28 @@ export class SalesService {
               },
             },
           });
+        }
+        if (allocation.acceptedDifference.gt(0)) {
+          await this.auditLogs.audit(
+            {
+              action: 'PAYMENT_ACCEPTED_AS_FULL',
+              entity: 'Payment',
+              entityId: initialPayment.id,
+              userId: sellerId,
+              newValue: {
+                documentId: sale.id,
+                documentReference: invoiceNumber,
+                totalPayable: allocation.remainingBefore.toNumber(),
+                amountReceived: allocation.amountReceived.toNumber(),
+                amountApplied: allocation.amountApplied.toNumber(),
+                acceptedDifference: allocation.acceptedDifference.toNumber(),
+                previousRemaining: allocation.remainingBefore.toNumber(),
+                newRemaining: 0,
+                reason: 'Règlement accepté comme définitif',
+              },
+            },
+            tx,
+          );
         }
       }
 
@@ -2088,6 +2136,7 @@ export class SalesService {
   ): boolean {
     if (!user) return false;
     const perms = user.permissions ?? [];
-    return perms.includes('*') || perms.includes(permission);
+    const module = permission.split('.')[0];
+    return perms.includes('*') || perms.includes(`${module}.*`) || perms.includes(permission);
   }
 }

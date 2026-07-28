@@ -37,6 +37,7 @@ import { toast } from "@/lib/toast";
 import { generateClientId } from "@/lib/id";
 import { PermissionGuard } from "@/components/shared/PermissionGuard";
 import { usePermissions } from "@/lib/hooks/usePermissions";
+import { AcceptedDifferenceOption } from "@/components/stockini/payments/AcceptedDifferenceOption";
 import { useFormDraft } from "@/hooks/useFormDraft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -500,10 +501,12 @@ interface ValidateDocModalProps {
   isEditMode?: boolean;
   initialPaidAmount?: number;
   hasCustomer: boolean;
+  canAcceptDifference: boolean;
   onConfirm: (
     amountReceived: number,
     paymentMethod: string,
     surplusDisposition?: SurplusDisposition,
+    acceptAsFullyPaid?: boolean,
   ) => void;
   onCancel: () => void;
 }
@@ -516,6 +519,7 @@ function ValidateDocumentModal({
   isEditMode = false,
   initialPaidAmount = 0,
   hasCustomer,
+  canAcceptDifference,
   onConfirm,
   onCancel,
 }: ValidateDocModalProps) {
@@ -523,12 +527,19 @@ function ValidateDocumentModal({
   const [paymentMethod, setPaymentMethod] = useState("");
   const [pmtError, setPmtError] = useState("");
   const [confirmOverpayment, setConfirmOverpayment] = useState(false);
+  const [acceptAsFullyPaid, setAcceptAsFullyPaid] = useState(false);
+  const [confirmAcceptedDifference, setConfirmAcceptedDifference] = useState(false);
   const [surplusDisposition, setSurplusDisposition] =
     useState<SurplusDisposition>(hasCustomer ? "CUSTOMER_CREDIT" : "CASH_SURPLUS");
 
   const paymentAllowed = docType === "FACTURE" || docType === "BON_LIVRAISON";
   const paidAmountNum = Number(paidAmount) || 0;
   const preview = calculateCustomerPayment(totals.totalFinal, paidAmount || "0");
+  const acceptedPreview = calculateCustomerPayment(
+    totals.totalFinal,
+    paidAmount || "0",
+    acceptAsFullyPaid,
+  );
   const overpayment = preview.changeDue.gt(0);
 
   const tabCfg = DOC_TAB_CONFIG.find((t) => t.id === docType);
@@ -548,10 +559,15 @@ function ValidateDocumentModal({
       setConfirmOverpayment(true);
       return;
     }
+    if (acceptAsFullyPaid && !confirmAcceptedDifference) {
+      setConfirmAcceptedDifference(true);
+      return;
+    }
     onConfirm(
       paymentAllowed ? paidAmountNum : 0,
       paymentAllowed && paidAmountNum > 0 ? paymentMethod : "",
       overpayment ? surplusDisposition : undefined,
+      acceptAsFullyPaid,
     );
   };
 
@@ -576,7 +592,9 @@ function ValidateDocumentModal({
           ? "Enregistrement…"
           : confirmOverpayment
             ? "Ne pas rendre et confirmer"
-            : "Confirmer"}
+            : confirmAcceptedDifference
+              ? "Confirmer le règlement"
+              : "Confirmer"}
       </Button>
     </div>
   );
@@ -631,6 +649,11 @@ function ValidateDocumentModal({
                 value={paidAmount}
                 onChange={(e) => {
                   setPaidAmount(e.target.value);
+                  setConfirmAcceptedDifference(false);
+                  const value = Number(e.target.value);
+                  if (!(value > 0 && value < totals.totalFinal)) {
+                    setAcceptAsFullyPaid(false);
+                  }
                   setPmtError("");
                 }}
                 placeholder="0.000"
@@ -642,8 +665,29 @@ function ValidateDocumentModal({
                 <div className="flex justify-between"><span>Montant dû</span><span>{money(preview.remainingBefore.toFixed(3))}</span></div>
                 <div className="flex justify-between"><span>Montant reçu</span><span>{money(preview.amountReceived.toFixed(3))}</span></div>
                 <div className="flex justify-between"><span>Montant encaissé</span><span>{money(preview.amountApplied.toFixed(3))}</span></div>
-                <div className="flex justify-between font-semibold"><span>Nouveau reste</span><span>{money(preview.remainingAfter.toFixed(3))}</span></div>
+                {acceptAsFullyPaid && <div className="flex justify-between text-amber-800"><span>Écart accepté</span><strong>{money(acceptedPreview.acceptedDifference.toFixed(3))}</strong></div>}
+                <div className="flex justify-between font-semibold"><span>Nouveau reste</span><span>{money(acceptedPreview.remainingAfter.toFixed(3))}</span></div>
                 {overpayment && <div className="flex justify-between rounded bg-amber-100 p-2 font-bold text-amber-900"><span>Monnaie à rendre</span><span>{money(preview.changeDue.toFixed(3))}</span></div>}
+              </div>
+            )}
+            <AcceptedDifferenceOption
+              checked={acceptAsFullyPaid}
+              disabled={isEditMode || !canAcceptDifference || paidAmountNum <= 0 || paidAmountNum >= totals.totalFinal}
+              difference={acceptedPreview.acceptedDifference.gt(0)
+                ? acceptedPreview.acceptedDifference
+                : acceptedPreview.remainingBefore.minus(acceptedPreview.amountApplied)}
+              onCheckedChange={(checked) => {
+                setAcceptAsFullyPaid(checked);
+                setConfirmAcceptedDifference(false);
+              }}
+            />
+            {confirmAcceptedDifference && acceptAsFullyPaid && (
+              <div className="rounded border-2 border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                <p className="font-semibold">Confirmer le règlement définitif</p>
+                <div className="mt-2 flex justify-between"><span>Montant total</span><strong>{money(acceptedPreview.remainingBefore.toFixed(3))}</strong></div>
+                <div className="flex justify-between"><span>Réellement encaissé</span><strong>{money(acceptedPreview.amountApplied.toFixed(3))}</strong></div>
+                <div className="flex justify-between"><span>Différence abandonnée</span><strong>{money(acceptedPreview.acceptedDifference.toFixed(3))}</strong></div>
+                <p className="mt-2">Le document sera marqué comme payé et aucune dette ne sera créée.</p>
               </div>
             )}
             {confirmOverpayment && overpayment && (
@@ -1208,11 +1252,13 @@ export default function VentesPage() {
       paid,
       method,
       surplusDisposition,
+      acceptAsFullyPaid,
     }: {
       docType: SalesDocumentType;
       paid: number;
       method: string;
       surplusDisposition?: SurplusDisposition;
+      acceptAsFullyPaid?: boolean;
     }) => {
       if (filledLines.length === 0) {
         throw new Error(
@@ -1275,6 +1321,7 @@ export default function VentesPage() {
           paidAmount: submittedPaidAmount,
           paymentMethod: submittedPaidAmount > 0 && method ? method : undefined,
           surplusDisposition,
+          acceptAsFullyPaid,
           items: filledLines.map((l) => ({
             productId: l.productId!,
             designation: l.designation.trim() || undefined,
@@ -2530,8 +2577,9 @@ export default function VentesPage() {
                 isEditMode={isEditMode}
                 initialPaidAmount={editingPaidAmount}
                 hasCustomer={Boolean(customerId)}
-                onConfirm={(paid, method, surplusDisposition) =>
-                  createMutation.mutate({ docType: activeTab, paid, method, surplusDisposition })
+                canAcceptDifference={can('payments.accept_difference')}
+                onConfirm={(paid, method, surplusDisposition, acceptAsFullyPaid) =>
+                  createMutation.mutate({ docType: activeTab, paid, method, surplusDisposition, acceptAsFullyPaid })
                 }
                 onCancel={() => setShowValidateModal(false)}
               />

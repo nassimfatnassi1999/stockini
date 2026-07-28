@@ -154,6 +154,10 @@ export class CreateSaleDto {
   @IsEnum(SurplusDisposition)
   surplusDisposition?: SurplusDisposition;
 
+  @IsOptional()
+  @IsBoolean()
+  acceptAsFullyPaid?: boolean;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateSaleItemDto)
