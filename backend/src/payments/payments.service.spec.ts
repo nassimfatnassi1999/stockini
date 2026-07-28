@@ -9,6 +9,7 @@ import {
   SaleStatus,
 } from '@prisma/client';
 import { PaymentsService } from './payments.service';
+import { PaymentHttpException } from './payment-errors';
 
 // ─── Helpers pour clearHistory ────────────────────────────────────────────────
 
@@ -154,10 +155,15 @@ describe('PaymentsService.paySale', () => {
       total: number;
       paidAmount: number;
       remainingAmount: number;
+      stampDuty?: number;
       documentType?: string;
       status?: string;
     },
-    opts: { caisseThrows?: boolean; activePaid?: number } = {},
+    opts: {
+      caisseThrows?: boolean;
+      activePaid?: number;
+      customerRefreshThrows?: boolean;
+    } = {},
   ) {
     const saleRow = {
       id: 'sale-1',
@@ -165,8 +171,10 @@ describe('PaymentsService.paySale', () => {
       invoiceNumber: 'FAC-001',
       documentType: sale.documentType ?? DocumentType.FACTURE,
       status: sale.status ?? SaleStatus.COMPLETED,
+      stampDuty: sale.stampDuty ?? 0,
       ...sale,
     };
+    let storedPayment: Record<string, unknown> | null = null;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tx: any = {
@@ -177,14 +185,16 @@ describe('PaymentsService.paySale', () => {
         ),
       },
       payment: {
-        create: jest.fn(({ data }: { data: any }) =>
-          Promise.resolve({
+        findUnique: jest.fn(() => Promise.resolve(storedPayment)),
+        create: jest.fn(({ data }: { data: any }) => {
+          storedPayment = {
             id: 'payment-1',
             ...data,
             sale: { ...saleRow, invoiceNumber: 'FAC-001' },
             customer: { id: 'customer-1', name: 'Client Test' },
-          }),
-        ),
+          };
+          return Promise.resolve(storedPayment);
+        }),
       },
     };
 
@@ -210,7 +220,11 @@ describe('PaymentsService.paySale', () => {
       settings,
       caisseService,
       {
-        recalculateClientLockStatus: jest.fn().mockResolvedValue(undefined),
+        recalculateClientLockStatus: jest.fn(() =>
+          opts.customerRefreshThrows
+            ? Promise.reject(new Error('refresh failed'))
+            : Promise.resolve(undefined),
+        ),
       } as any,
       auditLogs,
     );
@@ -278,6 +292,30 @@ describe('PaymentsService.paySale', () => {
     );
   });
 
+  it('inclut le timbre une seule fois dans le total à payer', async () => {
+    const { service, tx } = buildSaleService({
+      total: 129.06,
+      stampDuty: 1,
+      paidAmount: 0,
+      remainingAmount: 130.06,
+    });
+
+    await service.paySale('sale-1', {
+      amountReceived: 130.06,
+      method: 'CASH' as any,
+    });
+
+    expect(tx.sale.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paidAmount: 130.06,
+          remainingAmount: 0,
+          paymentStatus: PaymentStatus.PAID,
+        }),
+      }),
+    );
+  });
+
   it('crée un paiement CUSTOMER_PAYMENT lié à la vente et au client', async () => {
     const { service, tx } = buildSaleService({
       total: 100,
@@ -300,6 +338,41 @@ describe('PaymentsService.paySale', () => {
         }),
       }),
     );
+    expect(tx.payment.create.mock.calls[0][0].data).not.toHaveProperty('id');
+  });
+
+  it("retourne le paiement existant lors d'une double soumission idempotente", async () => {
+    const { service, tx } = buildSaleService({
+      total: 100,
+      paidAmount: 0,
+      remainingAmount: 100,
+    });
+    const dto = {
+      amountReceived: 100,
+      method: 'CASH' as any,
+      idempotencyKey: 'payment-request-1',
+    };
+
+    const first = await service.paySale('sale-1', dto);
+    const second = await service.paySale('sale-1', dto);
+
+    expect(second.id).toBe(first.id);
+    expect(tx.payment.create).toHaveBeenCalledTimes(1);
+    expect(tx.sale.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('ne renvoie pas 500 si le recalcul secondaire du client échoue après le commit', async () => {
+    const { service } = buildSaleService(
+      { total: 100, paidAmount: 0, remainingAmount: 100 },
+      { customerRefreshThrows: true },
+    );
+
+    await expect(
+      service.paySale('sale-1', {
+        amountReceived: 100,
+        method: 'CASH' as any,
+      }),
+    ).resolves.toMatchObject({ id: 'payment-1' });
   });
 
   it('crée un mouvement caisse positif ENCAISSEMENT_VENTE', async () => {
@@ -342,7 +415,7 @@ describe('PaymentsService.paySale', () => {
 
     await expect(
       service.paySale('sale-1', { amount: 50, method: 'CASH' as any }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(PaymentHttpException);
   });
 
   it('rejette un paiement sur une vente annulée', async () => {
@@ -358,7 +431,7 @@ describe('PaymentsService.paySale', () => {
     ).rejects.toThrow(/annulé/);
   });
 
-  it("rollback : propage l'erreur si le mouvement caisse échoue", async () => {
+  it("rollback : masque l'erreur interne si le mouvement caisse échoue", async () => {
     const { service } = buildSaleService(
       { total: 100, paidAmount: 0, remainingAmount: 100 },
       { caisseThrows: true },
@@ -366,7 +439,12 @@ describe('PaymentsService.paySale', () => {
 
     await expect(
       service.paySale('sale-1', { amount: 30, method: 'CASH' as any }),
-    ).rejects.toThrow('Solde insuffisant');
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        statusCode: 500,
+        code: 'PAYMENT_PROCESSING_FAILED',
+      }),
+    });
   });
 
   it('CREDIT → lève BadRequestException, aucun mouvement caisse créé', async () => {
@@ -378,7 +456,7 @@ describe('PaymentsService.paySale', () => {
 
     await expect(
       service.paySale('sale-1', { amount: 100, method: 'CREDIT' as any }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(PaymentHttpException);
 
     expect(caisseService.recordMovement).not.toHaveBeenCalled();
   });
@@ -392,7 +470,7 @@ describe('PaymentsService.paySale', () => {
 
     await expect(
       service.paySale('sale-1', { amount: 100, method: 'CREDIT' as any }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(PaymentHttpException);
 
     expect(tx.sale.update).not.toHaveBeenCalled();
   });

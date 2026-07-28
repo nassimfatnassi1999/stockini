@@ -17,6 +17,8 @@ import {
 } from '@/lib/stockini/customer-payment';
 import { dateTime, money } from '@/lib/stockini/format';
 import { toast } from '@/lib/toast';
+import { generateClientId } from '@/lib/id';
+import { getApiErrorMessage } from '@/lib/api-error';
 import type { Payment, PaymentsQueryParams, Sale } from '@/lib/stockini/types';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { PageHeader } from '../shared/PageHeader';
@@ -74,10 +76,10 @@ function invoicesColumns(
     },
     {
       key: 'total',
-      label: 'Total TTC',
+      label: 'Total à payer',
       sortable: true,
       className: 'text-right',
-      render: (row) => <span className="font-mono">{money(row.total)}</span>,
+      render: (row) => <span className="font-mono">{money(row.totalFinal)}</span>,
     },
     {
       key: 'paidAmount',
@@ -351,8 +353,7 @@ export function PaymentsPage() {
       toast.success('Paiement enregistré avec succès');
     },
     onError: (error: unknown) => {
-      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? (error as Error).message ?? 'Erreur lors du paiement');
+      toast.error(getApiErrorMessage(error, 'Erreur lors du paiement. Veuillez réessayer.'));
     },
   });
 
@@ -416,7 +417,7 @@ export function PaymentsPage() {
                 amountReceived: Number(sale.remainingAmount).toFixed(3),
                 method: 'CASH',
                 note: '',
-                idempotencyKey: crypto.randomUUID(),
+                idempotencyKey: generateClientId('payment'),
               });
               setConfirmOverpayment(false);
               setSurplusDisposition(sale.customer?.id ? 'CUSTOMER_CREDIT' : 'CASH_SURPLUS');
@@ -557,8 +558,16 @@ export function PaymentsPage() {
                 <span className="font-medium">{payTarget.customer?.name ?? '-'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-text-muted">Total TTC</span>
+                <span className="text-text-muted">Total TTC hors timbre</span>
                 <span className="font-mono font-medium">{money(payTarget.total)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Timbre fiscal</span>
+                <span className="font-mono font-medium">{money(payTarget.stampDuty)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-semibold">Total à payer</span>
+                <span className="font-mono font-semibold">{money(payTarget.totalFinal)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-text-muted">Déjà payé</span>

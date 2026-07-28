@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import {
   CaisseMovementType,
   DocumentType,
@@ -21,7 +27,10 @@ import {
   PayPurchaseDto,
   PaySaleDto,
 } from './dto/payment.dto';
-import { commercialTotalFinal } from '../common/utils/commercial-document';
+import {
+  commercialTotalFinal,
+  commercialTotalFinalDecimal,
+} from '../common/utils/commercial-document';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import {
   getPurchasePaymentSummary,
@@ -31,6 +40,7 @@ import {
 } from '../common/services/purchase-payment-state';
 import { allocateCustomerPayment, tnd } from '../common/utils/customer-payment';
 import { buildPaginatedResponse } from '../common/utils/pagination.util';
+import { PaymentHttpException } from './payment-errors';
 
 @Injectable()
 export class PaymentsService {
@@ -319,231 +329,426 @@ export class PaymentsService {
   }
 
   async paySale(saleId: string, dto: PaySaleDto, userId?: string) {
-    const execute = () => this.prisma.$transaction(async (tx) => {
-      if (dto.idempotencyKey) {
-        const existing = await tx.payment.findUnique({
-          where: { idempotencyKey: dto.idempotencyKey },
-          include: { sale: true, customer: true },
-        });
-        if (existing) {
-          if (existing.saleId !== saleId) {
-            throw new BadRequestException(
-              'Cette clé d’idempotence appartient à un autre document',
+    this.logPaymentDiagnostic('payment.requested', {
+      saleId,
+      userId: userId ?? null,
+      payload: dto,
+      monetaryTypes: {
+        amountReceived: typeof dto.amountReceived,
+        legacyAmount: typeof dto.amount,
+      },
+    });
+
+    const execute = () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          if (dto.idempotencyKey) {
+            const existing = await tx.payment.findUnique({
+              where: { idempotencyKey: dto.idempotencyKey },
+              include: { sale: true, customer: true },
+            });
+            if (existing) {
+              if (existing.saleId !== saleId) {
+                throw new PaymentHttpException(
+                  HttpStatus.CONFLICT,
+                  'PAYMENT_CONFLICT',
+                  "Cette clé d'idempotence appartient à un autre document.",
+                  { saleId },
+                );
+              }
+              return existing;
+            }
+          }
+          // CREDIT cannot be used as a later payment method — no treasury event.
+          if (dto.method === 'CREDIT') {
+            throw new PaymentHttpException(
+              HttpStatus.BAD_REQUEST,
+              'PAYMENT_NOT_ALLOWED',
+              'Le mode CREDIT ne peut pas être utilisé pour un paiement ultérieur. Utilisez CASH, CHEQUE, BANK_TRANSFER ou CARD.',
             );
           }
-          return existing;
-        }
-      }
-      // CREDIT cannot be used as a later payment method — no treasury event.
-      if (dto.method === 'CREDIT') {
-        throw new BadRequestException(
-          'Le mode CREDIT ne peut pas être utilisé pour un paiement ultérieur. Utilisez CASH, CHEQUE, BANK_TRANSFER ou CARD.',
-        );
-      }
 
-      const sale = await tx.sale.findFirstOrThrow({
-        where: { id: saleId, deletedAt: null },
-        include: {
-          consolidationMemberships: {
-            where: { active: true },
-            select: { consolidatedSale: { select: { invoiceNumber: true } } },
-          },
-        },
-      });
+          const sale = await tx.sale.findFirstOrThrow({
+            where: { id: saleId, deletedAt: null },
+            include: {
+              consolidationMemberships: {
+                where: { active: true },
+                select: {
+                  consolidatedSale: { select: { invoiceNumber: true } },
+                },
+              },
+            },
+          });
 
-      if ((sale.consolidationMemberships ?? []).length) {
-        throw new BadRequestException(
-          `Ce document est inclus dans ${sale.consolidationMemberships[0].consolidatedSale.invoiceNumber}. Le paiement doit être enregistré sur le regroupement.`,
-        );
-      }
+          if ((sale.consolidationMemberships ?? []).length) {
+            throw new PaymentHttpException(
+              HttpStatus.BAD_REQUEST,
+              'PAYMENT_NOT_ALLOWED',
+              `Ce document est inclus dans ${sale.consolidationMemberships[0].consolidatedSale.invoiceNumber}. Le paiement doit être enregistré sur le regroupement.`,
+              {
+                consolidatedDocument:
+                  sale.consolidationMemberships[0].consolidatedSale
+                    .invoiceNumber,
+              },
+            );
+          }
 
-      if (
-        sale.documentType === DocumentType.DEVIS ||
-        sale.documentType === DocumentType.BON_COMMANDE ||
-        sale.documentType === DocumentType.AVOIR
-      ) {
-        throw new BadRequestException(
-          `Le type ${sale.documentType} n'accepte pas de paiement`,
-        );
-      }
-      if (sale.status === SaleStatus.CANCELLED) {
-        throw new BadRequestException('Impossible de payer un document annulé');
-      }
+          if (
+            sale.documentType === DocumentType.DEVIS ||
+            sale.documentType === DocumentType.BON_COMMANDE ||
+            sale.documentType === DocumentType.AVOIR
+          ) {
+            throw new PaymentHttpException(
+              HttpStatus.BAD_REQUEST,
+              'PAYMENT_NOT_ALLOWED',
+              `Le type ${sale.documentType} n'accepte pas de paiement`,
+              { documentType: sale.documentType },
+            );
+          }
+          if (sale.status === SaleStatus.CANCELLED) {
+            throw new PaymentHttpException(
+              HttpStatus.BAD_REQUEST,
+              'PAYMENT_NOT_ALLOWED',
+              'Impossible de payer un document annulé.',
+            );
+          }
 
-      const saleTotalFinal = commercialTotalFinal(sale.total, sale.stampDuty);
-      const netAfterCredits = tnd(
-        Prisma.Decimal.max(
-          new Prisma.Decimal(saleTotalFinal).minus(sale.totalRefunded ?? 0),
-          0,
-        ),
-      );
-      // Recalculate from active applied payments: cached paid/remaining values may
-      // contain legacy overpayments.
-      const activePayments =
-        typeof tx.payment.aggregate === 'function'
-          ? await tx.payment.aggregate({
-              where: {
-                saleId,
-                deletedAt: null,
+          const saleTotalFinal = commercialTotalFinalDecimal(
+            sale.total,
+            sale.stampDuty,
+          );
+          const netAfterCredits = tnd(
+            Prisma.Decimal.max(
+              saleTotalFinal.minus(sale.totalRefunded ?? 0),
+              0,
+            ),
+          );
+          // Recalculate from active applied payments: cached paid/remaining values may
+          // contain legacy overpayments.
+          const activePayments =
+            typeof tx.payment.aggregate === 'function'
+              ? await tx.payment.aggregate({
+                  where: {
+                    saleId,
+                    deletedAt: null,
+                    type: PaymentType.CUSTOMER_PAYMENT,
+                  },
+                  _sum: { amountApplied: true, amount: true },
+                })
+              : {
+                  _sum: {
+                    amountApplied: sale.paidAmount,
+                    amount: sale.paidAmount,
+                  },
+                };
+          const appliedBefore = tnd(
+            activePayments._sum.amountApplied ??
+              activePayments._sum.amount ??
+              sale.paidAmount,
+          );
+          const remainingBefore = tnd(
+            Prisma.Decimal.max(netAfterCredits.minus(appliedBefore), 0),
+          );
+          let allocation;
+          try {
+            allocation = allocateCustomerPayment({
+              remainingBefore,
+              amountReceived: dto.amountReceived ?? dto.amount ?? 0,
+              method: dto.method,
+              surplusDisposition: dto.surplusDisposition,
+              hasCustomer: Boolean(sale.customerId),
+            });
+          } catch (error) {
+            if (error instanceof BadRequestException) {
+              const response = error.getResponse();
+              const message =
+                typeof response === 'string'
+                  ? response
+                  : String(
+                      (response as { message?: unknown }).message ??
+                        error.message,
+                    );
+              throw new PaymentHttpException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                'INVALID_PAYMENT_AMOUNT',
+                message,
+                {
+                  saleId,
+                  remainingAmount: remainingBefore.toFixed(3),
+                },
+              );
+            }
+            throw error;
+          }
+          this.logPaymentDiagnostic('payment.calculated', {
+            saleId,
+            userId: userId ?? null,
+            invoiceNumber: sale.invoiceNumber,
+            totalTtcExcludingStamp: new Prisma.Decimal(sale.total).toFixed(3),
+            stampDuty: new Prisma.Decimal(sale.stampDuty ?? 0).toFixed(3),
+            totalPayable: saleTotalFinal.toFixed(3),
+            totalRefunded: new Prisma.Decimal(sale.totalRefunded ?? 0).toFixed(
+              3,
+            ),
+            cachedPaidAmount: new Prisma.Decimal(sale.paidAmount ?? 0).toFixed(
+              3,
+            ),
+            appliedBefore: appliedBefore.toFixed(3),
+            remainingBefore: remainingBefore.toFixed(3),
+            amountReceived: allocation.amountReceived.toFixed(3),
+            amountApplied: allocation.amountApplied.toFixed(3),
+            changeReturned: allocation.changeReturned.toFixed(3),
+            remainingAfter: allocation.remainingAfter.toFixed(3),
+          });
+          const newPaidAmount = tnd(
+            appliedBefore.plus(allocation.amountApplied),
+          );
+
+          const payRef = await this.references.generate('PAY', 'payment', tx);
+          const payment = await tx.payment.create({
+            data: {
+              reference: payRef,
+              type: PaymentType.CUSTOMER_PAYMENT,
+              method: dto.method,
+              amount: allocation.amountApplied.toNumber(),
+              amountReceived: allocation.amountReceived.toNumber(),
+              amountApplied: allocation.amountApplied.toNumber(),
+              changeDue: allocation.changeDue.toNumber(),
+              changeReturned: allocation.changeReturned.toNumber(),
+              retainedSurplus: allocation.retainedSurplus.toNumber(),
+              customerCreditCreated:
+                allocation.customerCreditCreated.toNumber(),
+              remainingBefore: allocation.remainingBefore.toNumber(),
+              remainingAfter: allocation.remainingAfter.toNumber(),
+              surplusDisposition: allocation.surplusDisposition,
+              idempotencyKey: dto.idempotencyKey,
+              cashImpactDone: true,
+              saleId,
+              customerId: sale.customerId ?? undefined,
+              note: dto.note,
+            },
+            include: { sale: true, customer: true },
+          });
+
+          await tx.sale.update({
+            where: { id: saleId },
+            data: {
+              paidAmount: newPaidAmount.toNumber(),
+              remainingAmount: allocation.remainingAfter.toNumber(),
+              paymentStatus: allocation.paymentStatus,
+            },
+          });
+
+          const isReturned =
+            allocation.surplusDisposition === SurplusDisposition.RETURNED;
+          const isCashSurplus =
+            allocation.surplusDisposition === SurplusDisposition.CASH_SURPLUS;
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.ENCAISSEMENT_VENTE,
+            montant: isReturned
+              ? allocation.amountReceived.toNumber()
+              : isCashSurplus
+                ? allocation.amountApplied.toNumber()
+                : allocation.amountReceived.toNumber(),
+            motif: `Encaissement vente ${payment.sale?.invoiceNumber ?? saleId}`,
+            referenceDoc: payRef,
+            userId,
+            paymentMethod: dto.method as string,
+          });
+          if (allocation.changeReturned.gt(0)) {
+            await this.caisseService.recordMovement(tx, {
+              type: CaisseMovementType.CUSTOMER_CHANGE_OUT,
+              montant: allocation.changeReturned.negated().toNumber(),
+              motif: `Monnaie rendue pour ${payment.sale?.invoiceNumber ?? saleId}`,
+              referenceDoc: `CHANGE-${payRef}`,
+              userId,
+              paymentMethod: dto.method,
+            });
+          }
+          if (allocation.retainedSurplus.gt(0)) {
+            await this.caisseService.recordMovement(tx, {
+              type: CaisseMovementType.CASH_SURPLUS_IN,
+              montant: allocation.retainedSurplus.toNumber(),
+              motif: `Surplus non rendu pour ${payment.sale?.invoiceNumber ?? saleId}`,
+              referenceDoc: `SURPLUS-${payRef}`,
+              userId,
+              paymentMethod: dto.method,
+            });
+          }
+          if (allocation.customerCreditCreated.gt(0) && sale.customerId) {
+            await tx.customer.update({
+              where: { id: sale.customerId },
+              data: {
+                creditBalance: {
+                  increment: allocation.customerCreditCreated,
+                },
+              },
+            });
+          }
+
+          await this.auditLogs.audit(
+            {
+              action: 'payment.sale_payment',
+              entity: 'Payment',
+              entityId: payment.id,
+              userId,
+              newValue: {
+                id: payment.id,
+                reference: payRef,
+                amountReceived: allocation.amountReceived.toNumber(),
+                amountApplied: allocation.amountApplied.toNumber(),
+                changeReturned: allocation.changeReturned.toNumber(),
+                retainedSurplus: allocation.retainedSurplus.toNumber(),
+                customerCreditCreated:
+                  allocation.customerCreditCreated.toNumber(),
+                method: dto.method,
                 type: PaymentType.CUSTOMER_PAYMENT,
               },
-              _sum: { amountApplied: true, amount: true },
-            })
-          : { _sum: { amountApplied: sale.paidAmount, amount: sale.paidAmount } };
-      const appliedBefore = tnd(
-        activePayments._sum.amountApplied ??
-          activePayments._sum.amount ??
-          sale.paidAmount,
-      );
-      const remainingBefore = tnd(
-        Prisma.Decimal.max(netAfterCredits.minus(appliedBefore), 0),
-      );
-      const allocation = allocateCustomerPayment({
-        remainingBefore,
-        amountReceived: dto.amountReceived ?? dto.amount ?? 0,
-        method: dto.method,
-        surplusDisposition: dto.surplusDisposition,
-        hasCustomer: Boolean(sale.customerId),
-      });
-      const newPaidAmount = tnd(appliedBefore.plus(allocation.amountApplied));
-
-      const payRef = await this.references.generate('PAY', 'payment', tx);
-      const payment = await tx.payment.create({
-        data: {
-          reference: payRef,
-          type: PaymentType.CUSTOMER_PAYMENT,
-          method: dto.method,
-          amount: allocation.amountApplied.toNumber(),
-          amountReceived: allocation.amountReceived.toNumber(),
-          amountApplied: allocation.amountApplied.toNumber(),
-          changeDue: allocation.changeDue.toNumber(),
-          changeReturned: allocation.changeReturned.toNumber(),
-          retainedSurplus: allocation.retainedSurplus.toNumber(),
-          customerCreditCreated: allocation.customerCreditCreated.toNumber(),
-          remainingBefore: allocation.remainingBefore.toNumber(),
-          remainingAfter: allocation.remainingAfter.toNumber(),
-          surplusDisposition: allocation.surplusDisposition,
-          idempotencyKey: dto.idempotencyKey,
-          cashImpactDone: true,
-          saleId,
-          customerId: sale.customerId ?? undefined,
-          note: dto.note,
-        },
-        include: { sale: true, customer: true },
-      });
-
-      await tx.sale.update({
-        where: { id: saleId },
-        data: {
-          paidAmount: newPaidAmount.toNumber(),
-          remainingAmount: allocation.remainingAfter.toNumber(),
-          paymentStatus: allocation.paymentStatus,
-        },
-      });
-
-      const isReturned =
-        allocation.surplusDisposition === SurplusDisposition.RETURNED;
-      const isCashSurplus =
-        allocation.surplusDisposition === SurplusDisposition.CASH_SURPLUS;
-      await this.caisseService.recordMovement(tx, {
-        type: CaisseMovementType.ENCAISSEMENT_VENTE,
-        montant: isReturned
-          ? allocation.amountReceived.toNumber()
-          : isCashSurplus
-            ? allocation.amountApplied.toNumber()
-            : allocation.amountReceived.toNumber(),
-        motif: `Encaissement vente ${payment.sale?.invoiceNumber ?? saleId}`,
-        referenceDoc: payRef,
-        userId,
-        paymentMethod: dto.method as string,
-      });
-      if (allocation.changeReturned.gt(0)) {
-        await this.caisseService.recordMovement(tx, {
-          type: CaisseMovementType.CUSTOMER_CHANGE_OUT,
-          montant: allocation.changeReturned.negated().toNumber(),
-          motif: `Monnaie rendue pour ${payment.sale?.invoiceNumber ?? saleId}`,
-          referenceDoc: `CHANGE-${payRef}`,
-          userId,
-          paymentMethod: dto.method,
-        });
-      }
-      if (allocation.retainedSurplus.gt(0)) {
-        await this.caisseService.recordMovement(tx, {
-          type: CaisseMovementType.CASH_SURPLUS_IN,
-          montant: allocation.retainedSurplus.toNumber(),
-          motif: `Surplus non rendu pour ${payment.sale?.invoiceNumber ?? saleId}`,
-          referenceDoc: `SURPLUS-${payRef}`,
-          userId,
-          paymentMethod: dto.method,
-        });
-      }
-      if (allocation.customerCreditCreated.gt(0) && sale.customerId) {
-        await tx.customer.update({
-          where: { id: sale.customerId },
-          data: {
-            creditBalance: {
-              increment: allocation.customerCreditCreated,
+              metadata: {
+                paymentId: payment.id,
+                reference: payRef,
+                amountReceived: allocation.amountReceived.toNumber(),
+                amountApplied: allocation.amountApplied.toNumber(),
+                surplusDisposition: allocation.surplusDisposition,
+                method: dto.method,
+                saleId,
+                invoiceNumber: payment.sale?.invoiceNumber ?? null,
+                customerId: payment.customerId ?? null,
+              },
             },
-          },
-        });
-      }
+            tx,
+          );
 
-      await this.auditLogs.audit(
-        {
-          action: 'payment.sale_payment',
-          entity: 'Payment',
-          entityId: payment.id,
-          userId,
-          newValue: {
-            id: payment.id,
-            reference: payRef,
-            amountReceived: allocation.amountReceived.toNumber(),
-            amountApplied: allocation.amountApplied.toNumber(),
-            changeReturned: allocation.changeReturned.toNumber(),
-            retainedSurplus: allocation.retainedSurplus.toNumber(),
-            customerCreditCreated: allocation.customerCreditCreated.toNumber(),
-            method: dto.method,
-            type: PaymentType.CUSTOMER_PAYMENT,
-          },
-          metadata: {
-            paymentId: payment.id,
-            reference: payRef,
-            amountReceived: allocation.amountReceived.toNumber(),
-            amountApplied: allocation.amountApplied.toNumber(),
-            surplusDisposition: allocation.surplusDisposition,
-            method: dto.method,
-            saleId,
-            invoiceNumber: payment.sale?.invoiceNumber ?? null,
-            customerId: payment.customerId ?? null,
-          },
+          return payment;
         },
-        tx,
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
-      return payment;
-    });
-    const result = await execute().catch(async (error: unknown) => {
-      const isDuplicateIdempotencyKey =
-        dto.idempotencyKey &&
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002';
-      if (!isDuplicateIdempotencyKey) throw error;
-      const existing = await this.prisma.payment.findUnique({
-        where: { idempotencyKey: dto.idempotencyKey },
-        include: { sale: true, customer: true },
-      });
-      if (!existing || existing.saleId !== saleId) throw error;
-      return existing;
-    });
+    let result: Awaited<ReturnType<typeof execute>>;
+    try {
+      result = await execute();
+    } catch (firstError: unknown) {
+      if (this.isSerializationConflict(firstError)) {
+        try {
+          result = await execute();
+        } catch (retryError: unknown) {
+          result = await this.recoverIdempotentPaymentOrThrow(
+            retryError,
+            saleId,
+            dto.idempotencyKey,
+            userId,
+          );
+        }
+      } else {
+        result = await this.recoverIdempotentPaymentOrThrow(
+          firstError,
+          saleId,
+          dto.idempotencyKey,
+          userId,
+        );
+      }
+    }
 
     // Recalcule verrouillage après paiement (la dette peut être soldée)
     if (result.customerId) {
-      await this.customersService.recalculateClientLockStatus(
-        result.customerId,
-      );
+      try {
+        await this.customersService.recalculateClientLockStatus(
+          result.customerId,
+        );
+      } catch (error) {
+        // Le paiement, la vente, la caisse et l'audit sont déjà validés ensemble.
+        // Une maintenance secondaire ne doit jamais transformer ce succès en 500.
+        this.logger.warn(
+          JSON.stringify({
+            event: 'payment.customer_lock_refresh_failed',
+            saleId,
+            customerId: result.customerId,
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
     }
 
     return result;
+  }
+
+  private isSerializationConflict(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2034'
+    );
+  }
+
+  private async recoverIdempotentPaymentOrThrow(
+    error: unknown,
+    saleId: string,
+    idempotencyKey?: string,
+    userId?: string,
+  ) {
+    const prismaCode =
+      error instanceof Prisma.PrismaClientKnownRequestError
+        ? error.code
+        : undefined;
+    if (idempotencyKey && prismaCode === 'P2002') {
+      const existing = await this.prisma.payment.findUnique({
+        where: { idempotencyKey },
+        include: { sale: true, customer: true },
+      });
+      if (existing?.saleId === saleId) return existing;
+    }
+
+    if (error instanceof HttpException) throw error;
+
+    this.logger.error(
+      JSON.stringify({
+        event: 'payment.failed',
+        saleId,
+        userId: userId ?? null,
+        prismaCode: prismaCode ?? null,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      }),
+    );
+
+    if (prismaCode === 'P2025') {
+      throw new PaymentHttpException(
+        HttpStatus.NOT_FOUND,
+        'SALE_NOT_FOUND',
+        'La vente demandée est introuvable.',
+        { saleId },
+      );
+    }
+    if (prismaCode === 'P2003') {
+      throw new PaymentHttpException(
+        HttpStatus.NOT_FOUND,
+        'RELATED_ENTITY_NOT_FOUND',
+        'Une donnée liée au paiement (client, utilisateur ou caisse) est introuvable.',
+      );
+    }
+    if (prismaCode === 'P2002' || prismaCode === 'P2034') {
+      throw new PaymentHttpException(
+        HttpStatus.CONFLICT,
+        'PAYMENT_CONFLICT',
+        'Le paiement a déjà été enregistré ou modifié par une autre requête.',
+        { saleId },
+      );
+    }
+    throw new PaymentHttpException(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      'PAYMENT_PROCESSING_FAILED',
+      "Le paiement n'a pas pu être enregistré. Veuillez réessayer.",
+      { saleId },
+    );
+  }
+
+  private logPaymentDiagnostic(
+    event: string,
+    data: Record<string, unknown>,
+  ): void {
+    if (process.env.PAYMENT_DIAGNOSTICS !== 'true') return;
+    this.logger.debug(JSON.stringify({ event, ...data }));
   }
 
   async payPurchase(purchaseId: string, dto: PayPurchaseDto, userId?: string) {

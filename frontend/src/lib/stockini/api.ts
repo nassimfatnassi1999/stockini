@@ -431,7 +431,9 @@ export const stockiniApi = {
   ) => {
     validatePayment({ amount: data.amountReceived, method: data.method });
     return api
-      .post<Payment>(`/payments/sales/${saleId}/pay`, data)
+      .post<Payment>(`/payments/sales/${saleId}/pay`, data, {
+        suppressErrorToast: true,
+      })
       .then((r) => r.data);
   },
   payPurchase: (
