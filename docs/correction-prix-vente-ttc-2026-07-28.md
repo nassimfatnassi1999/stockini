@@ -19,10 +19,13 @@ La réception et le réparateur CUMP synchronisent maintenant `purchasePrice`, `
 ## Diagnostic
 
 ```bash
+npm run build
 npm run pricing:diagnose -- --reference=FD01B13120L
 ```
 
 Le script est strictement en lecture seule. Il compare les champs produit, la dernière réception, le CUMP issu des réceptions et le prix automatique résolu. La correction déterministe reste séparée :
+
+Les commandes exécutent les fichiers compilés de `dist/` et ne nécessitent pas `ts-node` en production. Après chaque mise à jour du code, le backend doit donc avoir été compilé ou redéployé avant leur lancement.
 
 ```bash
 npm run costs:repair

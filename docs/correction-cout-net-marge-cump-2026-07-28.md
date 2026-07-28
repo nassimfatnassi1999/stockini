@@ -29,6 +29,6 @@ Pour BATTERIE L2 : `276,990 − round3(276,990 × 25 %) = 207,742 DT`; `227,063 
 
 ## Réparation contrôlée
 
-`npm run costs:repair` est un dry-run. `npm run costs:repair -- --apply` écrit après sauvegarde explicite de la base.
+Après compilation du backend, `npm run costs:repair` est un dry-run. `npm run costs:repair -- --apply` écrit après sauvegarde explicite de la base. La commande utilise le JavaScript compilé dans `dist/` et ne dépend pas de `ts-node` sur le serveur.
 
 Le réparateur met à jour les coûts nets explicites des achats. Il corrige un snapshot de vente estimé uniquement si tous les achats réceptionnés antérieurs disponibles donnent exactement le même coût net. Les autres ventes sont déclarées ambiguës. Le CUMP produit est recalculé uniquement en l'absence d'entrées/retours historiques non valorisables.
