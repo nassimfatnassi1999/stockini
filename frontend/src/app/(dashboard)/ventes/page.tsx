@@ -1340,8 +1340,9 @@ export default function VentesPage() {
       queryClient.invalidateQueries({ queryKey: ["stockini-products"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-customers-page"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-customer-options"] });
+      queryClient.invalidateQueries({ queryKey: ["caisse-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["reports-overview"] });
       if (Number((newSale as { paidAmount?: unknown }).paidAmount) > 0) {
-        queryClient.invalidateQueries({ queryKey: ["caisse-summary"] });
         queryClient.invalidateQueries({ queryKey: ["caisse-transactions"] });
         queryClient.invalidateQueries({ queryKey: ["caisse-analytics"] });
       }
@@ -1388,6 +1389,9 @@ export default function VentesPage() {
       queryClient.invalidateQueries({ queryKey: ["stockini-customers-page"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-customer-options"] });
       queryClient.invalidateQueries({ queryKey: ["caisse-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["caisse-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["caisse-analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["reports-overview"] });
       toast.success("Vente déplacée dans la corbeille");
       setDeleteTarget(null);
     },

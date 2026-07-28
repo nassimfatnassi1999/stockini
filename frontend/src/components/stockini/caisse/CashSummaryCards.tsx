@@ -5,7 +5,6 @@ import {
   ArrowUpCircle,
   Banknote,
   Building2,
-  CalendarDays,
   TrendingDown,
   TrendingUp,
   Wallet,
@@ -14,6 +13,8 @@ import {
 import { cn } from '@/lib/utils';
 import { MetricInfoTooltip } from '../shared/MetricInfoTooltip';
 import type { KpiDefinitionKey } from '@/lib/kpi-definitions';
+import Decimal from 'decimal.js';
+import { cashProfitTitle } from './cash-period';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,9 +23,6 @@ export interface AccountSummary {
   entrees:       number;
   sorties:       number;
   profit:        number;
-  profitSemaine: number;
-  profitMois:    number;
-  profitAnnee:   number;
 }
 
 export interface CashSummary {
@@ -35,10 +33,17 @@ export interface CashSummary {
   totalClientDebt:  number;
   retainedSurplus:  number;
   profitPeriode:    number;
-  profitSemaine:    number;
-  profitMois:       number;
-  profitAnnee:      number;
   period:           string;
+  label:            string;
+  startDate:        string;
+  endDate:          string;
+  grossSalesHt:     string;
+  creditsAndReturnsHt: string;
+  netSalesHt:       string;
+  historicalCost:   string;
+  grossProfit:      string;
+  expenses:         string;
+  netProfit:        string;
   // Per-account detail
   soldeCaisse?:     number;
   soldeBanque?:     number;
@@ -50,17 +55,15 @@ export interface CashSummary {
     cashOutflows: number;
   };
   sales?: SalesProfitMetrics;
-  salesPeriods?: {
-    week: SalesProfitMetrics;
-    month: SalesProfitMetrics;
-    year: SalesProfitMetrics;
-  };
 }
 
 interface SalesProfitMetrics {
   netRevenueHt: number;
   costOfGoodsSold: number;
   grossProfit: number;
+  grossMargin: number;
+  expenses: number;
+  netProfit: number;
   creditNoteImpact: number;
   saleCount: number;
 }
@@ -69,11 +72,11 @@ export type AccountView = 'global' | 'cash' | 'bank';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
+function fmt(n: number | string) {
   return new Intl.NumberFormat('fr-TN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(n) + ' DT';
+  }).format(new Decimal(n).toNumber()) + ' DT';
 }
 
 const PERIOD_LABELS: Record<string, string> = {
@@ -96,9 +99,10 @@ interface KpiCardProps {
   description?: string;
   metric?: KpiDefinitionKey;
   period?: string;
+  details?: Array<{ label: string; value: string }>;
 }
 
-function KpiCard({ label, value, icon: Icon, color, bg, positive, description, metric, period = 'Période affichée' }: KpiCardProps) {
+function KpiCard({ label, value, icon: Icon, color, bg, positive, description, metric, period = 'Période affichée', details }: KpiCardProps) {
   const isPos = value >= 0;
   const content = (triggerProps?: React.HTMLAttributes<HTMLDivElement> & { ref?: React.RefObject<HTMLDivElement> }, infoButton?: React.ReactNode) => (
     <div {...triggerProps} className={cn('rounded-xl border border-border bg-card p-3 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-ring', 'flex min-h-[80px] items-start gap-3')}>
@@ -124,7 +128,7 @@ function KpiCard({ label, value, icon: Icon, color, bg, positive, description, m
     </div>
   );
   if (!metric) return content();
-  return <MetricInfoTooltip metric={metric} period={period}>{(triggerProps, infoButton) => content(triggerProps, infoButton)}</MetricInfoTooltip>;
+  return <MetricInfoTooltip metric={metric} period={period} details={details}>{(triggerProps, infoButton) => content(triggerProps, infoButton)}</MetricInfoTooltip>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -133,10 +137,25 @@ interface Props {
   summary:    CashSummary | undefined;
   isLoading:  boolean;
   view:       AccountView;
+  error?: unknown;
+  onRetry?: () => void;
+}
+
+function buildProfitDetails(summary: CashSummary) {
+  return [
+    { label: 'Ventes brutes HT', value: fmt(summary.grossSalesHt) },
+    { label: 'Avoirs et retours HT', value: fmt(summary.creditsAndReturnsHt) },
+    { label: 'Ventes nettes HT', value: fmt(summary.netSalesHt) },
+    { label: 'Coût historique', value: fmt(summary.historicalCost) },
+    { label: 'Marge brute réelle', value: fmt(summary.grossProfit) },
+    { label: 'Dépenses actives', value: fmt(summary.expenses) },
+    { label: 'Bénéfice net réel', value: fmt(summary.netProfit) },
+  ];
 }
 
 function buildGlobalCards(summary: CashSummary, periodLabel: string): KpiCardProps[] {
-  const benefitDescription = 'Ventes nettes HT − coût des produits vendus';
+  const benefitDescription = 'Ventes nettes HT − coût historique − dépenses actives';
+  const profitDetails = buildProfitDetails(summary);
   return [
     { label: 'Solde global', value: summary.soldeGlobal, icon: Wallet, color: 'text-orange-500', bg: 'bg-orange-50', metric: 'globalBalance', period: periodLabel },
     { label: 'Caisse physique', value: summary.soldeCaisse ?? 0, icon: Banknote, color: 'text-amber-600', bg: 'bg-amber-50', metric: 'physicalCash', period: periodLabel },
@@ -145,14 +164,11 @@ function buildGlobalCards(summary: CashSummary, periodLabel: string): KpiCardPro
     { label: `Écarts encaissés — ${periodLabel}`, value: summary.retainedSurplus ?? 0, icon: Banknote, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', metric: 'retainedSurplus', period: periodLabel },
     { label: `Entrées — ${periodLabel}`, value: summary.entrees, icon: ArrowUpCircle, color: 'text-emerald-600', bg: 'bg-emerald-50', metric: 'cashInflows', period: periodLabel },
     { label: `Sorties — ${periodLabel}`, value: summary.sorties, icon: ArrowDownCircle, color: 'text-red-500', bg: 'bg-red-50', metric: 'cashOutflows', period: periodLabel },
-    { label: `Bénéfice brut réel — ${periodLabel}`, value: summary.sales?.grossProfit ?? summary.profitPeriode, icon: summary.profitPeriode >= 0 ? TrendingUp : TrendingDown, color: summary.profitPeriode >= 0 ? 'text-emerald-600' : 'text-red-500', bg: summary.profitPeriode >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true, description: benefitDescription, metric: 'grossProfit', period: periodLabel },
-    { label: 'Bénéfice semaine', value: summary.salesPeriods?.week.grossProfit ?? summary.profitSemaine, icon: CalendarDays, color: summary.profitSemaine >= 0 ? 'text-sky-600' : 'text-red-500', bg: 'bg-sky-50', positive: true, metric: 'grossProfit', period: 'Cette semaine' },
-    { label: 'Bénéfice mois', value: summary.salesPeriods?.month.grossProfit ?? summary.profitMois, icon: CalendarDays, color: summary.profitMois >= 0 ? 'text-violet-600' : 'text-red-500', bg: 'bg-violet-50', positive: true, metric: 'grossProfit', period: 'Ce mois' },
-    { label: 'Bénéfice année', value: summary.salesPeriods?.year.grossProfit ?? summary.profitAnnee, icon: TrendingUp, color: summary.profitAnnee >= 0 ? 'text-amber-600' : 'text-red-500', bg: 'bg-amber-50', positive: true, metric: 'grossProfit', period: 'Cette année' },
+    { label: cashProfitTitle(periodLabel), value: new Decimal(summary.netProfit).toNumber(), icon: new Decimal(summary.netProfit).gte(0) ? TrendingUp : TrendingDown, color: new Decimal(summary.netProfit).gte(0) ? 'text-emerald-600' : 'text-red-500', bg: new Decimal(summary.netProfit).gte(0) ? 'bg-emerald-50' : 'bg-red-50', positive: true, description: benefitDescription, metric: 'netProfit', period: periodLabel, details: profitDetails },
   ];
 }
 
-function buildAccountCards(acc: AccountSummary, solde: number, periodLabel: string, isCash: boolean): KpiCardProps[] {
+function buildAccountCards(acc: AccountSummary, solde: number, periodLabel: string, isCash: boolean, summary: CashSummary): KpiCardProps[] {
   const Icon = isCash ? Banknote : Building2;
   const soldeBg = isCash ? 'bg-amber-50' : 'bg-blue-50';
   const soldeColor = isCash ? 'text-amber-600' : 'text-blue-600';
@@ -160,14 +176,11 @@ function buildAccountCards(acc: AccountSummary, solde: number, periodLabel: stri
     { label: isCash ? 'Solde caisse physique' : 'Solde banque / virements', value: solde, icon: Icon, color: soldeColor, bg: soldeBg, metric: isCash ? 'physicalCash' : 'bankBalance', period: periodLabel },
     { label: `Entrées — ${periodLabel}`, value: acc.entrees, icon: ArrowUpCircle, color: 'text-emerald-600', bg: 'bg-emerald-50', metric: 'cashInflows', period: periodLabel },
     { label: `Sorties — ${periodLabel}`, value: acc.sorties, icon: ArrowDownCircle, color: 'text-red-500', bg: 'bg-red-50', metric: 'cashOutflows', period: periodLabel },
-    { label: `Bénéfice brut réel — ${periodLabel}`, value: acc.profit, icon: acc.profit >= 0 ? TrendingUp : TrendingDown, color: acc.profit >= 0 ? 'text-emerald-600' : 'text-red-500', bg: acc.profit >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true, description: 'Ventes nettes HT − coût des produits vendus', metric: 'grossProfit', period: periodLabel },
-    { label: 'Bénéfice semaine', value: acc.profitSemaine, icon: CalendarDays, color: acc.profitSemaine >= 0 ? 'text-sky-600' : 'text-red-500', bg: 'bg-sky-50', positive: true, metric: 'grossProfit', period: 'Cette semaine' },
-    { label: 'Bénéfice mois', value: acc.profitMois, icon: CalendarDays, color: acc.profitMois >= 0 ? 'text-violet-600' : 'text-red-500', bg: 'bg-violet-50', positive: true, metric: 'grossProfit', period: 'Ce mois' },
-    { label: 'Bénéfice année', value: acc.profitAnnee, icon: TrendingUp, color: acc.profitAnnee >= 0 ? 'text-amber-600' : 'text-red-500', bg: 'bg-amber-50', positive: true, metric: 'grossProfit', period: 'Cette année' },
+    { label: cashProfitTitle(periodLabel), value: acc.profit, icon: acc.profit >= 0 ? TrendingUp : TrendingDown, color: acc.profit >= 0 ? 'text-emerald-600' : 'text-red-500', bg: acc.profit >= 0 ? 'bg-emerald-50' : 'bg-red-50', positive: true, description: 'Ventes nettes HT − coût historique − dépenses actives', metric: 'netProfit', period: periodLabel, details: buildProfitDetails(summary) },
   ];
 }
 
-export function CashSummaryCards({ summary, isLoading, view }: Props) {
+export function CashSummaryCards({ summary, isLoading, view, error, onRetry }: Props) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -178,15 +191,22 @@ export function CashSummaryCards({ summary, isLoading, view }: Props) {
     );
   }
 
+  if (error) {
+    return <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <p>Impossible de charger les indicateurs financiers pour cette période.</p>
+      {onRetry && <button type="button" onClick={onRetry} className="mt-2 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium">Réessayer</button>}
+    </div>;
+  }
+
   if (!summary) return null;
 
-  const periodLabel = PERIOD_LABELS[summary.period] ?? summary.period;
+  const periodLabel = summary.label ?? PERIOD_LABELS[summary.period] ?? summary.period;
 
   let cards: KpiCardProps[];
   if (view === 'cash' && summary.caisse) {
-    cards = buildAccountCards(summary.caisse, summary.soldeCaisse ?? 0, periodLabel, true);
+    cards = buildAccountCards(summary.caisse, summary.soldeCaisse ?? 0, periodLabel, true, summary);
   } else if (view === 'bank' && summary.banque) {
-    cards = buildAccountCards(summary.banque, summary.soldeBanque ?? 0, periodLabel, false);
+    cards = buildAccountCards(summary.banque, summary.soldeBanque ?? 0, periodLabel, false, summary);
   } else {
     cards = buildGlobalCards(summary, periodLabel);
   }

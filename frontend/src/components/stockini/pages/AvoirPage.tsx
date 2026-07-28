@@ -485,6 +485,10 @@ function CreateAvoirModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ["stockini-customers-page"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-customer-options"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-caisse"] });
+      queryClient.invalidateQueries({ queryKey: ["caisse-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["caisse-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["caisse-analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["reports-overview"] });
       queryClient.invalidateQueries({ queryKey: ["stockini-payments"] });
       queryClient.invalidateQueries({ queryKey: ["sale-credit-notes"] });
       queryClient.invalidateQueries({

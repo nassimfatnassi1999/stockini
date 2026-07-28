@@ -28,6 +28,7 @@ import { CashAnalyticsCharts, type CashAnalytics } from './CashAnalyticsCharts';
 import { CashResetModal } from './CashResetModal';
 import { CashManualOpModal } from './CashManualOpModal';
 import { ClearHistoryModal } from '../shared/ClearHistoryModal';
+import { buildCashPeriodParams, cashPeriodQueryKey, shouldShowCashKpiLoader } from './cash-period';
 
 type ContentTab = 'transactions' | 'analytics';
 type AccountTab = 'global' | 'cash' | 'bank';
@@ -39,7 +40,12 @@ const ACCOUNT_TABS: { id: AccountTab; label: string; icon: React.ElementType; ac
 ];
 
 function todayStr() {
-  return new Date().toISOString().split('T')[0];
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Tunis',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 export function CashDashboard() {
@@ -80,37 +86,36 @@ export function CashDashboard() {
 
   // Build period params (+ optional account filter for transactions/analytics)
   function buildParams(withAccount: boolean): Record<string, string> {
-    const base: Record<string, string> =
-      filters.period === 'custom' && filters.startDate && filters.endDate
-        ? { period: 'custom', startDate: filters.startDate, endDate: filters.endDate }
-        : { period: filters.period };
-    if (withAccount && accountParam) base.account = accountParam;
-    return base;
+    return buildCashPeriodParams(filters, withAccount ? accountParam : undefined);
   }
 
   // Summary always global (returns both breakdowns)
   const summaryParams = buildParams(false);
+  const customRangeReady = filters.period !== 'custom' ||
+    Boolean(filters.startDate && filters.endDate);
   const summaryQuery = useQuery<CashSummary>({
-    queryKey: ['caisse-summary', summaryParams],
+    queryKey: cashPeriodQueryKey('caisse-summary', filters),
     queryFn:  () => api.get('/caisse/summary', { params: summaryParams }).then((r) => r.data),
     staleTime: 30_000,
+    enabled: customRangeReady,
   });
 
   const txParams = buildParams(true);
   const txQuery = useQuery<{ data: CashTransaction[]; pagination: CashPagination }>({
-    queryKey: ['caisse-transactions', txParams, page, limit],
+    queryKey: [...cashPeriodQueryKey('caisse-transactions', filters, accountParam), page, limit],
     queryFn:  () =>
       api.get('/caisse/transactions', { params: cleanPaginationParams({ ...txParams, page, limit }) }).then((r) => r.data),
     staleTime: 30_000,
+    enabled: customRangeReady,
   });
 
   const analyticsParams = buildParams(true);
   const analyticsQuery = useQuery<CashAnalytics>({
-    queryKey: ['caisse-analytics', analyticsParams],
+    queryKey: cashPeriodQueryKey('caisse-analytics', filters, accountParam),
     queryFn:  () =>
       api.get('/caisse/analytics', { params: analyticsParams }).then((r) => r.data),
     staleTime: 60_000,
-    enabled: contentTab === 'analytics',
+    enabled: customRangeReady,
   });
 
   function handleFilterChange(f: CashFilterState) {
@@ -121,7 +126,7 @@ export function CashDashboard() {
   function handleRefresh() {
     summaryQuery.refetch();
     txQuery.refetch();
-    if (contentTab === 'analytics') analyticsQuery.refetch();
+    analyticsQuery.refetch();
   }
 
   function handleAccountTabChange(id: AccountTab) {
@@ -244,7 +249,9 @@ export function CashDashboard() {
       {/* KPI Cards (filtered by account tab) */}
       <CashSummaryCards
         summary={summaryQuery.data}
-        isLoading={summaryQuery.isLoading}
+        isLoading={shouldShowCashKpiLoader(summaryQuery.isLoading, summaryQuery.isFetching)}
+        error={summaryQuery.error}
+        onRetry={() => summaryQuery.refetch()}
         view={viewMap[accountTab]}
       />
 

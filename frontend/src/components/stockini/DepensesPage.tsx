@@ -276,6 +276,10 @@ export function DepensesPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-payments'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['reports-overview'] });
       setPayTarget(null);
       setPayForm({ amount: '', method: 'CASH', note: '' });
       toast.success('Dépense enregistrée avec succès');
@@ -304,6 +308,10 @@ export function DepensesPage() {
       queryClient.invalidateQueries({ queryKey: ['stockini-expenses'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-balance'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-historique'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['reports-overview'] });
       setShowExpenseModal(false);
       setExpenseForm({
         amount: '',

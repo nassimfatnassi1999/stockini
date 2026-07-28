@@ -4,6 +4,9 @@ const profit = (grossProfit: number) => ({
   netRevenueHt: grossProfit + 140,
   costOfGoodsSold: 140,
   grossProfit,
+  grossRevenueHt: grossProfit + 140,
+  expenses: 5,
+  netProfit: grossProfit - 5,
   creditNoteImpact: 0,
   saleCount: 1,
   dataQuality: {
@@ -34,10 +37,7 @@ describe('CaisseService summary — trésorerie séparée du bénéfice', () => 
     const reports = {
       getSalesProfitForPeriod: jest
         .fn()
-        .mockResolvedValueOnce(profit(16.8))
-        .mockResolvedValueOnce(profit(56))
-        .mockResolvedValueOnce(profit(80))
-        .mockResolvedValueOnce(profit(120)),
+        .mockResolvedValueOnce(profit(16.8)),
     } as any;
     const service = new CaisseService(
       prisma,
@@ -61,20 +61,27 @@ describe('CaisseService summary — trésorerie séparée du bénéfice', () => 
     expect(summary.sales).toEqual(
       expect.objectContaining({ grossProfit: 16.8, costOfGoodsSold: 140 }),
     );
-    expect(summary.profitPeriode).toBe(16.8);
-    expect(summary.profitSemaine).toBe(56);
-    expect(summary.profitMois).toBe(80);
-    expect(summary.profitAnnee).toBe(120);
+    expect(summary.profitPeriode).toBe(11.8);
+    expect(summary.netProfit).toBe('11.800');
+    expect(summary.grossProfit).toBe('16.800');
+    expect(summary.expenses).toBe('5.000');
   });
 
   it('demande les quatre périodes au calcul financier partagé', async () => {
     const { service, reports } = buildService();
     await service.getSummary({ period: 'yesterday' });
 
-    expect(reports.getSalesProfitForPeriod).toHaveBeenCalledTimes(4);
+    expect(reports.getSalesProfitForPeriod).toHaveBeenCalledTimes(1);
     expect(reports.getSalesProfitForPeriod).toHaveBeenNthCalledWith(1, {
       gte: expect.any(Date),
       lte: expect.any(Date),
     });
+  });
+
+  it('les flux de caisse ne sont jamais utilisés comme bénéfice', async () => {
+    const { service } = buildService();
+    const summary = await service.getSummary({ period: 'today' });
+    expect(summary.entrees - summary.sorties).toBe(400);
+    expect(summary.profitPeriode).toBe(11.8);
   });
 });

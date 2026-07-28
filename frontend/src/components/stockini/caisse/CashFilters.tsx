@@ -2,14 +2,9 @@
 
 import { Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { CashPeriod, CashPeriodSelection } from './cash-period';
 
-export type CashPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'custom';
-
-export interface CashFilterState {
-  period:    CashPeriod;
-  startDate: string;
-  endDate:   string;
-}
+export type CashFilterState = CashPeriodSelection;
 
 interface Props {
   value:    CashFilterState;

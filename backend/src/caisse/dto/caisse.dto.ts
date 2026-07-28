@@ -59,6 +59,10 @@ export class CashQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(TreasuryAccount)
   account?: TreasuryAccount;
+
+  @IsOptional()
+  @IsIn(['Africa/Tunis'])
+  timezone?: 'Africa/Tunis';
 }
 
 // ─── Per-endpoint DTOs ─────────────────────────────────────────────────────────

@@ -354,6 +354,7 @@ export function PaymentsPage() {
       queryClient.invalidateQueries({ queryKey: ['caisse-summary'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] });
       queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['reports-overview'] });
       setPayTarget(null);
       setPayForm({ amountReceived: '', method: 'CASH', note: '', idempotencyKey: '', acceptAsFullyPaid: false });
       setConfirmOverpayment(false);

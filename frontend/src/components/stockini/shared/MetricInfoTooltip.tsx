@@ -22,6 +22,7 @@ interface Props {
   metric: KpiDefinitionKey;
   period: string;
   filtersActive?: boolean;
+  details?: Array<{ label: string; value: string }>;
   children: (props: MetricTriggerProps, infoButton: React.ReactNode) => React.ReactNode;
 }
 
@@ -29,7 +30,7 @@ const OPEN_DELAY = 200;
 const GAP = 12;
 const VIEWPORT_PADDING = 12;
 
-export function MetricInfoTooltip({ metric, period, filtersActive = false, children }: Props) {
+export function MetricInfoTooltip({ metric, period, filtersActive = false, details, children }: Props) {
   const definition = KPI_DEFINITIONS[metric];
   const id = `kpi-tooltip-${useId().replaceAll(':', '')}`;
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -173,6 +174,10 @@ export function MetricInfoTooltip({ metric, period, filtersActive = false, child
             <p className="text-[10px] font-bold uppercase tracking-wide text-text-muted">Calcul</p>
             <p className="mt-1 text-xs font-medium leading-relaxed text-text-primary">{definition.formula}</p>
           </section>}
+          {details?.length ? <section className="mt-3 space-y-1 rounded-lg border border-border/70 bg-muted/40 p-2.5">
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-text-muted">Détail de la période</p>
+            {details.map((detail) => <div key={detail.label} className="flex justify-between gap-3 text-xs"><span className="text-text-secondary">{detail.label}</span><strong className="font-mono text-text-primary">{detail.value}</strong></div>)}
+          </section> : null}
           {(definition.included?.length || definition.excluded?.length) && <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {definition.included?.length && <section><p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Inclus</p><div className="mt-1 flex flex-wrap gap-1">{definition.included.map((item) => <span key={item} className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] leading-tight text-emerald-800">{item}</span>)}</div></section>}
             {definition.excluded?.length && <section><p className="text-[10px] font-bold uppercase tracking-wide text-red-700">Exclus</p><div className="mt-1 flex flex-wrap gap-1">{definition.excluded.map((item) => <span key={item} className="rounded-full bg-red-50 px-2 py-1 text-[10px] leading-tight text-red-800">{item}</span>)}</div></section>}

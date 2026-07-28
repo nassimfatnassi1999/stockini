@@ -4,6 +4,7 @@ export type KpiDefinitionKey =
   | 'customerReceivables'
   | 'averageBasket'
   | 'grossProfit'
+  | 'netProfit'
   | 'costOfGoodsSold'
   | 'markupRate'
   | 'discounts'
@@ -93,6 +94,15 @@ export const KPI_DEFINITIONS: Record<KpiDefinitionKey, KpiTooltipConfig> = {
     included: ['Coût historique figé sur chaque ligne de vente', 'Retours : CA et coût restitué déduits'],
     excluded: ['TVA et timbre fiscal', 'Dépenses générales', 'Paiements fournisseurs', 'Mouvements de trésorerie'],
     interpretation: 'Une valeur positive signifie que les ventes couvrent leur coût produit. Elle ne représente pas le bénéfice net après dépenses.',
+  },
+  netProfit: {
+    key: 'netProfit',
+    title: 'Bénéfice net réel',
+    description: 'Résultat commercial réel de la période après coût historique des produits et dépenses actives.',
+    formula: 'Ventes nettes HT − coût historique net des produits vendus − dépenses actives',
+    included: ['BL et factures comptabilisés une seule fois', 'Avoirs et retours', 'Dépenses actives de la période'],
+    excluded: ['TVA et timbre fiscal', 'Dépôts et retraits manuels', 'Encaissements', 'Paiements fournisseurs déjà représentés par le coût vendu'],
+    interpretation: 'Ce résultat suit la date métier de la vente et non la date de son règlement.',
   },
   costOfGoodsSold: {
     key: 'costOfGoodsSold',

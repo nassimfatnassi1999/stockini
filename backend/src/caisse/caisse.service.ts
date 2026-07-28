@@ -42,8 +42,8 @@ export function resolveCashDateRange(
   period: CashPeriod | undefined,
   startDate: string | undefined,
   endDate: string | undefined,
+  now = new Date(),
 ): { gte: Date; lte: Date } {
-  const now = new Date();
   const localNow = new Date(now.getTime() + TZ_OFFSET_MS);
   const today = new Date(
     Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - TZ_OFFSET_MS,
@@ -52,6 +52,11 @@ export function resolveCashDateRange(
   if (period === 'custom' && startDate && endDate) {
     const start = new Date(new Date(startDate).getTime() - TZ_OFFSET_MS);
     const end   = new Date(new Date(endDate).getTime() - TZ_OFFSET_MS + 86_400_000 - 1);
+    if (start > end) {
+      throw new BadRequestException(
+        'La date de début doit précéder ou être égale à la date de fin.',
+      );
+    }
     return { gte: start, lte: end };
   }
 
@@ -66,23 +71,56 @@ export function resolveCashDateRange(
       const monday = new Date(
         today.getTime() - ((localNow.getUTCDay() + 6) % 7) * 86_400_000,
       );
-      return { gte: monday, lte: now };
+      return { gte: monday, lte: new Date(monday.getTime() + 7 * 86_400_000 - 1) };
     }
     case 'month': {
       const monthStart = new Date(
         Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), 1) - TZ_OFFSET_MS,
       );
-      return { gte: monthStart, lte: now };
+      const nextMonth = new Date(
+        Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth() + 1, 1) - TZ_OFFSET_MS,
+      );
+      return { gte: monthStart, lte: new Date(nextMonth.getTime() - 1) };
     }
     case 'year': {
       const yearStart = new Date(
         Date.UTC(localNow.getUTCFullYear(), 0, 1) - TZ_OFFSET_MS,
       );
-      return { gte: yearStart, lte: now };
+      const nextYear = new Date(
+        Date.UTC(localNow.getUTCFullYear() + 1, 0, 1) - TZ_OFFSET_MS,
+      );
+      return { gte: yearStart, lte: new Date(nextYear.getTime() - 1) };
     }
     default:
       return { gte: today, lte: new Date(today.getTime() + 86_400_000 - 1) };
   }
+}
+
+function cashPeriodLabel(
+  period: CashPeriod,
+  startDate?: string,
+  endDate?: string,
+): string {
+  const labels: Record<Exclude<CashPeriod, 'custom'>, string> = {
+    today: "Aujourd'hui",
+    yesterday: 'Hier',
+    week: 'Cette semaine',
+    month: 'Ce mois',
+    year: 'Cette année',
+  };
+  if (period !== 'custom') return labels[period];
+  const display = (value?: string) => {
+    if (!value) return '';
+    const [year, month, day] = value.slice(0, 10).split('-');
+    return `${day}/${month}/${year}`;
+  };
+  return `Du ${display(startDate)} au ${display(endDate)}`;
+}
+
+function tunisIso(date: Date): string {
+  return new Date(date.getTime() + TZ_OFFSET_MS)
+    .toISOString()
+    .replace('Z', '+01:00');
 }
 
 // ─── Shared IN/OUT type lists ─────────────────────────────────────────────────
@@ -183,8 +221,12 @@ export class CaisseService {
   // ─── Summary KPIs ─────────────────────────────────────────────────────────────
 
   async getSummary(query: CashSummaryQueryDto) {
+    const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
+    const money = (value: Prisma.Decimal.Value) =>
+      D(value).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toFixed(3);
+    const period = query.period ?? 'today';
     const range = resolveCashDateRange(
-      query.period ?? 'today',
+      period,
       query.startDate,
       query.endDate,
     );
@@ -198,8 +240,10 @@ export class CaisseService {
       this.customers.getTotalClientDebt(),
     ]);
 
-    const soldeCaisse = Number(config?.solde ?? 0);
-    const soldeBanque = Number(config?.soldeBanque ?? 0);
+    const soldeCaisseDecimal = D(config?.solde ?? 0);
+    const soldeBanqueDecimal = D(config?.soldeBanque ?? 0);
+    const soldeCaisse = soldeCaisseDecimal.toNumber();
+    const soldeBanque = soldeBanqueDecimal.toNumber();
 
     // Per-account + global aggregations for the selected period
     const [
@@ -224,12 +268,18 @@ export class CaisseService {
       }),
     ]);
 
-    const entreesCaisse = Number(cashIn._sum.montant ?? 0);
-    const sortiesCaisse = Math.abs(Number(cashOut._sum.montant ?? 0));
-    const entreesBanque = Number(bankIn._sum.montant ?? 0);
-    const sortiesBanque = Math.abs(Number(bankOut._sum.montant ?? 0));
-    const entrees = entreesCaisse + entreesBanque;
-    const sorties = sortiesCaisse + sortiesBanque;
+    const entreesCaisseDecimal = D(cashIn._sum.montant ?? 0);
+    const sortiesCaisseDecimal = D(cashOut._sum.montant ?? 0).abs();
+    const entreesBanqueDecimal = D(bankIn._sum.montant ?? 0);
+    const sortiesBanqueDecimal = D(bankOut._sum.montant ?? 0).abs();
+    const entreesDecimal = entreesCaisseDecimal.plus(entreesBanqueDecimal);
+    const sortiesDecimal = sortiesCaisseDecimal.plus(sortiesBanqueDecimal);
+    const entreesCaisse = entreesCaisseDecimal.toNumber();
+    const sortiesCaisse = sortiesCaisseDecimal.toNumber();
+    const entreesBanque = entreesBanqueDecimal.toNumber();
+    const sortiesBanque = sortiesBanqueDecimal.toNumber();
+    const entrees = entreesDecimal.toNumber();
+    const sorties = sortiesDecimal.toNumber();
     const retainedSurplus = await this.prisma.caisseMovement.aggregate({
       _sum: { montant: true },
       where: {
@@ -240,23 +290,10 @@ export class CaisseService {
 
     // La marge commerciale est indépendante du compte de trésorerie et réutilise
     // exactement le calcul financier des rapports (snapshots + avoirs).
-    const [selectedSales, weekSales, monthSales, yearSales] = await Promise.all([
-      this.reports.getSalesProfitForPeriod(range),
-      this.reports.getSalesProfitForPeriod(
-        resolveCashDateRange('week', undefined, undefined),
-      ),
-      this.reports.getSalesProfitForPeriod(
-        resolveCashDateRange('month', undefined, undefined),
-      ),
-      this.reports.getSalesProfitForPeriod(
-        resolveCashDateRange('year', undefined, undefined),
-      ),
-    ]);
-
-    const selectedProfit = selectedSales.grossProfit;
-    const weekProfit = weekSales.grossProfit;
-    const monthProfit = monthSales.grossProfit;
-    const yearProfit = yearSales.grossProfit;
+    const selectedSales = await this.reports.getSalesProfitForPeriod(range);
+    const selectedProfit = selectedSales.netProfit;
+    const periodLabel = cashPeriodLabel(period, query.startDate, query.endDate);
+    const cashBalanceDecimal = soldeCaisseDecimal.plus(soldeBanqueDecimal);
 
     return {
       // Backward-compat flat fields
@@ -266,10 +303,22 @@ export class CaisseService {
       totalClientDebt,
       retainedSurplus: Number(retainedSurplus?._sum.montant ?? 0),
       profitPeriode: selectedProfit,
-      profitSemaine: weekProfit,
-      profitMois: monthProfit,
-      profitAnnee: yearProfit,
-      period: query.period ?? 'today',
+      period,
+      label: periodLabel,
+      startDate: tunisIso(range.gte),
+      endDate: tunisIso(range.lte),
+      timezone: 'Africa/Tunis',
+      currency: 'TND',
+      grossSalesHt: money(selectedSales.grossRevenueHt),
+      creditsAndReturnsHt: money(selectedSales.creditNoteImpact),
+      netSalesHt: money(selectedSales.netRevenueHt),
+      historicalCost: money(selectedSales.costOfGoodsSold),
+      grossProfit: money(selectedSales.grossProfit),
+      expenses: money(selectedSales.expenses),
+      netProfit: money(selectedSales.netProfit),
+      cashIn: money(entreesDecimal),
+      cashOut: money(sortiesDecimal),
+      cashBalance: money(cashBalanceDecimal),
 
       cash: {
         physicalBalance: soldeCaisse,
@@ -289,15 +338,13 @@ export class CaisseService {
       sales: {
         netRevenueHt: selectedSales.netRevenueHt,
         costOfGoodsSold: selectedSales.costOfGoodsSold,
-        grossProfit: selectedProfit,
+        grossProfit: selectedSales.grossProfit,
+        grossMargin: selectedSales.grossProfit,
+        expenses: selectedSales.expenses,
+        netProfit: selectedSales.netProfit,
         creditNoteImpact: selectedSales.creditNoteImpact,
         saleCount: selectedSales.saleCount,
         dataQuality: selectedSales.dataQuality,
-      },
-      salesPeriods: {
-        week: weekSales,
-        month: monthSales,
-        year: yearSales,
       },
 
       // Per-account detail
@@ -308,18 +355,12 @@ export class CaisseService {
         entrees: entreesCaisse,
         sorties: sortiesCaisse,
         profit: selectedProfit,
-        profitSemaine: weekProfit,
-        profitMois: monthProfit,
-        profitAnnee: yearProfit,
       },
       banque: {
         solde: soldeBanque,
         entrees: entreesBanque,
         sorties: sortiesBanque,
         profit: selectedProfit,
-        profitSemaine: weekProfit,
-        profitMois: monthProfit,
-        profitAnnee: yearProfit,
       },
     };
   }
@@ -418,53 +459,36 @@ export class CaisseService {
   async getAnalytics(query: CashAnalyticsQueryDto) {
     const account: TreasuryAccount | undefined = query.account;
     const period = query.period ?? 'month';
-    const now = new Date();
-    const localNow = new Date(now.getTime() + TZ_OFFSET_MS);
-    const todayStart = new Date(
-      Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - TZ_OFFSET_MS,
+    const analyticsRange = resolveCashDateRange(
+      period,
+      query.startDate,
+      query.endDate,
     );
     const days: Date[] = [];
 
-    if (period === 'today') {
+    if (period === 'today' || period === 'yesterday') {
       for (let h = 0; h < 24; h += 4) {
-        days.push(new Date(todayStart.getTime() + h * 3_600_000));
-      }
-    } else if (period === 'yesterday') {
-      const ydStart = new Date(todayStart.getTime() - 86_400_000);
-      for (let h = 0; h < 24; h += 4) {
-        days.push(new Date(ydStart.getTime() + h * 3_600_000));
-      }
-    } else if (period === 'week') {
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i);
-        d.setHours(0, 0, 0, 0);
-        days.push(d);
-      }
-    } else if (period === 'month') {
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i);
-        d.setHours(0, 0, 0, 0);
-        days.push(d);
+        days.push(new Date(analyticsRange.gte.getTime() + h * 3_600_000));
       }
     } else if (period === 'year') {
-      for (let i = 11; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        days.push(d);
+      const localStart = new Date(analyticsRange.gte.getTime() + TZ_OFFSET_MS);
+      for (let month = 0; month < 12; month++) {
+        days.push(new Date(
+          Date.UTC(localStart.getUTCFullYear(), month, 1) - TZ_OFFSET_MS,
+        ));
       }
-    } else if (period === 'custom' && query.startDate && query.endDate) {
-      const from = new Date(query.startDate);
-      const to = new Date(query.endDate);
-      const msDay = 86_400_000;
-      const diff = Math.ceil((to.getTime() - from.getTime()) / msDay);
-      const step = Math.max(1, Math.ceil(diff / 30));
+    } else {
+      const totalDays = Math.floor(
+        (analyticsRange.lte.getTime() - analyticsRange.gte.getTime()) /
+          86_400_000,
+      ) + 1;
+      const step = Math.max(1, Math.ceil(totalDays / 31));
       for (
-        let d = new Date(from);
-        d <= to;
-        d = new Date(d.getTime() + step * msDay)
+        let d = new Date(analyticsRange.gte);
+        d <= analyticsRange.lte;
+        d = new Date(d.getTime() + step * 86_400_000)
       ) {
-        days.push(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+        days.push(d);
       }
     }
 
@@ -478,16 +502,25 @@ export class CaisseService {
       days.map(async (bucketStart) => {
         let bucketEnd: Date;
         if (isYearly) {
+          const localBucket = new Date(bucketStart.getTime() + TZ_OFFSET_MS);
           bucketEnd = new Date(
-            bucketStart.getFullYear(),
-            bucketStart.getMonth() + 1,
-            0, 23, 59, 59, 999,
+            Date.UTC(
+              localBucket.getUTCFullYear(),
+              localBucket.getUTCMonth() + 1,
+              1,
+            ) - TZ_OFFSET_MS - 1,
           );
         } else if (isHourly) {
           bucketEnd = new Date(bucketStart.getTime() + 4 * 3_600_000 - 1);
         } else {
-          bucketEnd = new Date(bucketStart.getTime() + 86_400_000 - 1);
+          const totalDays = Math.floor(
+            (analyticsRange.lte.getTime() - analyticsRange.gte.getTime()) /
+              86_400_000,
+          ) + 1;
+          const step = Math.max(1, Math.ceil(totalDays / 31));
+          bucketEnd = new Date(bucketStart.getTime() + step * 86_400_000 - 1);
         }
+        if (bucketEnd > analyticsRange.lte) bucketEnd = analyticsRange.lte;
 
         const range = { gte: bucketStart, lte: bucketEnd };
 
@@ -507,18 +540,18 @@ export class CaisseService {
 
         let label: string;
         if (isYearly) {
-          label = bucketStart.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+          label = bucketStart.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit', timeZone: 'Africa/Tunis' });
         } else if (isHourly) {
-          label = `${String(bucketStart.getHours()).padStart(2, '0')}h`;
+          const tunisHour = new Date(bucketStart.getTime() + TZ_OFFSET_MS)
+            .getUTCHours();
+          label = `${String(tunisHour).padStart(2, '0')}h`;
         } else {
-          label = bucketStart.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+          label = bucketStart.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', timeZone: 'Africa/Tunis' });
         }
 
         return { label, entrees, sorties, netCashFlow: entrees - sorties };
       }),
     );
-
-    const analyticsRange = resolveCashDateRange(query.period, query.startDate, query.endDate);
 
     const topClients = await this.prisma.payment.groupBy({
       by: ['customerId'],

@@ -3,7 +3,7 @@ import {
   financialRates,
   isRevenueRecognizedDocument,
 } from './reports-financial.utils';
-import { DocumentType, SaleStatus } from '@prisma/client';
+import { DocumentType, Prisma, SaleStatus } from '@prisma/client';
 
 // ─── resolveReportDateRange ───────────────────────────────────────────────────
 
@@ -282,6 +282,26 @@ describe('ReportsService real profit', () => {
       { documentType: 'FACTURE' },
       { documentType: 'BON_LIVRAISON', transformedToId: null },
     ]);
+    expect(saleFindMany.mock.calls[0][0].where).toEqual(
+      expect.objectContaining({
+        createdAt: {
+          gte: new Date('2026-07-01'),
+          lte: new Date('2026-07-31'),
+        },
+        deletedAt: null,
+        consolidationMemberships: { none: { active: true } },
+      }),
+    );
+    expect(prisma.expense.aggregate).toHaveBeenCalledWith({
+      where: {
+        expenseDate: {
+          gte: new Date('2026-07-01'),
+          lte: new Date('2026-07-31'),
+        },
+        status: 'ACTIVE',
+      },
+      _sum: { amount: true },
+    });
     expect(result).toEqual(
       expect.objectContaining({
         netRevenueHt: 119,
@@ -292,6 +312,46 @@ describe('ReportsService real profit', () => {
         netProfit: 14,
       }),
     );
+  });
+
+  it('ignore paiements clients, dépôts, retraits et paiements fournisseurs', async () => {
+    const forbidden = jest.fn(() => {
+      throw new Error('Le bénéfice ne doit pas lire les flux de trésorerie');
+    });
+    const prisma = {
+      sale: { findMany: jest.fn().mockResolvedValue([]) },
+      creditNote: { findMany: jest.fn().mockResolvedValue([]) },
+      expense: { aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }) },
+      payment: { findMany: forbidden, aggregate: forbidden },
+      caisseMovement: { findMany: forbidden, aggregate: forbidden },
+    } as any;
+    const result = await new ReportsService(prisma).getSalesProfitForPeriod({
+      gte: new Date('2026-07-28T00:00:00Z'),
+      lte: new Date('2026-07-28T23:59:59Z'),
+    });
+    expect(result.netProfit).toBe(0);
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('conserve exactement trois décimales dans le résultat net', async () => {
+    const prisma = {
+      sale: { findMany: jest.fn().mockResolvedValue([{
+        subtotal: new Prisma.Decimal('10.005'),
+        discount: new Prisma.Decimal(0),
+        items: [{
+          quantity: 3,
+          unitPurchaseCostHt: new Prisma.Decimal('1.111'),
+          purchaseCostEstimated: false,
+        }],
+      }]) },
+      creditNote: { findMany: jest.fn().mockResolvedValue([]) },
+      expense: { aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal('0.001') } }) },
+    } as any;
+    const result = await new ReportsService(prisma).getSalesProfitForPeriod({
+      gte: new Date('2026-07-28T00:00:00Z'),
+      lte: new Date('2026-07-28T23:59:59Z'),
+    });
+    expect(result.netProfit).toBe(6.671);
   });
 
   it('signale les anciennes lignes dont le coût ne peut pas être reconstruit', async () => {
