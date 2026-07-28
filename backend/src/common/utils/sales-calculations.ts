@@ -26,6 +26,15 @@ export function salesRound3(value: Decimal.Value): number {
     .toNumber();
 }
 
+export const calculateSaleNetUnitPrice = (gross: Decimal.Value, discountPercent: Decimal.Value) =>
+  salesRound3(decimal(gross).mul(decimal(1).minus(decimal(discountPercent).div(100))));
+export const calculateMarginAmount = (saleNet: Decimal.Value, purchaseNet: Decimal.Value) =>
+  salesRound3(decimal(saleNet).minus(decimal(purchaseNet)));
+export const calculateMarginOnCostPercent = (margin: Decimal.Value, purchaseNet: Decimal.Value) =>
+  decimal(purchaseNet).gt(0) ? salesRound3(decimal(margin).div(decimal(purchaseNet)).mul(100)) : 0;
+export const calculateMarkupPercent = (margin: Decimal.Value, saleNet: Decimal.Value) =>
+  decimal(saleNet).gt(0) ? salesRound3(decimal(margin).div(decimal(saleNet)).mul(100)) : 0;
+
 export interface SalesLineCalculationInput {
   purchasePriceHt: number | string;
   /** Prix de vente brut HT avant remise. Dérivé de la marge lorsqu'il est absent. */

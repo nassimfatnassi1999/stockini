@@ -5,6 +5,23 @@ const d = (value: Decimal.Value = 0) => new Decimal(value);
 export const purchaseRound3 = (value: Decimal.Value) =>
   d(value).toDecimalPlaces(3, Decimal.ROUND_HALF_UP).toNumber();
 
+export function calculateWeightedAverageCost(input: {
+  currentQuantity: number | string;
+  currentUnitCostHtNet: Decimal.Value;
+  incomingQuantity: number | string;
+  incomingUnitCostHtNet: Decimal.Value;
+}) {
+  const currentQuantity = Decimal.max(0, d(input.currentQuantity));
+  const incomingQuantity = Decimal.max(0, d(input.incomingQuantity));
+  const totalQuantity = currentQuantity.plus(incomingQuantity);
+  if (totalQuantity.isZero()) return 0;
+  return purchaseRound3(
+    d(input.currentUnitCostHtNet).mul(currentQuantity)
+      .plus(d(input.incomingUnitCostHtNet).mul(incomingQuantity))
+      .div(totalQuantity),
+  );
+}
+
 export interface PurchaseLineInput {
   quantity: number | string;
   unitCost: number | string;
@@ -20,13 +37,19 @@ export function calculatePurchaseLine(input: PurchaseLineInput) {
     Decimal.max(0, d(input.discountPercent ?? 0)),
   );
   const tvaPercent = Decimal.max(0, d(input.tvaPercent ?? 0));
-  const grossHt = d(purchaseRound3(quantity.mul(unitCost)));
-  const discountAmount = d(
-    purchaseRound3(grossHt.mul(discountPercent).div(100)),
+  const unitDiscountAmount = d(
+    purchaseRound3(unitCost.mul(discountPercent).div(100)),
   );
-  const netHt = d(purchaseRound3(grossHt.minus(discountAmount)));
+  const unitCostHtNet = d(purchaseRound3(unitCost.minus(unitDiscountAmount)));
+  const grossHt = d(purchaseRound3(quantity.mul(unitCost)));
+  const discountAmount = d(purchaseRound3(grossHt.minus(unitCostHtNet.mul(quantity))));
+  const netHt = d(purchaseRound3(unitCostHtNet.mul(quantity)));
   const taxAmount = d(purchaseRound3(netHt.mul(tvaPercent).div(100)));
   return {
+    unitCostHtGross: purchaseRound3(unitCost),
+    unitDiscountAmount: unitDiscountAmount.toNumber(),
+    unitCostHtNet: unitCostHtNet.toNumber(),
+    lineTotalHtNet: netHt.toNumber(),
     grossHt: grossHt.toNumber(),
     discountAmount: discountAmount.toNumber(),
     netHt: netHt.toNumber(),
@@ -36,7 +59,7 @@ export function calculatePurchaseLine(input: PurchaseLineInput) {
 }
 
 export function calculatePurchaseTotals(
-  lines: ReturnType<typeof calculatePurchaseLine>[],
+  lines: Array<Pick<ReturnType<typeof calculatePurchaseLine>, 'grossHt' | 'discountAmount' | 'netHt' | 'taxAmount'>>,
   stampDuty: number | string = 0,
 ) {
   const sum = (field: 'grossHt' | 'discountAmount' | 'netHt' | 'taxAmount') =>

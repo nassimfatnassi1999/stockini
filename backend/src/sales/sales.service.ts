@@ -839,13 +839,16 @@ export class SalesService {
 
       // FACTURE and BON_LIVRAISON are validated at creation and impact stock once.
       if (immediateStockImpact) {
-        for (const item of items) {
+        for (const item of sale.items) {
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
             type: StockMovementType.SALE,
             quantity: item.quantity,
             reason: `${documentType}:${invoiceNumber}`,
             userId: sellerId,
+            sourceType: 'SALE_ITEM',
+            sourceId: item.id,
+            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
         await tx.sale.update({
@@ -1065,6 +1068,9 @@ export class SalesService {
             quantity: item.quantity,
             reason: `${sale.documentType}:${sale.invoiceNumber}`,
             userId,
+            sourceType: 'SALE_ITEM',
+            sourceId: item.id,
+            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
       }
@@ -1274,6 +1280,9 @@ export class SalesService {
             quantity: item.quantity,
             reason: `Annulation ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
+            sourceType: 'SALE_CANCELLATION',
+            sourceId: item.id,
+            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
       }
@@ -1509,6 +1518,7 @@ export class SalesService {
             quantity: item.quantity,
             reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
+            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
         for (const item of calculated) {
@@ -1527,6 +1537,8 @@ export class SalesService {
             quantity: item.quantity,
             reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
+            sourceType: 'SALE_EDIT',
+            unitCostHtNet: item.unitPurchaseCostHt,
           });
         }
       }
@@ -1789,6 +1801,9 @@ export class SalesService {
             quantity: item.quantity,
             reason: `TRANSFORMATION:${source.invoiceNumber} -> ${invoiceNumber}`,
             userId,
+            sourceType: 'SALE_ITEM',
+            sourceId: item.id,
+            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
         await tx.sale.update({

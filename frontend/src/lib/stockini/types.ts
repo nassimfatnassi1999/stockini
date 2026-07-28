@@ -282,6 +282,10 @@ export interface PurchaseItemDetail {
   quantity: number;
   receivedQuantity: number;
   unitCost: number | string;
+  /** Prix fournisseur HT après remise, arrondi à 3 décimales. */
+  unitCostHtNet?: number | string | null;
+  discountAmount?: number | string;
+  lineTotalHtNet?: number | string | null;
   designation?: string | null;
   discountPercent?: number | string;
   tvaPercent?: number | string | null;

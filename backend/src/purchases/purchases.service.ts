@@ -69,6 +69,9 @@ export class PurchasesService {
         tvaPercent: item.tvaPercent ?? 0,
         total: calculation.netHt,
         discountAmount: calculation.discountAmount,
+        persistedDiscountAmount: calculation.unitDiscountAmount,
+        unitCostHtNet: calculation.unitCostHtNet,
+        lineTotalHtNet: calculation.lineTotalHtNet,
         taxAmount: calculation.taxAmount,
         grossHt: calculation.grossHt,
       };
@@ -124,8 +127,9 @@ export class PurchasesService {
                 discountAmount: _discountAmount,
                 taxAmount: _taxAmount,
                 grossHt: _grossHt,
+                persistedDiscountAmount,
                 ...item
-              }) => item,
+              }) => ({ ...item, discountAmount: persistedDiscountAmount }),
             ),
           },
         },
@@ -366,6 +370,13 @@ export class PurchasesService {
           quantity: item.quantity,
           reason: `Réception achat ${purchase.orderNumber}`,
           userId,
+          sourceType: 'PURCHASE_ITEM',
+          sourceId: purchaseItem.id,
+          unitCostHtGross: purchaseItem.unitCost,
+          purchaseDiscountPercent: purchaseItem.discountPercent,
+          unitCostHtNet:
+            purchaseItem.unitCostHtNet ??
+            calculatePurchaseLine({ quantity: 1, unitCost: purchaseItem.unitCost.toString(), discountPercent: purchaseItem.discountPercent?.toString() ?? '0' }).unitCostHtNet,
         });
       }
 
@@ -619,6 +630,9 @@ export class PurchasesService {
             tvaPercent,
             total: values.netHt,
             discountAmount: values.discountAmount,
+            persistedDiscountAmount: values.unitDiscountAmount,
+            unitCostHtNet: values.unitCostHtNet,
+            lineTotalHtNet: values.lineTotalHtNet,
             taxAmount: values.taxAmount,
             grossHt: values.grossHt,
           };
@@ -642,6 +656,11 @@ export class PurchasesService {
               quantity: old.receivedQuantity,
               reason: `Modification achat ${previous.orderNumber}`,
               userId,
+              sourceType: 'PURCHASE_ITEM',
+              sourceId: old.id,
+              unitCostHtGross: old.unitCost,
+              purchaseDiscountPercent: old.discountPercent,
+              unitCostHtNet: old.unitCostHtNet ?? undefined,
             });
             if (desired.receivedQuantity > 0)
               await this.stockService.applyMovement(tx, {
@@ -650,6 +669,11 @@ export class PurchasesService {
                 quantity: desired.receivedQuantity,
                 reason: `Modification achat ${previous.orderNumber}`,
                 userId,
+                sourceType: 'PURCHASE_ITEM',
+                sourceId: desired.id,
+                unitCostHtGross: desired.unitCost,
+                purchaseDiscountPercent: desired.discountPercent,
+                unitCostHtNet: desired.unitCostHtNet,
               });
           } else {
             if (delta > 0)
@@ -659,6 +683,11 @@ export class PurchasesService {
                 quantity: delta,
                 reason: `Modification achat ${previous.orderNumber}`,
                 userId,
+                sourceType: 'PURCHASE_ITEM',
+                sourceId: desired!.id,
+                unitCostHtGross: desired!.unitCost,
+                purchaseDiscountPercent: desired!.discountPercent,
+                unitCostHtNet: desired!.unitCostHtNet,
               });
             if (delta < 0)
               await this.stockService.applyMovement(tx, {
@@ -667,6 +696,11 @@ export class PurchasesService {
                 quantity: -delta,
                 reason: `Modification achat ${previous.orderNumber}`,
                 userId,
+                sourceType: 'PURCHASE_ITEM',
+                sourceId: old.id,
+                unitCostHtGross: old.unitCost,
+                purchaseDiscountPercent: old.discountPercent,
+                unitCostHtNet: old.unitCostHtNet ?? undefined,
               });
           }
         }
@@ -679,6 +713,10 @@ export class PurchasesService {
             quantity: item.receivedQuantity,
             reason: `Modification achat ${previous.orderNumber}`,
             userId,
+            sourceType: 'PURCHASE_ITEM',
+            unitCostHtGross: item.unitCost,
+            purchaseDiscountPercent: item.discountPercent,
+            unitCostHtNet: item.unitCostHtNet,
           });
         }
 
@@ -740,6 +778,9 @@ export class PurchasesService {
             receivedQuantity: item.receivedQuantity,
             unitCost: item.unitCost,
             discountPercent: item.discountPercent,
+            discountAmount: item.persistedDiscountAmount,
+            unitCostHtNet: item.unitCostHtNet,
+            lineTotalHtNet: item.lineTotalHtNet,
             tvaPercent: item.tvaPercent,
             total: item.total,
           };
@@ -918,6 +959,13 @@ export class PurchasesService {
               quantity: qty,
               reason: `Transformation BC→BR ${purchase.orderNumber}`,
               userId,
+              sourceType: 'PURCHASE_ITEM',
+              sourceId: item.id,
+              unitCostHtGross: item.unitCost,
+              purchaseDiscountPercent: item.discountPercent,
+              unitCostHtNet:
+                item.unitCostHtNet ??
+                calculatePurchaseLine({ quantity: 1, unitCost: item.unitCost.toString(), discountPercent: item.discountPercent?.toString() ?? '0' }).unitCostHtNet,
             });
           }
         }

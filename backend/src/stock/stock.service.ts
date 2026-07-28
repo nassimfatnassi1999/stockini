@@ -16,6 +16,7 @@ import {
   StockChangeDto,
   StockMovementQueryDto,
 } from './dto/stock.dto';
+import { calculateWeightedAverageCost } from '../common/utils/purchase-calculations';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
 
@@ -300,6 +301,9 @@ export class StockService {
       creditNoteId?: string;
       originalSaleId?: string;
       originalSaleItemId?: string;
+      unitCostHtGross?: Prisma.Decimal.Value;
+      purchaseDiscountPercent?: Prisma.Decimal.Value;
+      unitCostHtNet?: Prisma.Decimal.Value;
     },
   ) {
     const product = await client.product.findUniqueOrThrow({
@@ -307,6 +311,10 @@ export class StockService {
     });
     const signedQuantity = this.signedQuantity(input.type, input.quantity);
     const newQuantity = product.quantity + signedQuantity;
+    const netUnitCost = input.unitCostHtNet == null
+      ? null
+      : new Prisma.Decimal(input.unitCostHtNet).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+    const totalCostHtNet = netUnitCost?.mul(input.quantity).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP) ?? null;
 
     if (newQuantity < 0) {
       throw new BadRequestException('Product quantity cannot become negative');
@@ -325,6 +333,10 @@ export class StockService {
         creditNoteId: input.creditNoteId,
         originalSaleId: input.originalSaleId,
         originalSaleItemId: input.originalSaleItemId,
+        unitCostHtGross: input.unitCostHtGross,
+        purchaseDiscountPercent: input.purchaseDiscountPercent,
+        unitCostHtNet: netUnitCost,
+        totalCostHtNet,
         reference: await this.references.generate(
           this.prefixForMovement(input.type),
           'stockMovement',
@@ -334,9 +346,26 @@ export class StockService {
       },
     });
 
+    const isValuedInbound = signedQuantity > 0 && netUnitCost != null;
+    const averageCost = isValuedInbound && newQuantity > 0
+      ? new Prisma.Decimal(calculateWeightedAverageCost({
+          currentQuantity: product.quantity,
+          currentUnitCostHtNet: product.purchasePrice,
+          incomingQuantity: input.quantity,
+          incomingUnitCostHtNet: netUnitCost,
+        }))
+      : null;
     await client.product.update({
       where: { id: input.productId },
-      data: { quantity: newQuantity },
+      data: {
+        quantity: newQuantity,
+        ...(averageCost && {
+          purchasePrice: averageCost,
+          purchasePriceTtc: averageCost
+            .mul(new Prisma.Decimal(1).plus(new Prisma.Decimal(product.tva).div(100)))
+            .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP),
+        }),
+      },
     });
     await this.ensureStockAlert(client, product, newQuantity);
     return movement;

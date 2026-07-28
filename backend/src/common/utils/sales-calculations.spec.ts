@@ -1,6 +1,28 @@
-import { calculateSalesLine, calculateSalesTotals } from './sales-calculations';
+import { calculateMarginAmount, calculateMarginOnCostPercent, calculateMarkupPercent, calculateSalesLine, calculateSalesTotals } from './sales-calculations';
 
 describe('canonical sales calculations', () => {
+  it.each([
+    ['sans remise', 100, 120, 20, 20],
+    ['remise fournisseur BATTERIE L2', 207.742, 227.063, 19.321, 9.3],
+    ['vente réellement à perte', 250, 220, -30, -12],
+  ])('%s', (_label, cost, sale, expectedAmount, expectedRate) => {
+    const amount = calculateMarginAmount(sale, cost);
+    expect(amount).toBe(expectedAmount);
+    expect(calculateMarginOnCostPercent(amount, cost)).toBe(expectedRate);
+  });
+
+  it('distingue marge sur coût et taux de marque', () => {
+    expect(calculateMarginOnCostPercent(70, 200)).toBe(35);
+    expect(calculateMarkupPercent(70, 270)).toBe(25.926);
+  });
+
+  it('applique séparément remise achat et remise vente', () => {
+    const purchaseNet = 80;
+    const sale = calculateSalesLine({ purchasePriceHt: purchaseNet, marginPercent: 275, discountPercent: 10, quantity: 1 });
+    expect(sale.grossSalePriceHt).toBe(300);
+    expect(sale.netSalePriceHt).toBe(270);
+    expect(sale.marginAmount).toBe(190);
+  });
   it('applique la remise au prix de vente brut (PA 68,989, marge 40, remise 20)', () => {
     const line = calculateSalesLine({
       purchasePriceHt: 68.989,

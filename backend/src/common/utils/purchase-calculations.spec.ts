@@ -1,9 +1,25 @@
 import {
   calculatePurchaseLine,
   calculatePurchaseTotals,
+  calculateWeightedAverageCost,
 } from './purchase-calculations';
 
 describe('canonical purchase calculations', () => {
+  it('calcule le coût unitaire net fournisseur avec arrondi HALF_UP à 3 décimales', () => {
+    expect(calculatePurchaseLine({ quantity: 1, unitCost: 276.99, discountPercent: 25 })).toMatchObject({
+      unitCostHtGross: 276.99,
+      unitDiscountAmount: 69.248,
+      unitCostHtNet: 207.742,
+      lineTotalHtNet: 207.742,
+    });
+  });
+
+  it('calcule le CUMP de plusieurs réceptions nettes et restaure un retour à son coût historique', () => {
+    const first = calculateWeightedAverageCost({ currentQuantity: 0, currentUnitCostHtNet: 0, incomingQuantity: 2, incomingUnitCostHtNet: 100 });
+    const second = calculateWeightedAverageCost({ currentQuantity: 2, currentUnitCostHtNet: first, incomingQuantity: 1, incomingUnitCostHtNet: 70 });
+    expect(second).toBe(90);
+    expect(calculateWeightedAverageCost({ currentQuantity: 2, currentUnitCostHtNet: 90, incomingQuantity: 1, incomingUnitCostHtNet: 100 })).toBe(93.333);
+  });
   it('arrondit chaque ligne puis somme les lignes et utilise le timbre saisi', () => {
     const lines = [
       calculatePurchaseLine({

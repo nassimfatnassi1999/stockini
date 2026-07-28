@@ -162,10 +162,12 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                         { label: "Réf", right: false },
                         { label: "Désignation", right: false },
                         { label: "Qté", right: true },
-                        { label: "PU HT", right: true },
-                        { label: "Marge brute", right: true },
-                        { label: "Remise", right: true },
-                        { label: "Marge nette", right: true },
+                        { label: "PU vente HT brut", right: true },
+                        { label: "Remise vente", right: true },
+                        { label: "PU vente HT net", right: true },
+                        { label: "Coût achat net", right: true },
+                        { label: "Marge DT", right: true },
+                        { label: "Marge sur coût", right: true },
                         { label: "Total HT", right: true },
                       ].map(({ label, right }) => (
                         <th
@@ -180,14 +182,13 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                   <tbody className="divide-y divide-border/40">
                     {sale.items.map((item) => {
                       const unitPrice = Number(item.finalUnitPrice ?? (Number(item.total) / item.quantity));
+                      const grossUnitPrice = Number(item.unitPrice);
                       const purchasePrice = Number(item.unitPurchaseCostHt ?? 0);
+                      const marginAmount = purchasePrice > 0 ? unitPrice - purchasePrice : null;
                       const margePercent =
                         purchasePrice > 0
                           ? ((unitPrice - purchasePrice) / purchasePrice) * 100
                           : null;
-                      const grossMargin = item.marginPercent == null
-                        ? null
-                        : Number(item.marginPercent);
                       const discount = Number(item.discountPercent ?? 0);
                       return (
                         <tr key={item.id} className="hover:bg-slate-50/60">
@@ -202,20 +203,26 @@ export function SaleDetailsModal({ saleId, onClose }: Props) {
                             {item.quantity}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
-                            {fmt3(unitPrice)}
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums">
-                            {grossMargin === null ? "Historique" : `${grossMargin.toFixed(2)} %`}
+                            {fmt3(grossUnitPrice)}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">
                             {discount.toFixed(2)} %
                           </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{fmt3(unitPrice)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums" title="Coût historique net après remise fournisseur, figé lors de la vente">
+                            {purchasePrice > 0 ? fmt3(purchasePrice) : "—"}
+                            {item.purchaseCostEstimated ? <span className="block text-[10px] text-amber-600">estimé</span> : null}
+                          </td>
+                          <td className={`px-3 py-2.5 text-right tabular-nums font-medium ${marginAmount === null ? "text-text-muted" : marginAmount < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                            {marginAmount === null ? "—" : `${marginAmount >= 0 ? "+" : ""}${fmt3(marginAmount)} DT`}
+                          </td>
                           <td
-                            className={`px-3 py-2.5 text-right tabular-nums font-medium ${margePercent === null ? "text-text-muted" : margePercent < 20 ? "text-red-600" : "text-emerald-600"}`}
+                            title="Marge calculée à partir du coût d’achat net après remise fournisseur."
+                            className={`px-3 py-2.5 text-right tabular-nums font-medium ${margePercent === null ? "text-text-muted" : margePercent < 0 ? "text-red-600" : "text-emerald-600"}`}
                           >
                             {margePercent === null
                               ? "—"
-                              : `${margePercent.toLocaleString("fr-TN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`}
+                              : `${margePercent >= 0 ? "+" : ""}${margePercent.toLocaleString("fr-TN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
                             {fmt3(item.total)}

@@ -280,6 +280,7 @@ export class AvoirsService {
           designation: string;
           quantiteRetournee: number;
           prixUnitaireHt: Prisma.Decimal;
+          unitPurchaseCostHt: Prisma.Decimal | null;
           tva: Prisma.Decimal;
           totalHt: Prisma.Decimal;
           totalTtc: Prisma.Decimal;
@@ -340,6 +341,7 @@ export class AvoirsService {
                 dtoItem.productId,
               quantiteRetournee: allocatedQuantity,
               prixUnitaireHt: unitPriceHt,
+              unitPurchaseCostHt: saleItem.unitPurchaseCostHt,
               tva: tvaRate,
               totalHt,
               totalTtc,
@@ -502,6 +504,7 @@ export class AvoirsService {
             creditNoteId: avoir.id,
             originalSaleId: item.originalSaleId,
             originalSaleItemId: item.saleItemId,
+            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
 
