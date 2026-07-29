@@ -10,9 +10,9 @@ FRONTEND := $(ROOT_DIR)/frontend
 ENV_FILE := $(ROOT_DIR)/.env
 
 COMPOSE := docker compose --env-file .env
-PROD_ENV_FILE := $(ROOT_DIR)/deploy-docker/.env.prod
-PROD_COMPOSE_FILE := $(ROOT_DIR)/deploy-docker/docker-compose.prod.yml
-COMPOSE_PROD := docker compose --env-file $(PROD_ENV_FILE) -f $(PROD_COMPOSE_FILE)
+PROD_ENV := $(ROOT_DIR)/deploy-docker/.env.prod
+PROD_COMPOSE := $(ROOT_DIR)/deploy-docker/docker-compose.prod.yml
+DOCKER_COMPOSE := docker compose --env-file $(PROD_ENV) -f $(PROD_COMPOSE)
 PROD_BACKEND_CONTAINER := stockini-prod-backend
 PROD_FRONTEND_CONTAINER := stockini-prod-frontend
 PROD_POSTGRES_CONTAINER := stockini-prod-postgres
@@ -21,16 +21,12 @@ PROD_BACKEND_SERVICE := stockini-prod-backend
 PROD_POSTGRES_SERVICE := stockini-prod-postgres
 PROD_NETWORK := stockini-prod-network
 PROD_WAIT_TIMEOUT ?= 60
-PROD_WAIT_FRONTEND ?= 1
-COST_REPAIR ?=
 
 # GNU Make interprète tout argument commençant par "--" comme une option avant
 # de lire ce fichier. La forme cible nécessite donc le séparateur standard :
 #   make prod-deploy -- --cost-repair
-# La forme portable recommandée reste : make prod-deploy COST_REPAIR=1
-COST_REPAIR_ENABLED := $(strip $(or \
-	$(filter --cost-repair,$(MAKECMDGOALS)), \
-	$(filter 1 true yes,$(COST_REPAIR))))
+COST_REPAIR_ENABLED := $(filter --cost-repair,$(MAKECMDGOALS))
+PROD_COST_REPAIR_TARGET := $(if $(COST_REPAIR_ENABLED),prod-cost-repair)
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
 # le compose actuel peut encore utiliser "postgres".
@@ -58,8 +54,8 @@ NC := \033[0m
 	db-up db-down db-wait db-migrate db-seed db-seed-only db-reset studio \
 	minio-up minio-down minio-wait \
 	logs logs-db logs-minio build clear clean-all \
-	prod prod-deploy prod-undeploy prod-logs prod-status prod-restart \
-	prod-migrate prod-buckets prod-wait prod-clean prod-cost-repair --cost-repair \
+	prod prod-deploy prod-build-deploy prod-undeploy prod-logs prod-status prod-restart \
+	prod-migrate prod-buckets prod-health prod-wait prod-clean prod-cost-repair prod-final --cost-repair \
 	env-check deps-check backend-env-check frontend-env-check prod-env-check
 
 help: ## Afficher cette aide
@@ -118,11 +114,11 @@ frontend-env-check: env-check
 	fi
 
 prod-env-check:
-	@if [ ! -f "$(PROD_ENV_FILE)" ]; then \
+	@if [ ! -f "$(PROD_ENV)" ]; then \
 		echo -e "$(RED)Erreur: deploy-docker/.env.prod introuvable. Créez-le avant tout déploiement.$(NC)"; \
 		exit 1; \
 	fi
-	@if [ ! -f "$(PROD_COMPOSE_FILE)" ]; then \
+	@if [ ! -f "$(PROD_COMPOSE)" ]; then \
 		echo -e "$(RED)Erreur: deploy-docker/docker-compose.prod.yml introuvable.$(NC)"; \
 		exit 1; \
 	fi
@@ -348,68 +344,39 @@ prod: prod-deploy ## Alias de prod-deploy
 --cost-repair:
 	@:
 
-# Les images sont toujours reconstruites depuis zéro : aucune couche en cache
-# n'est réutilisée pendant le build de production. Après un déploiement réussi,
-# le cache BuildKit est nettoyé pour empêcher l'utilisation disque d'augmenter
-# continuellement.
-prod-deploy: prod-env-check ## Builder et déployer Stockini, migrer puis préparer MinIO
-	@echo -e "$(BLUE)[1/5] Déploiement de production$(NC)"
-	@$(COMPOSE_PROD) build --no-cache
-	@$(COMPOSE_PROD) up -d
-	@$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=0
-	@echo -e "$(BLUE)[2/5] Migrations Prisma$(NC)"
-	@$(MAKE) --no-print-directory prod-migrate
-	@$(MAKE) --no-print-directory prod-buckets
-	@echo -e "$(BLUE)[3/5] Vérification des services$(NC)"
-	@$(MAKE) --no-print-directory prod-wait
-	@if [ -n "$(COST_REPAIR_ENABLED)" ]; then \
-		echo -e "$(YELLOW)Option --cost-repair détectée.$(NC)"; \
-		if ! $(MAKE) --no-print-directory prod-cost-repair; then \
-			echo -e "$(RED)Le déploiement a réussi, mais la réparation des coûts a échoué.$(NC)"; \
-			echo -e "$(RED)Consulter les logs avant toute nouvelle tentative.$(NC)"; \
-			exit 1; \
-		fi; \
-	else \
-		echo -e "$(BLUE)[4/5] Réparation des coûts ignorée : option --cost-repair absente.$(NC)"; \
-	fi
-	@set -e; \
-	echo -e "$(BLUE)[5/5] Vérification finale$(NC)"; \
-	frontend_url="$$(awk -F= '/^CORS_ORIGIN=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
-	backend_url="$$(awk -F= '/^NEXT_PUBLIC_API_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
-	docker builder prune -af; \
-	echo -e "$(GREEN)Déploiement de production terminé avec succès.$(NC)"; \
-	echo "Frontend : $${frontend_url:-http://IP_VPS:3010}"; \
-	echo "Backend  : $${backend_url:-http://IP_VPS:4010}"
+# Une invocation unique, sans sous-make : Make déduplique automatiquement les
+# prérequis communs et exécute les cibles de gauche à droite en mode normal.
+prod-deploy: prod-env-check prod-build-deploy prod-migrate prod-buckets prod-health $(PROD_COST_REPAIR_TARGET) prod-final ## Builder, migrer, vérifier et réparer optionnellement
+	@:
 
-prod-cost-repair: prod-env-check ## Sauvegarder puis réparer les coûts dans le backend de production
+# Les images sont toujours reconstruites depuis zéro. On attend uniquement que
+# le conteneur backend soit Running afin que Prisma puisse s'y exécuter ; les
+# health checks complets restent centralisés dans prod-health après migrations.
+prod-build-deploy: prod-env-check
 	@set -e; \
-	echo -e "$(BLUE)[4/5] Réparation des coûts$(NC)"; \
-	echo -e "$(YELLOW)Exécution du réparateur dans le backend de production.$(NC)"; \
+	echo -e "$(BLUE)[1/5] Build + Deploy$(NC)"; \
+	$(DOCKER_COMPOSE) build --no-cache; \
+	$(DOCKER_COMPOSE) up -d; \
 	for attempt in $$(seq 1 30); do \
-		if $(COMPOSE_PROD) exec -T $(PROD_POSTGRES_SERVICE) sh -lc \
-			'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then \
-			postgres_ready=true; \
-			break; \
-		fi; \
-		if [ "$$attempt" -eq 30 ]; then \
-			echo -e "$(RED)PostgreSQL indisponible.$(NC)"; \
+		state="$$(docker inspect --format '{{.State.Status}}' "$(PROD_BACKEND_CONTAINER)" 2>/dev/null || true)"; \
+		[ "$$state" = running ] && exit 0; \
+		[ "$$state" = exited ] || [ "$$state" = dead ] && { \
+			echo -e "$(RED)Backend arrêté avant les migrations (status=$$state).$(NC)"; \
 			exit 1; \
-		fi; \
+		}; \
 		sleep 2; \
 	done; \
-	[ "$${postgres_ready:-false}" = true ]; \
-	for container in "$(PROD_POSTGRES_CONTAINER)" "$(PROD_BACKEND_CONTAINER)"; do \
-		health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$container")"; \
-		running="$$(docker inspect --format '{{.State.Running}}' "$$container")"; \
-		if [ "$$running" != true ] || { [ "$$health" != none ] && [ "$$health" != healthy ]; }; then \
-			echo -e "$(RED)Service non prêt: $$container (running=$$running, health=$$health).$(NC)"; \
-			exit 1; \
-		fi; \
-	done; \
-	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) npx prisma migrate status; \
-	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) sh -lc \
-		'test "$$(npm pkg get scripts.costs:repair)" != "{}"'; \
-	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) sh -lc 'set -eu; \
+	echo -e "$(RED)Backend non démarré après 60 secondes.$(NC)"; \
+	exit 1
+
+prod-cost-repair: prod-env-check prod-migrate prod-health ## Sauvegarder puis réparer les coûts dans le backend de production
+	@set -e; \
+	trap 'echo -e "$(RED)Échec de la réparation des coûts. Consulter les logs avant toute nouvelle tentative.$(NC)"' ERR; \
+	echo -e "$(BLUE)[4/5] Cost Repair$(NC)"; \
+	echo -e "$(YELLOW)Option --cost-repair détectée.$(NC)"; \
+	$(DOCKER_COMPOSE) exec -T $(PROD_BACKEND_SERVICE) node -e \
+		'const pkg=require("./package.json"); if (!pkg.scripts?.["costs:repair"]) { console.error("Script npm costs:repair absent."); process.exit(1); }'; \
+	$(DOCKER_COMPOSE) exec -T $(PROD_BACKEND_SERVICE) sh -lc 'set -eu; \
 		db_url="$${DATABASE_URL%%\?*}"; \
 		stamp="$$(date -u +%Y%m%d-%H%M%S)"; \
 		backup_dir="$${BACKUP_DIRECTORY:-/app/backups}"; \
@@ -419,23 +386,34 @@ prod-cost-repair: prod-env-check ## Sauvegarder puis réparer les coûts dans le
 		test -s "$$backup_file"; \
 		pg_restore --list "$$backup_file" >/dev/null; \
 		echo "Backup PostgreSQL récent et validé: $$backup_file"'; \
-	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) npm run costs:repair -- --apply; \
-	backend_health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(PROD_BACKEND_CONTAINER)")"; \
-	backend_running="$$(docker inspect --format '{{.State.Running}}' "$(PROD_BACKEND_CONTAINER)")"; \
-	if [ "$$backend_running" != true ] || { [ "$$backend_health" != none ] && [ "$$backend_health" != healthy ]; }; then \
-		echo -e "$(RED)Backend non prêt après réparation (running=$$backend_running, health=$$backend_health).$(NC)"; \
-		exit 1; \
-	fi; \
+	$(DOCKER_COMPOSE) exec -T $(PROD_BACKEND_SERVICE) npm run costs:repair -- --apply; \
 	echo -e "$(GREEN)Réparation des coûts terminée avec succès.$(NC)"
+
+prod-final: prod-env-check
+	@set -e; \
+	echo -e "$(BLUE)[5/5] Final Verification$(NC)"; \
+	frontend_url="$$(awk -F= '/^CORS_ORIGIN=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV)")"; \
+	backend_url="$$(awk -F= '/^NEXT_PUBLIC_API_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV)")"; \
+	docker builder prune -af; \
+	echo ""; \
+	echo -e "$(GREEN)✔ Build$(NC)"; \
+	echo -e "$(GREEN)✔ Deploy$(NC)"; \
+	echo -e "$(GREEN)✔ Prisma$(NC)"; \
+	echo -e "$(GREEN)✔ Backend$(NC)"; \
+	echo -e "$(GREEN)✔ PostgreSQL$(NC)"; \
+	echo -e "$(if $(COST_REPAIR_ENABLED),$(GREEN)✔ Cost Repair$(NC),$(YELLOW)○ Cost Repair ignorée$(NC))"; \
+	echo -e "$(GREEN)✔ Final Verification$(NC)"; \
+	echo "Frontend : $${frontend_url:-http://IP_VPS:3010}"; \
+	echo "Backend  : $${backend_url:-http://IP_VPS:4010}"
 
 prod-undeploy: prod-env-check ## Arrêter uniquement frontend/backend Stockini, sans volume
 	@set -e; \
 	echo -e "$(YELLOW)Arrêt des conteneurs Stockini production...$(NC)"; \
-	$(COMPOSE_PROD) down; \
+	$(DOCKER_COMPOSE) down; \
 	echo -e "$(GREEN)Stockini arrêté. Aucun volume, PostgreSQL ou MinIO n'a été supprimé.$(NC)"
 
 prod-logs: prod-env-check ## Suivre les logs frontend/backend production
-	@$(COMPOSE_PROD) logs -f
+	@$(DOCKER_COMPOSE) logs -f
 
 prod-status: prod-env-check ## Afficher conteneurs, santé, ports et réseau Stockini
 	@echo -e "$(BLUE)Conteneurs Stockini$(NC)"
@@ -455,31 +433,35 @@ prod-status: prod-env-check ## Afficher conteneurs, santé, ports et réseau Sto
 	@echo -e "\n$(BLUE)Réseau Stockini$(NC)"
 	@docker network inspect "$(PROD_NETWORK)" --format 'Nom={{.Name}} Driver={{.Driver}} Conteneurs={{len .Containers}}' 2>/dev/null || echo "$(PROD_NETWORK): absent"
 
-prod-wait: prod-env-check ## Attendre les healthchecks configurés (running sinon), maximum 60 s
-	@echo -e "$(BLUE)Attente des services requis (maximum $(PROD_WAIT_TIMEOUT) secondes)...$(NC)"
+prod-health: prod-env-check ## Vérifier une seule fois tous les services de production
+	@echo -e "$(BLUE)[3/5] Health Checks$(NC)"
 	@set -e; \
-	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER)"; \
-	if [ "$(PROD_WAIT_FRONTEND)" = "1" ]; then containers="$$containers $(PROD_FRONTEND_CONTAINER)"; fi; \
+	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER) $(PROD_FRONTEND_CONTAINER)"; \
 	deadline=$$((SECONDS + $(PROD_WAIT_TIMEOUT))); \
 	while [ $$SECONDS -lt $$deadline ]; do \
 		all_ready=true; \
 		for container in $$containers; do \
-			if ! docker inspect "$$container" >/dev/null 2>&1; then \
+			state="$$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$container" 2>/dev/null)" || { \
 				echo "$$container: absent"; \
 				all_ready=false; \
 				continue; \
-			fi; \
-			status="$$(docker inspect --format '{{.State.Status}}' "$$container")"; \
-			running="$$(docker inspect --format '{{.State.Running}}' "$$container")"; \
-			health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$container")"; \
-			if [ "$$container" = "$(PROD_FRONTEND_CONTAINER)" ]; then \
-				[ "$$running" = "true" ] && ready=true || ready=false; \
-			elif [ "$$health" = "none" ]; then \
-				ready="$$running"; \
+			}; \
+			status="$${state%%|*}"; \
+			health="$${state#*|}"; \
+			if [ "$$status" != running ]; then \
+				ready=false; \
+			elif [ "$$health" = none ] || [ "$$health" = healthy ]; then \
+				ready=true; \
 			else \
-				[ "$$health" = "healthy" ] && ready=true || ready=false; \
+				ready=false; \
 			fi; \
-			echo "$$container: status=$$status health=$$health running=$$running ready=$$ready"; \
+			if [ "$$container" = "$(PROD_POSTGRES_CONTAINER)" ] && [ "$$ready" = true ]; then \
+				if ! $(DOCKER_COMPOSE) exec -T $(PROD_POSTGRES_SERVICE) sh -lc \
+					'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then \
+					ready=false; \
+				fi; \
+			fi; \
+			echo "$$container: status=$$status health=$$health ready=$$ready"; \
 			if [ "$$status" = "exited" ] || [ "$$status" = "dead" ]; then \
 				echo -e "$(RED)$$container s'est arrêté avant d'être prêt.$(NC)"; \
 				docker logs --tail 100 "$$container"; \
@@ -496,14 +478,16 @@ prod-wait: prod-env-check ## Attendre les healthchecks configurés (running sino
 	echo -e "$(RED)Timeout: services non prêts après $(PROD_WAIT_TIMEOUT) secondes.$(NC)"; \
 	for container in $$containers; do \
 		echo "--- $$container ---"; \
-		docker inspect --format '{{json .State.Health}}' "$$container" 2>/dev/null || true; \
 		docker logs --tail 100 "$$container" 2>/dev/null || true; \
 	done; \
 	exit 1
 
+# Alias historique sans seconde implémentation de health check.
+prod-wait: prod-health
+
 prod-migrate: prod-env-check ## Vérifier et appliquer uniquement les migrations Prisma nécessaires
 	@set -e; \
-	echo -e "$(BLUE)Vérification des migrations Prisma...$(NC)"; \
+	echo -e "$(BLUE)[2/5] Prisma Migrations$(NC)"; \
 	status_output="$$(docker exec "$(PROD_BACKEND_CONTAINER)" npx prisma migrate status 2>&1)" && status_rc=0 || status_rc=$$?; \
 	echo "$$status_output"; \
 	if [ $$status_rc -eq 0 ]; then \
