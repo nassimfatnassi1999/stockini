@@ -20,6 +20,7 @@ PROD_MINIO_CONTAINER := stockini-prod-minio
 PROD_POSTGRES_SERVICE := stockini-prod-postgres
 PROD_NETWORK := stockini-prod-network
 PROD_WAIT_TIMEOUT ?= 60
+PROD_WAIT_FRONTEND ?= 1
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
 # le compose actuel peut encore utiliser "postgres".
@@ -337,25 +338,15 @@ prod: prod-deploy ## Alias de prod-deploy
 prod-deploy: prod-env-check prod-build-deploy prod-migrate prod-buckets prod-health prod-final ## Builder, migrer et vérifier la production
 	@:
 
-# Les images sont toujours reconstruites depuis zéro. On attend uniquement que
-# le conteneur backend soit Running afin que Prisma puisse s'y exécuter ; les
-# health checks complets restent centralisés dans prod-health après migrations.
+# Les images sont toujours reconstruites depuis zéro. La première attente ne
+# concerne que les dépendances nécessaires aux migrations ; le frontend est
+# contrôlé lors de la vérification finale.
 prod-build-deploy: prod-env-check
 	@set -e; \
 	echo -e "$(BLUE)[1/4] Build + Deploy$(NC)"; \
 	$(DOCKER_COMPOSE) build --no-cache; \
 	$(DOCKER_COMPOSE) up -d; \
-	for attempt in $$(seq 1 30); do \
-		state="$$(docker inspect --format '{{.State.Status}}' "$(PROD_BACKEND_CONTAINER)" 2>/dev/null || true)"; \
-		[ "$$state" = running ] && exit 0; \
-		[ "$$state" = exited ] || [ "$$state" = dead ] && { \
-			echo -e "$(RED)Backend arrêté avant les migrations (status=$$state).$(NC)"; \
-			exit 1; \
-		}; \
-		sleep 2; \
-	done; \
-	echo -e "$(RED)Backend non démarré après 60 secondes.$(NC)"; \
-	exit 1
+	$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=0
 
 prod-final: prod-env-check
 	@set -e; \
@@ -400,27 +391,47 @@ prod-status: prod-env-check ## Afficher conteneurs, santé, ports et réseau Sto
 	@echo -e "\n$(BLUE)Réseau Stockini$(NC)"
 	@docker network inspect "$(PROD_NETWORK)" --format 'Nom={{.Name}} Driver={{.Driver}} Conteneurs={{len .Containers}}' 2>/dev/null || echo "$(PROD_NETWORK): absent"
 
-prod-health: prod-env-check ## Vérifier une seule fois tous les services de production
+prod-health: prod-env-check ## Attendre et vérifier tous les services de production
 	@echo -e "$(BLUE)[3/4] Health Checks$(NC)"
+	@$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=1
+
+prod-wait: prod-env-check ## Attendre les services requis sans répéter les états inchangés
 	@set -e; \
-	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER) $(PROD_FRONTEND_CONTAINER)"; \
+	containers="$(PROD_POSTGRES_CONTAINER) $(PROD_MINIO_CONTAINER) $(PROD_BACKEND_CONTAINER)"; \
+	if [ "$(PROD_WAIT_FRONTEND)" = "1" ]; then containers="$$containers $(PROD_FRONTEND_CONTAINER)"; fi; \
+	echo -e "$(BLUE)Attente des services de production...$(NC)"; \
 	deadline=$$((SECONDS + $(PROD_WAIT_TIMEOUT))); \
+	previous_postgres=""; previous_minio=""; previous_backend=""; previous_frontend=""; \
+	diagnose() { \
+		container="$$1"; \
+		echo -e "$(RED)Diagnostic de $$container$(NC)"; \
+		docker inspect --format '{{json .State.Health}}' "$$container" 2>/dev/null || true; \
+		docker logs --tail 100 "$$container" 2>/dev/null || true; \
+	}; \
 	while [ $$SECONDS -lt $$deadline ]; do \
 		all_ready=true; \
 		for container in $$containers; do \
+			case "$$container" in \
+				"$(PROD_POSTGRES_CONTAINER)") label="PostgreSQL" ;; \
+				"$(PROD_MINIO_CONTAINER)") label="MinIO" ;; \
+				"$(PROD_BACKEND_CONTAINER)") label="Backend" ;; \
+				*) label="Frontend" ;; \
+			esac; \
 			state="$$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$container" 2>/dev/null)" || { \
-				echo "$$container: absent"; \
+				state="absent|none"; \
 				all_ready=false; \
-				continue; \
 			}; \
 			status="$${state%%|*}"; \
 			health="$${state#*|}"; \
-			if [ "$$status" != running ]; then \
-				ready=false; \
-			elif [ "$$health" = none ] || [ "$$health" = healthy ]; then \
+			ready=false; \
+			if [ "$$status" = running ] && [ "$$health" = healthy ]; then \
 				ready=true; \
-			else \
-				ready=false; \
+			elif [ "$$status" = running ] && [ "$$health" = none ]; then \
+				if [ "$$container" = "$(PROD_FRONTEND_CONTAINER)" ]; then \
+					if docker exec "$$container" sh -lc 'node -e "const http=require(\"http\");const req=http.get({host:\"127.0.0.1\",port:Number(process.env.PORT||3000),path:\"/api/health\"},res=>{res.resume();process.exit(res.statusCode===200?0:1)});req.on(\"error\",()=>process.exit(1));req.setTimeout(4000,()=>{req.destroy();process.exit(1)})"' >/dev/null 2>&1; then ready=true; fi; \
+				else \
+					ready=true; \
+				fi; \
 			fi; \
 			if [ "$$container" = "$(PROD_POSTGRES_CONTAINER)" ] && [ "$$ready" = true ]; then \
 				if ! $(DOCKER_COMPOSE) exec -T $(PROD_POSTGRES_SERVICE) sh -lc \
@@ -428,13 +439,37 @@ prod-health: prod-env-check ## Vérifier une seule fois tous les services de pro
 					ready=false; \
 				fi; \
 			fi; \
-			echo "$$container: status=$$status health=$$health ready=$$ready"; \
-			if [ "$$status" = "exited" ] || [ "$$status" = "dead" ]; then \
-				echo -e "$(RED)$$container s'est arrêté avant d'être prêt.$(NC)"; \
-				docker logs --tail 100 "$$container"; \
+			display_state="$$status/$$health"; \
+			if [ "$$ready" = true ]; then display_state="ready"; fi; \
+			case "$$label" in \
+				PostgreSQL) previous="$$previous_postgres" ;; \
+				MinIO) previous="$$previous_minio" ;; \
+				Backend) previous="$$previous_backend" ;; \
+				*) previous="$$previous_frontend" ;; \
+			esac; \
+			if [ "$$previous" != "$$display_state" ]; then \
+				echo "$$label: $${previous:-initial} → $$display_state"; \
+				case "$$label" in \
+					PostgreSQL) previous_postgres="$$display_state" ;; \
+					MinIO) previous_minio="$$display_state" ;; \
+					Backend) previous_backend="$$display_state" ;; \
+					*) previous_frontend="$$display_state" ;; \
+				esac; \
+			fi; \
+			if [ "$$status" = exited ] || [ "$$status" = dead ]; then \
+				echo -e "$(RED)$$label s'est arrêté avant d'être prêt (status=$$status).$(NC)"; \
+				diagnose "$$container"; \
 				exit 1; \
 			fi; \
-			[ "$$ready" = "true" ] || all_ready=false; \
+			if [ "$$health" = unhealthy ]; then \
+				echo -e "$(RED)$$label est unhealthy ; arrêt immédiat de l'attente.$(NC)"; \
+				diagnose "$$container"; \
+				exit 1; \
+			fi; \
+			if [ "$$ready" != true ]; then \
+				ready=false; \
+				all_ready=false; \
+			fi; \
 		done; \
 		if [ "$$all_ready" = true ]; then \
 			echo -e "$(GREEN)Tous les services requis sont prêts.$(NC)"; \
@@ -444,13 +479,9 @@ prod-health: prod-env-check ## Vérifier une seule fois tous les services de pro
 	done; \
 	echo -e "$(RED)Timeout: services non prêts après $(PROD_WAIT_TIMEOUT) secondes.$(NC)"; \
 	for container in $$containers; do \
-		echo "--- $$container ---"; \
-		docker logs --tail 100 "$$container" 2>/dev/null || true; \
+		diagnose "$$container"; \
 	done; \
 	exit 1
-
-# Alias historique sans seconde implémentation de health check.
-prod-wait: prod-health
 
 prod-migrate: prod-env-check ## Vérifier et appliquer uniquement les migrations Prisma nécessaires
 	@set -e; \
