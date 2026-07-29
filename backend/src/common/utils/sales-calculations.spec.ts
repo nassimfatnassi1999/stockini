@@ -1,6 +1,24 @@
 import { calculateMarginAmount, calculateMarginOnCostPercent, calculateMarkupPercent, calculateSalePriceFromPurchaseTtc, calculateSalesLine, calculateSalesTotals, salesRound3 } from './sales-calculations';
 
 describe('canonical sales calculations', () => {
+  it('calcule le vecteur de marge demandé avec quantité 4', () => {
+    const line = calculateSalesLine({
+      purchasePriceHt: 70,
+      grossSalePriceHt: 98,
+      discountPercent: 15,
+      quantity: 4,
+    });
+    expect(line).toMatchObject({
+      netSalePriceHt: 83.3,
+      marginAmount: 13.3,
+      marginAmountHt: 53.2,
+      marginPercentOnCost: 19,
+    });
+    expect(calculateMarkupPercent(line.marginAmount, line.netSalePriceHt)).toBe(
+      15.966,
+    );
+  });
+
   it('calcule FD01B13120L depuis le PA TTC sans confusion HT/TTC', () => {
     expect(calculateSalePriceFromPurchaseTtc({ purchaseTtc: 70, markupPercent: 40, discountPercent: 15, vatPercent: 19 })).toEqual({
       saleTtcGross: 98,

@@ -17,10 +17,9 @@ const netPurchaseUnitCost = (gross: Prisma.Decimal.Value, discount: Prisma.Decim
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 async function main() {
-  const [purchaseItems, saleItems, products, ambiguousInbound] = await Promise.all([
+  const [purchaseItems, allSaleItems, products, ambiguousInbound] = await Promise.all([
     prisma.purchaseItem.findMany({ include: { purchase: { select: { orderNumber: true, createdAt: true } } } }),
     prisma.saleItem.findMany({
-      where: { OR: [{ unitPurchaseCostHt: null }, { purchaseCostEstimated: true }] },
       include: { sale: { select: { invoiceNumber: true, createdAt: true } } },
     }),
     prisma.product.findMany({ where: { deletedAt: null }, select: { id: true, reference: true, purchasePrice: true, purchasePriceTtc: true, tva: true } }),
@@ -29,6 +28,9 @@ async function main() {
       select: { productId: true },
     }),
   ]);
+  const saleItems = allSaleItems.filter(
+    (item) => item.unitPurchaseCostHt == null || item.purchaseCostEstimated,
+  );
 
   const purchaseChanges = purchaseItems.flatMap((item) => {
     const net = netPurchaseUnitCost(item.unitCost, item.discountPercent);
@@ -70,7 +72,20 @@ async function main() {
     return { vente: item.sale.invoiceNumber, ligne: item.id, ancienCout: oldCost?.toFixed(3) ?? 'NULL', nouveauCout: newCost.toFixed(3), ancienneMarge: oldCost == null ? '?' : money(D(saleNet).minus(oldCost)).toFixed(3), nouvelleMarge: money(D(saleNet).minus(newCost)).toFixed(3) };
   }));
   console.table(productChanges.map(({ product, cump }) => ({ produit: product.reference, ancienCump: product.purchasePrice.toFixed(3), nouveauCump: cump.toFixed(3) })));
-  console.log({ mode: apply ? 'APPLY' : 'DRY-RUN', purchaseLinesAnalyzed: purchaseItems.length, purchaseLinesCorrectible: purchaseChanges.length, productsAnalyzed: products.length, productsCorrectible: productChanges.length, ambiguousProducts: ambiguousProductIds.size, saleLinesAnalyzed: saleItems.length, saleLinesCorrectible: saleChanges.length, ambiguousSaleLines: ambiguousSales.length });
+  console.log({
+    mode: apply ? 'APPLY' : 'DRY-RUN',
+    salesAudited: new Set(allSaleItems.map((item) => item.saleId)).size,
+    saleLinesAudited: allSaleItems.length,
+    saleLinesWithoutSnapshot: allSaleItems.filter((item) => item.unitPurchaseCostHt == null).length,
+    saleLinesWithEstimatedSnapshot: allSaleItems.filter((item) => item.purchaseCostEstimated).length,
+    saleLinesCorrectible: saleChanges.length,
+    ambiguousSaleLines: ambiguousSales.length,
+    purchaseLinesAnalyzed: purchaseItems.length,
+    purchasesWithUnpropagatedDiscount: purchaseChanges.length,
+    productsAnalyzed: products.length,
+    productsWithInconsistentCump: productChanges.length,
+    ambiguousProducts: ambiguousProductIds.size,
+  });
 
   if (apply) {
     await prisma.$transaction([

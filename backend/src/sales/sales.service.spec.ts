@@ -44,6 +44,7 @@ describe('SalesService document references', () => {
     const tx: any = {
       product: {
         findMany: jest.fn().mockResolvedValue([product]),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(product),
         update: jest.fn().mockResolvedValue(product),
       },
       customer: {
@@ -87,6 +88,7 @@ describe('SalesService document references', () => {
       },
       saleItem: {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn((args: any) => {
           if (args?.select?.saleId)
             return Promise.resolve([{ saleId: 'sale-1' }]);
@@ -220,7 +222,11 @@ describe('SalesService document references', () => {
         expect.objectContaining({
           unitPrice: 140,
           finalUnitPrice: 140,
-          unitPurchaseCostHt: 100,
+          unitPurchaseCostHt: (
+            [DocumentType.FACTURE, DocumentType.BON_LIVRAISON] as DocumentType[]
+          ).includes(documentType)
+            ? 100
+            : null,
           calculationVersion: 4,
           total: 140,
         }),
@@ -545,6 +551,66 @@ describe('SalesService document references', () => {
         data: { transformedToId: 'sale-1' },
       }),
     );
+  });
+
+  it('fige le CUMP courant lors de la transformation devis vers facture', async () => {
+    const { service, tx, stockService } = buildService();
+    tx.product.findUniqueOrThrow.mockResolvedValue({
+      ...product,
+      purchasePrice: 90,
+    });
+    tx.sale.findFirstOrThrow.mockResolvedValue({
+      id: 'source-quote',
+      invoiceNumber: 'DEV-001',
+      customerId: 'customer-1',
+      customer: { name: 'Auto Top' },
+      documentType: DocumentType.DEVIS,
+      status: SaleStatus.DRAFT,
+      transformedToId: null,
+      stockImpactDone: false,
+      subtotal: 119,
+      discount: 21,
+      tax: 22.61,
+      total: 141.61,
+      stampDuty: 1,
+      clientType: 'PERSISTENT',
+      items: [
+        {
+          id: 'quote-item',
+          productId: product.id,
+          designation: product.name,
+          quantity: 1,
+          unitPrice: 140,
+          finalUnitPrice: 119,
+          total: 119,
+          discountPercent: 15,
+          marginPercent: 40,
+          tvaPercent: 19,
+          unitPurchaseCostHt: null,
+          purchaseCostEstimated: false,
+          calculationVersion: 4,
+        },
+      ],
+    });
+
+    await service.transformDocument('source-quote', DocumentType.FACTURE, {
+      id: 'seller',
+      permissions: [],
+    } as any);
+
+    expect(tx.sale.create.mock.calls[0][0].data.items.create[0]).toEqual(
+      expect.objectContaining({ unitPurchaseCostHt: expect.anything() }),
+    );
+    expect(
+      tx.sale.create.mock.calls[0][0].data.items.create[0].unitPurchaseCostHt.toString(),
+    ).toBe('90');
+    expect(stockService.applyMovement).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ unitCostHtNet: expect.anything() }),
+    );
+    expect(
+      stockService.applyMovement.mock.calls[0][1].unitCostHtNet.toString(),
+    ).toBe('90');
   });
 
   it('returns the next simple reference preview for each document type', async () => {

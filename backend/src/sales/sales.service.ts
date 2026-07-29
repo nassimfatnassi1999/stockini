@@ -807,9 +807,12 @@ export class SalesService {
           tvaPercent: item.tvaRate,
           finalUnitPrice: salesRound3(item.netLineTotal / item.quantity),
           total: salesRound3(item.netLineTotal),
-          unitPurchaseCostHt: Number(
-            productsById.get(item.productId)!.purchasePrice,
-          ),
+          // A quote/order does not consume stock: its cost is intentionally not
+          // frozen. The immutable CUMP snapshot is captured on the actual stock
+          // issue (creation, validation or transformation to BL/invoice).
+          unitPurchaseCostHt: immediateStockImpact
+            ? Number(productsById.get(item.productId)!.purchasePrice)
+            : null,
           purchaseCostEstimated: false,
           calculationVersion: SALES_CALCULATION_VERSION,
         };
@@ -1080,6 +1083,16 @@ export class SalesService {
               `Stock insuffisant pour "${product.name}" — disponible: ${product.quantity}, demandé: ${item.quantity}`,
             );
           }
+          const historicalUnitCost = new Prisma.Decimal(
+            product.purchasePrice,
+          ).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+          await tx.saleItem.update({
+            where: { id: item.id },
+            data: {
+              unitPurchaseCostHt: historicalUnitCost,
+              purchaseCostEstimated: false,
+            },
+          });
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
             type: StockMovementType.SALE,
@@ -1088,7 +1101,7 @@ export class SalesService {
             userId,
             sourceType: 'SALE_ITEM',
             sourceId: item.id,
-            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
+            unitCostHtNet: historicalUnitCost,
           });
         }
       }
@@ -1726,8 +1739,10 @@ export class SalesService {
       const targetAppliesStock = STOCK_IMPACTING_TYPES.has(targetType);
       const sourceAppliedStock = source.stockImpactDone;
 
-      // Vérifier la disponibilité stock uniquement si le document cible affecte le
-      // stock ET que le document source n'a pas déjà consommé ce stock.
+      const resolvedHistoricalCosts = new Map<string, Prisma.Decimal | null>();
+
+      // Vérifier la disponibilité et capturer le CUMP uniquement si le document
+      // cible effectue réellement la première sortie de stock.
       if (targetAppliesStock && !sourceAppliedStock) {
         for (const item of source.items) {
           const product = await tx.product.findUniqueOrThrow({
@@ -1738,6 +1753,20 @@ export class SalesService {
               `Stock insuffisant pour "${product.name}" — disponible : ${product.quantity}, demandé : ${item.quantity}`,
             );
           }
+          resolvedHistoricalCosts.set(
+            item.id,
+            new Prisma.Decimal(product.purchasePrice).toDecimalPlaces(
+              3,
+              Prisma.Decimal.ROUND_HALF_UP,
+            ),
+          );
+        }
+      } else {
+        for (const item of source.items) {
+          resolvedHistoricalCosts.set(
+            item.id,
+            sourceAppliedStock ? item.unitPurchaseCostHt : null,
+          );
         }
       }
 
@@ -1797,8 +1826,10 @@ export class SalesService {
               tvaPercent: item.tvaPercent,
               finalUnitPrice: item.finalUnitPrice,
               total: item.total,
-              unitPurchaseCostHt: item.unitPurchaseCostHt,
-              purchaseCostEstimated: item.purchaseCostEstimated,
+              unitPurchaseCostHt: resolvedHistoricalCosts.get(item.id),
+              purchaseCostEstimated: sourceAppliedStock
+                ? item.purchaseCostEstimated
+                : false,
               calculationVersion: item.calculationVersion,
             })),
           },
@@ -1813,7 +1844,7 @@ export class SalesService {
 
       // Appliquer le stock une seule fois si nécessaire
       if (targetAppliesStock && !sourceAppliedStock) {
-        for (const item of source.items) {
+        for (const item of newSale.items) {
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
             type: StockMovementType.SALE,

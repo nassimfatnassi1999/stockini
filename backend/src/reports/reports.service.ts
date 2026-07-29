@@ -43,7 +43,9 @@ import {
 //
 // Impayés fournisseurs: SUM(Purchase.remainingAmount) from active purchases in period.
 //
-// Bénéfice estimé: CA net - Total achats. Marge % = (Bénéfice / CA) * 100.
+// Marge brute réelle: CA net HT - coût historique des articles vendus.
+// Bénéfice net: marge brute réelle - dépenses actives. Les achats et paiements
+// restent des flux séparés et ne sont jamais soustraits une seconde fois.
 //
 // Valeur stock (global): SUM(quantity * purchasePrice/salePrice) on active products.
 //

@@ -34,30 +34,36 @@ export interface CreditNoteTotals {
   totalTtc: number;
 }
 
-const MONEY_SCALE = 1000;
-
-export function roundCreditNoteMoney(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round((value + Number.EPSILON) * MONEY_SCALE) / MONEY_SCALE;
+export function roundCreditNoteMoney(value: Decimal.Value): number {
+  return new Decimal(value)
+    .toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
+    .toNumber();
 }
 
 export function calculateCreditNoteTotals(
   lines: CreditNoteCalculationLine[],
 ): CreditNoteTotals {
-  const totalHt = roundCreditNoteMoney(
-    lines.reduce((sum, line) => sum + line.quantity * line.unitPriceHt, 0),
+  const totalHtDecimal = lines.reduce(
+    (sum, line) => sum.plus(new Decimal(line.unitPriceHt).mul(line.quantity)),
+    new Decimal(0),
   );
-  const totalTva = roundCreditNoteMoney(
-    lines.reduce(
-      (sum, line) =>
-        sum + line.quantity * line.unitPriceHt * (line.tvaRate / 100),
-      0,
-    ),
+  const totalTvaDecimal = lines.reduce(
+    (sum, line) =>
+      sum.plus(
+        new Decimal(line.unitPriceHt)
+          .mul(line.quantity)
+          .mul(line.tvaRate)
+          .div(100),
+      ),
+    new Decimal(0),
   );
+  const totalHt = roundCreditNoteMoney(totalHtDecimal);
+  const totalTva = roundCreditNoteMoney(totalTvaDecimal);
 
   return {
     totalHt,
     totalTva,
-    totalTtc: roundCreditNoteMoney(totalHt + totalTva),
+    totalTtc: roundCreditNoteMoney(new Decimal(totalHt).plus(totalTva)),
   };
 }
+import Decimal from "decimal.js";

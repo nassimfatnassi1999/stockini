@@ -17,9 +17,20 @@ PROD_BACKEND_CONTAINER := stockini-prod-backend
 PROD_FRONTEND_CONTAINER := stockini-prod-frontend
 PROD_POSTGRES_CONTAINER := stockini-prod-postgres
 PROD_MINIO_CONTAINER := stockini-prod-minio
+PROD_BACKEND_SERVICE := stockini-prod-backend
+PROD_POSTGRES_SERVICE := stockini-prod-postgres
 PROD_NETWORK := stockini-prod-network
 PROD_WAIT_TIMEOUT ?= 60
 PROD_WAIT_FRONTEND ?= 1
+COST_REPAIR ?=
+
+# GNU Make interprète tout argument commençant par "--" comme une option avant
+# de lire ce fichier. La forme cible nécessite donc le séparateur standard :
+#   make prod-deploy -- --cost-repair
+# La forme portable recommandée reste : make prod-deploy COST_REPAIR=1
+COST_REPAIR_ENABLED := $(strip $(or \
+	$(filter --cost-repair,$(MAKECMDGOALS)), \
+	$(filter 1 true yes,$(COST_REPAIR))))
 
 # Détection robuste du service PostgreSQL: la consigne cible "db",
 # le compose actuel peut encore utiliser "postgres".
@@ -48,7 +59,7 @@ NC := \033[0m
 	minio-up minio-down minio-wait \
 	logs logs-db logs-minio build clear clean-all \
 	prod prod-deploy prod-undeploy prod-logs prod-status prod-restart \
-	prod-migrate prod-buckets prod-wait prod-clean \
+	prod-migrate prod-buckets prod-wait prod-clean prod-cost-repair --cost-repair \
 	env-check deps-check backend-env-check frontend-env-check prod-env-check
 
 help: ## Afficher cette aide
@@ -332,25 +343,90 @@ clean-all: env-check ## Nettoyer node_modules, builds et volumes Docker
 
 prod: prod-deploy ## Alias de prod-deploy
 
+# Cible marqueur sans action métier. Pour GNU Make, utiliser obligatoirement :
+# make prod-deploy -- --cost-repair
+--cost-repair:
+	@:
+
 # Les images sont toujours reconstruites depuis zéro : aucune couche en cache
 # n'est réutilisée pendant le build de production. Après un déploiement réussi,
 # le cache BuildKit est nettoyé pour empêcher l'utilisation disque d'augmenter
 # continuellement.
 prod-deploy: prod-env-check ## Builder et déployer Stockini, migrer puis préparer MinIO
+	@echo -e "$(BLUE)[1/5] Déploiement de production$(NC)"
+	@$(COMPOSE_PROD) build --no-cache
+	@$(COMPOSE_PROD) up -d
+	@$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=0
+	@echo -e "$(BLUE)[2/5] Migrations Prisma$(NC)"
+	@$(MAKE) --no-print-directory prod-migrate
+	@$(MAKE) --no-print-directory prod-buckets
+	@echo -e "$(BLUE)[3/5] Vérification des services$(NC)"
+	@$(MAKE) --no-print-directory prod-wait
+	@if [ -n "$(COST_REPAIR_ENABLED)" ]; then \
+		echo -e "$(YELLOW)Option --cost-repair détectée.$(NC)"; \
+		if ! $(MAKE) --no-print-directory prod-cost-repair; then \
+			echo -e "$(RED)Le déploiement a réussi, mais la réparation des coûts a échoué.$(NC)"; \
+			echo -e "$(RED)Consulter les logs avant toute nouvelle tentative.$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo -e "$(BLUE)[4/5] Réparation des coûts ignorée : option --cost-repair absente.$(NC)"; \
+	fi
 	@set -e; \
-	echo -e "$(BLUE)Build et démarrage des seuls services Stockini...$(NC)"; \
-	$(COMPOSE_PROD) build --no-cache; \
-	$(COMPOSE_PROD) up -d; \
-	$(MAKE) --no-print-directory prod-wait PROD_WAIT_FRONTEND=0; \
-	$(MAKE) --no-print-directory prod-migrate; \
-	$(MAKE) --no-print-directory prod-buckets; \
-	$(MAKE) --no-print-directory prod-wait; \
+	echo -e "$(BLUE)[5/5] Vérification finale$(NC)"; \
 	frontend_url="$$(awk -F= '/^CORS_ORIGIN=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
 	backend_url="$$(awk -F= '/^NEXT_PUBLIC_API_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$(PROD_ENV_FILE)")"; \
 	docker builder prune -af; \
-	echo -e "$(GREEN)Stockini production est prêt.$(NC)"; \
+	echo -e "$(GREEN)Déploiement de production terminé avec succès.$(NC)"; \
 	echo "Frontend : $${frontend_url:-http://IP_VPS:3010}"; \
 	echo "Backend  : $${backend_url:-http://IP_VPS:4010}"
+
+prod-cost-repair: prod-env-check ## Sauvegarder puis réparer les coûts dans le backend de production
+	@set -e; \
+	echo -e "$(BLUE)[4/5] Réparation des coûts$(NC)"; \
+	echo -e "$(YELLOW)Exécution du réparateur dans le backend de production.$(NC)"; \
+	for attempt in $$(seq 1 30); do \
+		if $(COMPOSE_PROD) exec -T $(PROD_POSTGRES_SERVICE) sh -lc \
+			'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then \
+			postgres_ready=true; \
+			break; \
+		fi; \
+		if [ "$$attempt" -eq 30 ]; then \
+			echo -e "$(RED)PostgreSQL indisponible.$(NC)"; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+	done; \
+	[ "$${postgres_ready:-false}" = true ]; \
+	for container in "$(PROD_POSTGRES_CONTAINER)" "$(PROD_BACKEND_CONTAINER)"; do \
+		health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$$container")"; \
+		running="$$(docker inspect --format '{{.State.Running}}' "$$container")"; \
+		if [ "$$running" != true ] || { [ "$$health" != none ] && [ "$$health" != healthy ]; }; then \
+			echo -e "$(RED)Service non prêt: $$container (running=$$running, health=$$health).$(NC)"; \
+			exit 1; \
+		fi; \
+	done; \
+	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) npx prisma migrate status; \
+	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) sh -lc \
+		'test "$$(npm pkg get scripts.costs:repair)" != "{}"'; \
+	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) sh -lc 'set -eu; \
+		db_url="$${DATABASE_URL%%\?*}"; \
+		stamp="$$(date -u +%Y%m%d-%H%M%S)"; \
+		backup_dir="$${BACKUP_DIRECTORY:-/app/backups}"; \
+		backup_file="$$backup_dir/pre-cost-repair-$$stamp.dump"; \
+		mkdir -p "$$backup_dir"; \
+		pg_dump --format=custom --file="$$backup_file" "$$db_url"; \
+		test -s "$$backup_file"; \
+		pg_restore --list "$$backup_file" >/dev/null; \
+		echo "Backup PostgreSQL récent et validé: $$backup_file"'; \
+	$(COMPOSE_PROD) exec -T $(PROD_BACKEND_SERVICE) npm run costs:repair -- --apply; \
+	backend_health="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(PROD_BACKEND_CONTAINER)")"; \
+	backend_running="$$(docker inspect --format '{{.State.Running}}' "$(PROD_BACKEND_CONTAINER)")"; \
+	if [ "$$backend_running" != true ] || { [ "$$backend_health" != none ] && [ "$$backend_health" != healthy ]; }; then \
+		echo -e "$(RED)Backend non prêt après réparation (running=$$backend_running, health=$$backend_health).$(NC)"; \
+		exit 1; \
+	fi; \
+	echo -e "$(GREEN)Réparation des coûts terminée avec succès.$(NC)"
 
 prod-undeploy: prod-env-check ## Arrêter uniquement frontend/backend Stockini, sans volume
 	@set -e; \

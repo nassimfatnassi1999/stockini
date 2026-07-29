@@ -5,6 +5,16 @@ import {
 } from './purchase-calculations';
 
 describe('canonical purchase calculations', () => {
+  it('calcule 276,990 avec 10 % de remise fournisseur à 249,291', () => {
+    expect(
+      calculatePurchaseLine({
+        quantity: 1,
+        unitCost: 276.99,
+        discountPercent: 10,
+      }).unitCostHtNet,
+    ).toBe(249.291);
+  });
+
   it('calcule le coût unitaire net fournisseur avec arrondi HALF_UP à 3 décimales', () => {
     expect(calculatePurchaseLine({ quantity: 1, unitCost: 276.99, discountPercent: 25 })).toMatchObject({
       unitCostHtGross: 276.99,
@@ -19,6 +29,16 @@ describe('canonical purchase calculations', () => {
     const second = calculateWeightedAverageCost({ currentQuantity: 2, currentUnitCostHtNet: first, incomingQuantity: 1, incomingUnitCostHtNet: 70 });
     expect(second).toBe(90);
     expect(calculateWeightedAverageCost({ currentQuantity: 2, currentUnitCostHtNet: 90, incomingQuantity: 1, incomingUnitCostHtNet: 100 })).toBe(93.333);
+  });
+  it('calcule le cas CUMP de référence à 53,333', () => {
+    expect(
+      calculateWeightedAverageCost({
+        currentQuantity: 10,
+        currentUnitCostHtNet: 50,
+        incomingQuantity: 5,
+        incomingUnitCostHtNet: 60,
+      }),
+    ).toBe(53.333);
   });
   it('arrondit chaque ligne puis somme les lignes et utilise le timbre saisi', () => {
     const lines = [
