@@ -62,7 +62,7 @@ export function resolveCashDateRange(
 
   switch (period) {
     case 'today':
-      return { gte: today, lte: new Date(today.getTime() + 86_400_000 - 1) };
+      return { gte: today, lte: now };
     case 'yesterday': {
       const yd = new Date(today.getTime() - 86_400_000);
       return { gte: yd, lte: new Date(today.getTime() - 1) };
@@ -71,28 +71,22 @@ export function resolveCashDateRange(
       const monday = new Date(
         today.getTime() - ((localNow.getUTCDay() + 6) % 7) * 86_400_000,
       );
-      return { gte: monday, lte: new Date(monday.getTime() + 7 * 86_400_000 - 1) };
+      return { gte: monday, lte: now };
     }
     case 'month': {
       const monthStart = new Date(
         Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), 1) - TZ_OFFSET_MS,
       );
-      const nextMonth = new Date(
-        Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth() + 1, 1) - TZ_OFFSET_MS,
-      );
-      return { gte: monthStart, lte: new Date(nextMonth.getTime() - 1) };
+      return { gte: monthStart, lte: now };
     }
     case 'year': {
       const yearStart = new Date(
         Date.UTC(localNow.getUTCFullYear(), 0, 1) - TZ_OFFSET_MS,
       );
-      const nextYear = new Date(
-        Date.UTC(localNow.getUTCFullYear() + 1, 0, 1) - TZ_OFFSET_MS,
-      );
-      return { gte: yearStart, lte: new Date(nextYear.getTime() - 1) };
+      return { gte: yearStart, lte: now };
     }
     default:
-      return { gte: today, lte: new Date(today.getTime() + 86_400_000 - 1) };
+      return { gte: today, lte: now };
   }
 }
 

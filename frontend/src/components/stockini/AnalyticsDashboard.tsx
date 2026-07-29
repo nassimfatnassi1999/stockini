@@ -238,11 +238,19 @@ export function AnalyticsDashboard() {
       ['Indicateur', 'Valeur'],
       ['Chiffre d’affaires net HT', overview.financier.caNet],
       ['Bénéfice brut réel', overview.financier.beneficeBrut],
+      ['Bénéfice net commercial', overview.financier.beneficeEstime],
       ['Coût des produits vendus', overview.financier.coutProduitsVendus],
       ['Taux de marque sur vente (%)', overview.financier.tauxMarque],
       ['Taux de marge sur coût (%)', overview.financier.tauxMargeSurCout],
       ['Montant encaissé', overview.financier.encaissementsClients],
       ['Reste à encaisser', overview.financier.impayesClients],
+      ['Entrées de caisse', overview.financier.entreesCaisse],
+      ['Sorties de caisse', overview.financier.sortiesCaisse],
+      ['Flux net de caisse', overview.financier.fluxNetCaisse],
+      ['Dépenses payées', overview.financier.depensesPayees],
+      ['Remboursements d’avoirs', overview.financier.remboursementsAvoirs],
+      ['Monnaie rendue', overview.financier.monnaieRendue],
+      ['Excédents non rendus', overview.financier.excedentsNonRendus],
       ['Remises accordées', overview.financier.remisesAccordees],
       ['Avoirs HT', overview.ventes.avoirs.total],
       ['Nombre de ventes', overview.ventes.count],
@@ -475,7 +483,7 @@ export function AnalyticsDashboard() {
             {...kpiContext}
             metric="customerReceivables"
             icon={AlertTriangle}
-            label="Impayés clients"
+            label="Reste à encaisser"
             value={reportMoney(financier.impayesClients)}
             color="red"
           />
@@ -487,6 +495,15 @@ export function AnalyticsDashboard() {
             value={reportMoney(financier.beneficeBrut)}
             sub={`Taux de marque sur vente : ${financier.tauxMarque}%`}
             color={financier.beneficeBrut >= 0 ? 'green' : 'red'}
+          />
+          <KpiCard
+            {...kpiContext}
+            metric="netProfit"
+            icon={TrendingUp}
+            label="Bénéfice net commercial"
+            value={reportMoney(financier.beneficeEstime)}
+            sub="Marge brute − dépenses actives"
+            color={financier.beneficeEstime >= 0 ? 'green' : 'red'}
           />
           <KpiCard
             {...kpiContext}
@@ -568,6 +585,13 @@ export function AnalyticsDashboard() {
             value={reportMoney(financier.depenses)}
             color="red"
           />
+          <KpiCard {...kpiContext} metric="cashInflows" icon={TrendingUp} label="Entrées de caisse" value={reportMoney(financier.entreesCaisse)} color="green" />
+          <KpiCard {...kpiContext} metric="cashOutflows" icon={TrendingDown} label="Sorties de caisse" value={reportMoney(financier.sortiesCaisse)} color="red" />
+          <KpiCard {...kpiContext} metric="netCashFlow" icon={Activity} label="Flux net de caisse" value={reportMoney(financier.fluxNetCaisse)} color={financier.fluxNetCaisse >= 0 ? 'green' : 'red'} />
+          <KpiCard {...kpiContext} metric="paidExpenses" icon={TrendingDown} label="Dépenses payées" value={reportMoney(financier.depensesPayees)} color="red" />
+          <KpiCard {...kpiContext} metric="refundedAmount" icon={RefreshCw} label="Remboursements d’avoirs" value={reportMoney(financier.remboursementsAvoirs)} color="orange" />
+          <KpiCard {...kpiContext} metric="customerChange" icon={RefreshCw} label="Monnaie rendue" value={reportMoney(financier.monnaieRendue)} color="orange" />
+          <KpiCard {...kpiContext} metric="retainedSurplus" icon={DollarSign} label="Excédents non rendus" value={reportMoney(financier.excedentsNonRendus)} color="purple" />
         </div>
       </section>
 
@@ -685,6 +709,7 @@ export function AnalyticsDashboard() {
           <KpiCard {...kpiContext} metric="purchaseCount" icon={Layers} label="Nb commandes" value={achats.count} trend={achats.countTrend} color="purple" />
           <KpiCard {...kpiContext} metric="supplierPayments" icon={Truck} label="Paiements fournisseurs" value={reportMoney(financier.paiementsFournisseurs)} color="teal" />
           <KpiCard {...kpiContext} metric="supplierPayables" icon={AlertTriangle} label="Impayés fournisseurs" value={reportMoney(financier.impayesFournisseurs)} color="orange" />
+          <KpiCard {...kpiContext} metric="supplierPayables" icon={AlertTriangle} label="Dettes fournisseurs (global)" value={reportMoney(financier.dettesFournisseurs)} color="orange" />
         </div>
       </section>
 
@@ -696,7 +721,8 @@ export function AnalyticsDashboard() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard {...kpiContext} metric="customersCount" icon={Users} label="Total clients" value={clients.total} color="blue" />
           <KpiCard {...kpiContext} metric="customerCollections" icon={DollarSign} label="Encaissements période" value={reportMoney(financier.encaissementsClients)} color="green" />
-          <KpiCard {...kpiContext} metric="customerReceivables" icon={AlertTriangle} label="Impayés période" value={reportMoney(financier.impayesClients)} color="red" />
+          <KpiCard {...kpiContext} metric="customerReceivables" icon={AlertTriangle} label="Reste à encaisser (période)" value={reportMoney(financier.resteAEncaisser)} color="red" />
+          <KpiCard {...kpiContext} metric="currentCustomerDebt" icon={AlertTriangle} label="Dettes clients (global)" value={reportMoney(financier.dettesClients)} color="red" />
         </div>
       </section>
 

@@ -1,4 +1,9 @@
-import { DocumentType, Prisma, SaleStatus } from '@prisma/client';
+import {
+  CaisseMovementType,
+  DocumentType,
+  Prisma,
+  SaleStatus,
+} from '@prisma/client';
 
 export const REVENUE_RECOGNIZED_STATUSES: SaleStatus[] = [
   SaleStatus.COMPLETED,
@@ -54,5 +59,37 @@ export function financialRates(
   return {
     marginRateOnCost: c.isZero() ? new Prisma.Decimal(0) : p.div(c).mul(100),
     markupRateOnRevenue: r.isZero() ? new Prisma.Decimal(0) : p.div(r).mul(100),
+  };
+}
+
+export function summarizeCashMovements(
+  movements: Array<{
+    type: CaisseMovementType;
+    montant: Prisma.Decimal.Value;
+  }>,
+) {
+  const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
+  const byType = (type: CaisseMovementType) =>
+    movements
+      .filter((movement) => movement.type === type)
+      .reduce((total, movement) => total.plus(movement.montant), D(0));
+  const inflows = movements.reduce(
+    (total, movement) =>
+      D(movement.montant).gt(0) ? total.plus(movement.montant) : total,
+    D(0),
+  );
+  const outflows = movements.reduce(
+    (total, movement) =>
+      D(movement.montant).lt(0) ? total.plus(D(movement.montant).abs()) : total,
+    D(0),
+  );
+  return {
+    inflows,
+    outflows,
+    netFlow: inflows.minus(outflows),
+    paidExpenses: byType(CaisseMovementType.DEPENSE_GENERALE).abs(),
+    creditNoteRefunds: byType(CaisseMovementType.REFUND_OUT).abs(),
+    returnedChange: byType(CaisseMovementType.CUSTOMER_CHANGE_OUT).abs(),
+    retainedSurplus: byType(CaisseMovementType.CASH_SURPLUS_IN),
   };
 }

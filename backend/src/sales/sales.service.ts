@@ -226,6 +226,10 @@ export class SalesService {
           customerId: first.customerId,
           clientType: first.clientType,
           createdAt: documentDate,
+          recognizedAt: sources.reduce<Date | null>((earliest, sale) => {
+            const recognized = sale.recognizedAt ?? sale.createdAt;
+            return !earliest || recognized < earliest ? recognized : earliest;
+          }, null),
           sellerId: user?.id,
           subtotal,
           discount,
@@ -823,6 +827,7 @@ export class SalesService {
         data: {
           invoiceNumber,
           createdAt: documentDate,
+          recognizedAt: immediateStockImpact ? new Date() : null,
           customerId: resolvedCustomerId,
           clientType: resolvedClientType ?? null,
           counterClientFirstName: isComptoir
@@ -1110,6 +1115,7 @@ export class SalesService {
         where: { id },
         data: {
           status: SaleStatus.COMPLETED,
+          recognizedAt: sale.recognizedAt ?? new Date(),
           ...(needsStockImpact && { stockImpactDone: true }),
           ...(needsLastSalePriceImpact && { lastSalePriceImpactDone: true }),
         },
@@ -1789,6 +1795,11 @@ export class SalesService {
         data: {
           invoiceNumber,
           createdAt: documentDate,
+          recognizedAt: targetAppliesStock
+            ? sourceAppliedStock
+              ? (source.recognizedAt ?? source.createdAt)
+              : new Date()
+            : null,
           customerId: source.customerId,
           clientType: source.clientType,
           counterClientFirstName: source.counterClientFirstName,

@@ -2,23 +2,28 @@ import { ReportsService, resolveReportDateRange } from './reports.service';
 import {
   financialRates,
   isRevenueRecognizedDocument,
+  summarizeCashMovements,
 } from './reports-financial.utils';
-import { DocumentType, Prisma, SaleStatus } from '@prisma/client';
+import {
+  CaisseMovementType,
+  DocumentType,
+  Prisma,
+  SaleStatus,
+} from '@prisma/client';
 
 // ─── resolveReportDateRange ───────────────────────────────────────────────────
 
 describe('resolveReportDateRange', () => {
   const TZ_OFFSET_MS = 60 * 60_000;
 
-  it('today: gte is start of local day, lte is end of local day', () => {
+  it('today: gte is start of local day, lte is now', () => {
+    const before = Date.now();
     const { gte, lte } = resolveReportDateRange('today', undefined, undefined);
     const localGte = new Date(gte.getTime() + TZ_OFFSET_MS);
-    const localLte = new Date(lte.getTime() + TZ_OFFSET_MS);
     expect(localGte.getUTCHours()).toBe(0);
     expect(localGte.getUTCMinutes()).toBe(0);
-    expect(localLte.getUTCHours()).toBe(23);
-    expect(localLte.getUTCMinutes()).toBe(59);
-    expect(lte.getTime() - gte.getTime()).toBe(86_400_000 - 1);
+    expect(lte.getTime()).toBeGreaterThanOrEqual(before);
+    expect(lte.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   it('week: range starts on Monday in Africa/Tunis', () => {
@@ -235,6 +240,25 @@ describe('centralized financial rules', () => {
     ).toBe(false);
   });
 
+  it('sépare monnaie rendue et surplus non rendu du paiement de vente', () => {
+    const returned = summarizeCashMovements([
+      { type: CaisseMovementType.ENCAISSEMENT_VENTE, montant: '330.000' },
+      { type: CaisseMovementType.CUSTOMER_CHANGE_OUT, montant: '-1.000' },
+    ]);
+    expect(returned.inflows.toFixed(3)).toBe('330.000');
+    expect(returned.returnedChange.toFixed(3)).toBe('1.000');
+    expect(returned.netFlow.toFixed(3)).toBe('329.000');
+    expect(returned.retainedSurplus.toFixed(3)).toBe('0.000');
+
+    const retained = summarizeCashMovements([
+      { type: CaisseMovementType.ENCAISSEMENT_VENTE, montant: '329.000' },
+      { type: CaisseMovementType.CASH_SURPLUS_IN, montant: '1.000' },
+    ]);
+    expect(retained.netFlow.toFixed(3)).toBe('330.000');
+    expect(retained.retainedSurplus.toFixed(3)).toBe('1.000');
+    expect(retained.returnedChange.toFixed(3)).toBe('0.000');
+  });
+
   it('distingue taux de marque et taux de marge sans division par zéro', () => {
     const rates = financialRates(196, 140, 56);
     expect(rates.markupRateOnRevenue.toNumber()).toBeCloseTo(28.571, 3);
@@ -284,7 +308,7 @@ describe('ReportsService real profit', () => {
     ]);
     expect(saleFindMany.mock.calls[0][0].where).toEqual(
       expect.objectContaining({
-        createdAt: {
+        recognizedAt: {
           gte: new Date('2026-07-01'),
           lte: new Date('2026-07-31'),
         },
@@ -321,7 +345,9 @@ describe('ReportsService real profit', () => {
     const prisma = {
       sale: { findMany: jest.fn().mockResolvedValue([]) },
       creditNote: { findMany: jest.fn().mockResolvedValue([]) },
-      expense: { aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }) },
+      expense: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }),
+      },
       payment: { findMany: forbidden, aggregate: forbidden },
       caisseMovement: { findMany: forbidden, aggregate: forbidden },
     } as any;
@@ -335,17 +361,27 @@ describe('ReportsService real profit', () => {
 
   it('conserve exactement trois décimales dans le résultat net', async () => {
     const prisma = {
-      sale: { findMany: jest.fn().mockResolvedValue([{
-        subtotal: new Prisma.Decimal('10.005'),
-        discount: new Prisma.Decimal(0),
-        items: [{
-          quantity: 3,
-          unitPurchaseCostHt: new Prisma.Decimal('1.111'),
-          purchaseCostEstimated: false,
-        }],
-      }]) },
+      sale: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            subtotal: new Prisma.Decimal('10.005'),
+            discount: new Prisma.Decimal(0),
+            items: [
+              {
+                quantity: 3,
+                unitPurchaseCostHt: new Prisma.Decimal('1.111'),
+                purchaseCostEstimated: false,
+              },
+            ],
+          },
+        ]),
+      },
       creditNote: { findMany: jest.fn().mockResolvedValue([]) },
-      expense: { aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal('0.001') } }) },
+      expense: {
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _sum: { amount: new Prisma.Decimal('0.001') } }),
+      },
     } as any;
     const result = await new ReportsService(prisma).getSalesProfitForPeriod({
       gte: new Date('2026-07-28T00:00:00Z'),

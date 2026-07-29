@@ -418,6 +418,7 @@ model Sale {
   counterClientTaxId        String?                   @map("counter_client_tax_id")
   counterClientNote         String?                   @map("counter_client_note")
   createdAt                 DateTime                  @default(now())
+  recognizedAt              DateTime?                 @map("recognized_at")
   updatedAt                 DateTime                  @updatedAt
   isEdited                  Boolean                   @default(false)
   editedAt                  DateTime?
@@ -443,6 +444,7 @@ model Sale {
   @@index([customerId])
   @@index([sellerId])
   @@index([createdAt])
+  @@index([recognizedAt])
   @@index([deletedAt])
   @@index([documentType, status, createdAt])
   @@index([isConsolidated, consolidationStatus])

@@ -36,7 +36,10 @@ export type KpiDefinitionKey =
   | 'currentCustomerDebt'
   | 'retainedSurplus'
   | 'cashInflows'
-  | 'cashOutflows';
+  | 'cashOutflows'
+  | 'netCashFlow'
+  | 'customerChange'
+  | 'paidExpenses';
 
 export type KpiTooltipConfig = {
   key: KpiDefinitionKey;
@@ -287,6 +290,21 @@ export const KPI_DEFINITIONS: Record<KpiDefinitionKey, KpiTooltipConfig> = {
   cashOutflows: {
     key: 'cashOutflows', title: 'Sorties de trésorerie', description: 'Total des mouvements sortants enregistrés sur le compte affiché pendant la période.',
     formula: 'Somme des mouvements de caisse sortants non effacés', interpretation: 'Une sortie de trésorerie ne constitue pas nécessairement une dépense commerciale.',
+  },
+  netCashFlow: {
+    key: 'netCashFlow', title: 'Flux net de caisse', description: 'Variation nette de trésorerie produite par les mouvements de la période.',
+    formula: 'Entrées de caisse − sorties de caisse',
+    interpretation: 'Ce flux suit les dates des mouvements et ne constitue pas le bénéfice commercial.',
+  },
+  customerChange: {
+    key: 'customerChange', title: 'Monnaie rendue', description: 'Sommes effectivement restituées aux clients pendant la période.',
+    formula: 'Somme absolue des mouvements CUSTOMER_CHANGE_OUT',
+    excluded: ['Remises commerciales', 'Surplus non rendus'],
+  },
+  paidExpenses: {
+    key: 'paidExpenses', title: 'Dépenses payées', description: 'Sorties de trésorerie réellement enregistrées pour des dépenses pendant la période.',
+    formula: 'Somme absolue des mouvements DEPENSE_GENERALE',
+    interpretation: 'La date du mouvement de caisse peut différer de la date économique utilisée par le bénéfice net.',
   },
 };
 
