@@ -25,6 +25,10 @@ import {
   revenueRecognizedSaleWhere,
   summarizeCashMovements,
 } from './reports-financial.utils';
+import {
+  CustomerDebtCalculator,
+  customerDebtSaleWhere,
+} from '../common/utils/customer-debt-calculator';
 
 // ─── KPI CALCULATION RULES ────────────────────────────────────────────────────
 //
@@ -891,7 +895,7 @@ export class ReportsService {
         select: { type: true, montant: true },
       }),
       this.prisma.sale.aggregate({
-        where: salesFilter,
+        where: customerDebtSaleWhere(),
         _sum: { remainingAmount: true },
       }),
       this.prisma.purchase.aggregate({
@@ -1019,9 +1023,21 @@ export class ReportsService {
         caGross: financials.grossRevenueHt,
         caTrend: trend(caNet, prevCaNet),
         encaissementsClients: moneyRound(num(customerPaymentsAgg._sum.amount)),
-        impayesClients: moneyRound(num(salesAgg._sum.remainingAmount)),
-        resteAEncaisser: moneyRound(num(salesAgg._sum.remainingAmount)),
-        dettesClients: moneyRound(num(customerDebtAgg._sum.remainingAmount)),
+        impayesClients: moneyRound(
+          CustomerDebtCalculator.remaining(
+            salesAgg._sum.remainingAmount ?? 0,
+          ),
+        ),
+        resteAEncaisser: moneyRound(
+          CustomerDebtCalculator.remaining(
+            salesAgg._sum.remainingAmount ?? 0,
+          ),
+        ),
+        dettesClients: moneyRound(
+          CustomerDebtCalculator.remaining(
+            customerDebtAgg._sum.remainingAmount ?? 0,
+          ),
+        ),
         totalAchats: moneyRound(totalAchats),
         achatsTrend: trend(
           totalAchats,
@@ -1349,7 +1365,8 @@ export class ReportsService {
       operationnel: {
         caNet: overview.financier.caNet,
         encaissements: overview.financier.encaissementsClients,
-        resteAEncaisser: overview.financier.impayesClients,
+        // Current receivable uses the same global source as Rapports/Caisse/Clients.
+        resteAEncaisser: overview.financier.dettesClients,
         panierMoyen: overview.ventes.panierMoyen,
       },
       ...(canSeeFinancials && {

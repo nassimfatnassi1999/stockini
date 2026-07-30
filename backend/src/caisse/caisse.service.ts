@@ -6,6 +6,11 @@ import { CustomersService } from '../customers/customers.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ReportsService } from '../reports/reports.service';
 import { buildPagination } from '../common/utils/pagination.util';
+import {
+  CASH_IN_MOVEMENT_TYPES,
+  CASH_OUT_MOVEMENT_TYPES,
+  CashMovementClassifier,
+} from '../common/utils/cash-movement-classifier';
 import type {
   CashPeriod,
   CashQueryDto,
@@ -117,24 +122,6 @@ function tunisIso(date: Date): string {
     .replace('Z', '+01:00');
 }
 
-// ─── Shared IN/OUT type lists ─────────────────────────────────────────────────
-
-const IN_TYPES = [
-  CaisseMovementType.ENCAISSEMENT_VENTE,
-  CaisseMovementType.CASH_SURPLUS_IN,
-  CaisseMovementType.DEPOT_MANUEL,
-  CaisseMovementType.ANNULATION_ACHAT,
-  CaisseMovementType.ANNULATION_DEPENSE,
-];
-const OUT_TYPES = [
-  CaisseMovementType.CUSTOMER_CHANGE_OUT,
-  CaisseMovementType.DECAISSEMENT_ACHAT,
-  CaisseMovementType.DEPENSE_GENERALE,
-  CaisseMovementType.RETRAIT_MANUEL,
-  CaisseMovementType.ANNULATION_VENTE,
-  CaisseMovementType.REFUND_OUT,
-];
-
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
@@ -225,10 +212,6 @@ export class CaisseService {
       query.endDate,
     );
 
-    const buildFilter = (account?: TreasuryAccount) => ({
-      ...(account ? { treasuryAccount: account } : {}),
-    });
-
     const [config, totalClientDebt] = await Promise.all([
       this.prisma.caisseConfig.findFirst(),
       this.customers.getTotalClientDebt(),
@@ -239,33 +222,33 @@ export class CaisseService {
     const soldeCaisse = soldeCaisseDecimal.toNumber();
     const soldeBanque = soldeBanqueDecimal.toNumber();
 
-    // Per-account + global aggregations for the selected period
-    const [
-      cashIn, cashOut,
-      bankIn, bankOut,
-    ] = await Promise.all([
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: { in: IN_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.PHYSICAL_CASH) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: { in: OUT_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.PHYSICAL_CASH) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: { in: IN_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.BANK_TREASURY) },
-      }),
-      this.prisma.caisseMovement.aggregate({
-        _sum: { montant: true },
-        where: { type: { in: OUT_TYPES }, createdAt: range, ...buildFilter(TreasuryAccount.BANK_TREASURY) },
-      }),
-    ]);
+    // Both Caisse and Rapports use the exact same type-based classifier.
+    const movements = await this.prisma.caisseMovement.findMany({
+      where: {
+        createdAt: range,
+        type: {
+          in: [...CASH_IN_MOVEMENT_TYPES, ...CASH_OUT_MOVEMENT_TYPES],
+        },
+      },
+      select: { type: true, montant: true, treasuryAccount: true },
+    });
+    const cashFlow = CashMovementClassifier.summarize(
+      movements.filter(
+        (movement) =>
+          movement.treasuryAccount === TreasuryAccount.PHYSICAL_CASH,
+      ),
+    );
+    const bankFlow = CashMovementClassifier.summarize(
+      movements.filter(
+        (movement) =>
+          movement.treasuryAccount === TreasuryAccount.BANK_TREASURY,
+      ),
+    );
 
-    const entreesCaisseDecimal = D(cashIn._sum.montant ?? 0);
-    const sortiesCaisseDecimal = D(cashOut._sum.montant ?? 0).abs();
-    const entreesBanqueDecimal = D(bankIn._sum.montant ?? 0);
-    const sortiesBanqueDecimal = D(bankOut._sum.montant ?? 0).abs();
+    const entreesCaisseDecimal = cashFlow.inflows;
+    const sortiesCaisseDecimal = cashFlow.outflows;
+    const entreesBanqueDecimal = bankFlow.inflows;
+    const sortiesBanqueDecimal = bankFlow.outflows;
     const entreesDecimal = entreesCaisseDecimal.plus(entreesBanqueDecimal);
     const sortiesDecimal = sortiesCaisseDecimal.plus(sortiesBanqueDecimal);
     const entreesCaisse = entreesCaisseDecimal.toNumber();
@@ -274,13 +257,9 @@ export class CaisseService {
     const sortiesBanque = sortiesBanqueDecimal.toNumber();
     const entrees = entreesDecimal.toNumber();
     const sorties = sortiesDecimal.toNumber();
-    const retainedSurplus = await this.prisma.caisseMovement.aggregate({
-      _sum: { montant: true },
-      where: {
-        type: CaisseMovementType.CASH_SURPLUS_IN,
-        createdAt: range,
-      },
-    });
+    const retainedSurplus = cashFlow.retainedSurplus.plus(
+      bankFlow.retainedSurplus,
+    );
 
     // La marge commerciale est indépendante du compte de trésorerie et réutilise
     // exactement le calcul financier des rapports (snapshots + avoirs).
@@ -295,7 +274,7 @@ export class CaisseService {
       entrees,
       sorties,
       totalClientDebt,
-      retainedSurplus: Number(retainedSurplus?._sum.montant ?? 0),
+      retainedSurplus: retainedSurplus.toNumber(),
       profitPeriode: selectedProfit,
       period,
       label: periodLabel,
@@ -426,11 +405,8 @@ export class CaisseService {
       type: m.type,
       account: m.treasuryAccount,
       direction:
-        m.type === CaisseMovementType.CASH_RESET
-          ? Number(m.ancienSolde) < 0 ? 'IN' : 'OUT'
-          : (['ENCAISSEMENT_VENTE', 'CASH_SURPLUS_IN', 'DEPOT_MANUEL', 'ANNULATION_ACHAT', 'ANNULATION_DEPENSE'] as string[]).includes(m.type)
-            ? 'IN'
-            : 'OUT',
+        CashMovementClassifier.direction(m.type) ??
+        (Number(m.nouveauSolde) >= Number(m.ancienSolde) ? 'IN' : 'OUT'),
       reference: m.referenceDoc ?? null,
       montant: Number(m.montant),
       ancienSolde: Number(m.ancienSolde),
@@ -521,11 +497,11 @@ export class CaisseService {
         const [inMvt, outMvt] = await Promise.all([
           this.prisma.caisseMovement.aggregate({
             _sum: { montant: true },
-            where: { type: { in: IN_TYPES }, createdAt: range, ...accountFilter },
+            where: { type: { in: CASH_IN_MOVEMENT_TYPES }, createdAt: range, ...accountFilter },
           }),
           this.prisma.caisseMovement.aggregate({
             _sum: { montant: true },
-            where: { type: { in: OUT_TYPES }, createdAt: range, ...accountFilter },
+            where: { type: { in: CASH_OUT_MOVEMENT_TYPES }, createdAt: range, ...accountFilter },
           }),
         ]);
 

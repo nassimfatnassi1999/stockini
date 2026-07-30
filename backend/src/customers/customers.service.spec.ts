@@ -32,6 +32,7 @@ function makeInvoice(customerId: string, total: number, paidAmount: number) {
     customerId,
     total: new Prisma.Decimal(total),
     paidAmount: new Prisma.Decimal(paidAmount),
+    remainingAmount: new Prisma.Decimal(Math.max(total - paidAmount, 0)),
   };
 }
 
@@ -165,6 +166,7 @@ describe('CustomersService.findSales', () => {
           id: 'sale-1', invoiceNumber: 'FAC-001', documentType: 'FACTURE', status: 'COMPLETED',
           createdAt: new Date('2026-07-18'), subtotal: new Prisma.Decimal(80), tax: new Prisma.Decimal(20),
           total: new Prisma.Decimal(100), stampDuty: new Prisma.Decimal(1), items: [{ id: 'item-1' }],
+          paidAmount: new Prisma.Decimal(40), remainingAmount: new Prisma.Decimal(59), paymentStatus: 'PARTIAL',
           totalRefunded: new Prisma.Decimal(2),
           payments: [{ amount: new Prisma.Decimal(40) }],
         }]),
@@ -173,6 +175,8 @@ describe('CustomersService.findSales', () => {
           _sum: {
             total: new Prisma.Decimal(100),
             stampDuty: new Prisma.Decimal(1),
+            paidAmount: new Prisma.Decimal(40),
+            remainingAmount: new Prisma.Decimal(59),
             totalRefunded: new Prisma.Decimal(2),
           },
         }),
@@ -189,9 +193,6 @@ describe('CustomersService.findSales', () => {
       where: expect.objectContaining({ customerId: 'client-1', deletedAt: null }),
       skip: 0,
       take: 10,
-    }));
-    expect(prisma.payment.aggregate).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ deletedAt: null }),
     }));
     expect(result.data[0]).toEqual(expect.objectContaining({
       id: 'sale-1', itemCount: 1, paymentStatus: 'PARTIAL',

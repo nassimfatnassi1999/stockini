@@ -1,6 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { ConsolidationStatus, CustomerOrigin, PaymentStatus, PaymentType, Prisma } from '@prisma/client';
-import { calculatePaymentAmounts } from '../common/utils/payment-status';
+import { ConsolidationStatus, CustomerOrigin, PaymentStatus, Prisma } from '@prisma/client';
+import {
+  CustomerDebtCalculator,
+  customerDebtSaleWhere,
+} from '../common/utils/customer-debt-calculator';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -40,75 +43,27 @@ export class CustomersService {
   // Calcule la dette totale d'un client : somme des restes à payer sur FACTURE/BL non annulés/supprimés
   async getClientDebt(clientId: string): Promise<{ debtAmount: number; unpaidInvoicesCount: number }> {
     const invoices = await this.prisma.sale.findMany({
-      where: {
-        customerId: clientId,
-        deletedAt: null,
-        status: { not: 'CANCELLED' },
-        consolidationMemberships: { none: { active: true } },
-        OR: [
-          { documentType: 'FACTURE' },
-          { documentType: 'BON_LIVRAISON', transformedToId: null },
-        ],
-      },
+      where: customerDebtSaleWhere({ customerId: clientId }),
       select: {
-        total: true,
-        stampDuty: true,
-        paidAmount: true,
-        totalRefunded: true,
+        remainingAmount: true,
       },
     });
-
-    let debtAmount = new Prisma.Decimal(0);
-    let unpaidInvoicesCount = 0;
-
-    for (const inv of invoices) {
-      const remaining = calculatePaymentAmounts(
-        new Prisma.Decimal(inv.total ?? 0).plus(inv.stampDuty ?? 0),
-        inv.paidAmount ?? 0,
-        inv.totalRefunded ?? 0,
-      ).remainingAmount;
-      if (remaining.greaterThan(0)) {
-        debtAmount = debtAmount.plus(remaining);
-        unpaidInvoicesCount++;
-      }
-    }
-
-    return { debtAmount: debtAmount.toNumber(), unpaidInvoicesCount };
+    const debt = CustomerDebtCalculator.summarize(invoices);
+    return {
+      debtAmount: debt.debtAmount.toNumber(),
+      unpaidInvoicesCount: debt.unpaidInvoicesCount,
+    };
   }
 
   // Somme de toutes les dettes clients (pour le KPI caisse)
   async getTotalClientDebt(): Promise<number> {
     const invoices = await this.prisma.sale.findMany({
-      where: {
-        deletedAt: null,
-        status: { not: 'CANCELLED' },
-        customerId: { not: null },
-        consolidationMemberships: { none: { active: true } },
-        OR: [
-          { documentType: 'FACTURE' },
-          { documentType: 'BON_LIVRAISON', transformedToId: null },
-        ],
-      },
+      where: customerDebtSaleWhere(),
       select: {
-        total: true,
-        stampDuty: true,
-        paidAmount: true,
-        totalRefunded: true,
+        remainingAmount: true,
       },
     });
-
-    let total = new Prisma.Decimal(0);
-    for (const inv of invoices) {
-      const remaining = calculatePaymentAmounts(
-        new Prisma.Decimal(inv.total ?? 0).plus(inv.stampDuty ?? 0),
-        inv.paidAmount ?? 0,
-        inv.totalRefunded ?? 0,
-      ).remainingAmount;
-      if (remaining.greaterThan(0)) {
-        total = total.plus(remaining);
-      }
-    }
-    return total.toNumber();
+    return CustomerDebtCalculator.summarize(invoices).debtAmount.toNumber();
   }
 
   async findAll(query: CustomerQueryDto = new CustomerQueryDto()) {
@@ -161,40 +116,15 @@ export class CustomersService {
 
     // Calcul des dettes en une seule requête groupée (FACTURE + BL non transformés, non supprimés, non annulés)
     const invoices = await this.prisma.sale.findMany({
-      where: {
-        deletedAt: null,
-        status: { not: 'CANCELLED' },
+      where: customerDebtSaleWhere({
         customerId: { in: customers.map((c) => c.id) },
-        consolidationMemberships: { none: { active: true } },
-        OR: [
-          { documentType: 'FACTURE' },
-          { documentType: 'BON_LIVRAISON', transformedToId: null },
-        ],
-      },
+      }),
       select: {
         customerId: true,
-        total: true,
-        stampDuty: true,
-        paidAmount: true,
-        totalRefunded: true,
+        remainingAmount: true,
       },
     });
-
-    const debtMap = new Map<string, { debtAmount: Prisma.Decimal; unpaidInvoicesCount: number }>();
-    for (const inv of invoices) {
-      if (!inv.customerId) continue;
-      const remaining = calculatePaymentAmounts(
-        new Prisma.Decimal(inv.total ?? 0).plus(inv.stampDuty ?? 0),
-        inv.paidAmount ?? 0,
-        inv.totalRefunded ?? 0,
-      ).remainingAmount;
-      if (remaining.greaterThan(0)) {
-        const entry = debtMap.get(inv.customerId) ?? { debtAmount: new Prisma.Decimal(0), unpaidInvoicesCount: 0 };
-        entry.debtAmount = entry.debtAmount.plus(remaining);
-        entry.unpaidInvoicesCount++;
-        debtMap.set(inv.customerId, entry);
-      }
-    }
+    const debtMap = CustomerDebtCalculator.groupByCustomer(invoices);
 
     const data = customers.map((c) => {
         const debt = debtMap.get(c.id);
@@ -279,7 +209,7 @@ export class CustomersService {
     const financialWhere: Prisma.SaleWhereInput = {
       AND: [where, { consolidationMemberships: { none: { active: true } } }],
     };
-    const [sales, total, totals, validPayments, unpaidCount] = await Promise.all([
+    const [sales, total, totals, unpaidCount] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         orderBy,
@@ -297,12 +227,9 @@ export class CustomersService {
           stampDuty: true,
           paidAmount: true,
           remainingAmount: true,
+          paymentStatus: true,
           totalRefunded: true,
           items: { select: { id: true } },
-          payments: {
-            where: { deletedAt: null, type: PaymentType.CUSTOMER_PAYMENT },
-            select: { amount: true },
-          },
           isConsolidated: true,
           consolidationStatus: true,
           consolidationMemberships: { where: { active: true }, select: { consolidatedSale: { select: { id: true, invoiceNumber: true } } } },
@@ -312,41 +239,30 @@ export class CustomersService {
       this.prisma.sale.count({ where }),
       this.prisma.sale.aggregate({
         where: financialWhere,
-        _sum: { total: true, stampDuty: true, totalRefunded: true },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          deletedAt: null,
-          type: PaymentType.CUSTOMER_PAYMENT,
-          OR: [
-            { sale: { is: financialWhere } },
-            { sale: { consolidationMemberships: { some: { active: true, consolidatedSale: { is: financialWhere } } } } },
-          ],
+        _sum: {
+          total: true,
+          stampDuty: true,
+          paidAmount: true,
+          remainingAmount: true,
+          totalRefunded: true,
         },
-        _sum: { amount: true },
       }),
       this.prisma.sale.count({ where: { AND: [financialWhere, { remainingAmount: { gt: 0.001 } }] } }),
     ]);
 
-    const data = sales.map(({ payments, items, consolidationMemberships, _count, ...sale }) => {
+    const data = sales.map(({ items, consolidationMemberships, _count, ...sale }) => {
       const totalPayable = new Prisma.Decimal(sale.total).plus(sale.stampDuty ?? 0);
-      const paid = sale.isConsolidated ? new Prisma.Decimal(sale.paidAmount) : payments.reduce(
-        (sum, payment) => sum.plus(payment.amount),
-        new Prisma.Decimal(0),
-      );
-      const amounts = calculatePaymentAmounts(
-        totalPayable,
-        paid,
-        sale.totalRefunded ?? 0,
+      const remainingAmount = CustomerDebtCalculator.remaining(
+        sale.remainingAmount,
       );
       return {
         ...sale,
         itemCount: items.length,
         totalTtc: totalPayable,
         totalFinal: totalPayable,
-        paidAmount: amounts.paidAmount,
-        remainingAmount: amounts.remainingAmount,
-        paymentStatus: amounts.paymentStatus,
+        paidAmount: new Prisma.Decimal(sale.paidAmount),
+        remainingAmount,
+        paymentStatus: sale.paymentStatus,
         activeConsolidation: consolidationMemberships?.[0]?.consolidatedSale ?? null,
         sourceDocumentsCount: _count?.consolidationSources ?? 0,
       };
@@ -354,12 +270,10 @@ export class CustomersService {
 
     const totalTtc = new Prisma.Decimal(totals._sum.total ?? 0);
     const totalStampDuty = new Prisma.Decimal(totals._sum.stampDuty ?? 0);
-    const totalCredits = new Prisma.Decimal(totals._sum.totalRefunded ?? 0);
     const totalPayable = totalTtc.plus(totalStampDuty);
-    const totalPaid = new Prisma.Decimal(validPayments._sum.amount ?? 0);
-    const totalRemaining = Prisma.Decimal.max(
-      totalPayable.minus(totalPaid).minus(totalCredits),
-      new Prisma.Decimal(0),
+    const totalPaid = new Prisma.Decimal(totals._sum.paidAmount ?? 0);
+    const totalRemaining = CustomerDebtCalculator.remaining(
+      totals._sum.remainingAmount ?? 0,
     );
 
     return {

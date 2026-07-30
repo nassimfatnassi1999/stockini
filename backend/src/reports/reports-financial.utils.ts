@@ -1,9 +1,12 @@
 import {
-  CaisseMovementType,
   DocumentType,
   Prisma,
   SaleStatus,
 } from '@prisma/client';
+import {
+  CashMovementClassifier,
+  type ClassifiableCashMovement,
+} from '../common/utils/cash-movement-classifier';
 
 export const REVENUE_RECOGNIZED_STATUSES: SaleStatus[] = [
   SaleStatus.COMPLETED,
@@ -63,33 +66,7 @@ export function financialRates(
 }
 
 export function summarizeCashMovements(
-  movements: Array<{
-    type: CaisseMovementType;
-    montant: Prisma.Decimal.Value;
-  }>,
+  movements: ClassifiableCashMovement[],
 ) {
-  const D = (value: Prisma.Decimal.Value = 0) => new Prisma.Decimal(value);
-  const byType = (type: CaisseMovementType) =>
-    movements
-      .filter((movement) => movement.type === type)
-      .reduce((total, movement) => total.plus(movement.montant), D(0));
-  const inflows = movements.reduce(
-    (total, movement) =>
-      D(movement.montant).gt(0) ? total.plus(movement.montant) : total,
-    D(0),
-  );
-  const outflows = movements.reduce(
-    (total, movement) =>
-      D(movement.montant).lt(0) ? total.plus(D(movement.montant).abs()) : total,
-    D(0),
-  );
-  return {
-    inflows,
-    outflows,
-    netFlow: inflows.minus(outflows),
-    paidExpenses: byType(CaisseMovementType.DEPENSE_GENERALE).abs(),
-    creditNoteRefunds: byType(CaisseMovementType.REFUND_OUT).abs(),
-    returnedChange: byType(CaisseMovementType.CUSTOMER_CHANGE_OUT).abs(),
-    retainedSurplus: byType(CaisseMovementType.CASH_SURPLUS_IN),
-  };
+  return CashMovementClassifier.summarize(movements);
 }

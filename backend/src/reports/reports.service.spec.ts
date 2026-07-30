@@ -243,7 +243,8 @@ describe('centralized financial rules', () => {
   it('sépare monnaie rendue et surplus non rendu du paiement de vente', () => {
     const returned = summarizeCashMovements([
       { type: CaisseMovementType.ENCAISSEMENT_VENTE, montant: '330.000' },
-      { type: CaisseMovementType.CUSTOMER_CHANGE_OUT, montant: '-1.000' },
+      // recordMovement() persists every amount as an absolute value.
+      { type: CaisseMovementType.CUSTOMER_CHANGE_OUT, montant: '1.000' },
     ]);
     expect(returned.inflows.toFixed(3)).toBe('330.000');
     expect(returned.returnedChange.toFixed(3)).toBe('1.000');

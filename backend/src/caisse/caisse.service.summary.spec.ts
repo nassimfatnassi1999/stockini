@@ -1,3 +1,4 @@
+import { CaisseMovementType, TreasuryAccount } from '@prisma/client';
 import { CaisseService } from './caisse.service';
 
 const profit = (grossProfit: number) => ({
@@ -26,12 +27,18 @@ describe('CaisseService summary — trésorerie séparée du bénéfice', () => 
         }),
       },
       caisseMovement: {
-        aggregate: jest
-          .fn()
-          .mockResolvedValueOnce({ _sum: { montant: 500 } })
-          .mockResolvedValueOnce({ _sum: { montant: -100 } })
-          .mockResolvedValueOnce({ _sum: { montant: 0 } })
-          .mockResolvedValueOnce({ _sum: { montant: 0 } }),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            type: CaisseMovementType.DEPOT_MANUEL,
+            montant: 500,
+            treasuryAccount: TreasuryAccount.PHYSICAL_CASH,
+          },
+          {
+            type: CaisseMovementType.RETRAIT_MANUEL,
+            montant: 100,
+            treasuryAccount: TreasuryAccount.PHYSICAL_CASH,
+          },
+        ]),
       },
     } as any;
     const reports = {

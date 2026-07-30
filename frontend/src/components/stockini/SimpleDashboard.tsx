@@ -178,7 +178,7 @@ export function SimpleDashboard() {
         <div className="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <KpiCard metric="netRevenue" period={selectedPeriodLabel} icon={ShoppingCart} label="CA HT net" value={money(dashboard?.operationnel.caNet ?? 0)} trend={dashboard?.ventes.countTrend ?? undefined} color="blue" sub={`${dashboard?.ventes.count ?? 0} vente(s) comptabilisée(s)`} />
           <KpiCard metric="customerCollections" period={selectedPeriodLabel} icon={Banknote} label="Encaissements" value={money(dashboard?.operationnel.encaissements ?? 0)} color="green" sub="Montants réellement payés" />
-          <KpiCard metric="customerReceivables" period={selectedPeriodLabel} icon={WalletCards} label="Reste à encaisser" value={money(dashboard?.operationnel.resteAEncaisser ?? 0)} color="orange" sub="Créances de la période" />
+          <KpiCard metric="customerReceivables" period="Global" icon={WalletCards} label="Reste à encaisser" value={money(dashboard?.operationnel.resteAEncaisser ?? 0)} color="orange" sub="Créances clients actuelles" />
           <KpiCard metric="averageBasket" period={selectedPeriodLabel} icon={TrendingUp} label="Panier moyen" value={money(dashboard?.operationnel.panierMoyen ?? 0)} color="purple" />
         </div>
         {dashboard?.financier && (
