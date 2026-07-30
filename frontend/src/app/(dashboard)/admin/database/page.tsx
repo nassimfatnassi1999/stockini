@@ -1396,166 +1396,6 @@ function BackupsTab() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// TAB: EXPORTS
-// ═══════════════════════════════════════════════════════════
-
-const EXPORT_ENTITIES = [
-  {
-    key: "products",
-    label: "Produits",
-    icon: FileText,
-    description: "Catalogue produits complet",
-  },
-  {
-    key: "stock",
-    label: "Stock",
-    icon: HardDrive,
-    description: "État du stock avec alertes",
-  },
-  {
-    key: "customers",
-    label: "Clients",
-    icon: FileText,
-    description: "Liste des clients",
-  },
-  {
-    key: "suppliers",
-    label: "Fournisseurs",
-    icon: FileText,
-    description: "Liste des fournisseurs",
-  },
-  {
-    key: "sales",
-    label: "Ventes",
-    icon: FileSpreadsheet,
-    description: "Toutes les ventes",
-  },
-  {
-    key: "purchases",
-    label: "Achats",
-    icon: FileSpreadsheet,
-    description: "Tous les achats",
-  },
-  {
-    key: "payments",
-    label: "Paiements",
-    icon: FileSpreadsheet,
-    description: "Paiements clients",
-  },
-  {
-    key: "audit_logs",
-    label: "Audit Logs",
-    icon: Shield,
-    description: "Journal des actions",
-  },
-];
-
-function ExportsTab() {
-  const [exporting, setExporting] = useState<string | null>(null);
-
-  const doExport = async (entity: string, format: "xlsx" | "csv") => {
-    const key = `${entity}-${format}`;
-    setExporting(key);
-    try {
-      const token = localStorage.getItem("access_token");
-      const url = `/api/admin/database/export/${entity}?format=${format}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token ?? ""}` },
-      });
-      if (!res.ok) {
-        let msg = `Erreur HTTP ${res.status}`;
-        try {
-          const json = (await res.json()) as { message?: string };
-          msg = json.message ?? msg;
-        } catch {
-          /* ignore */
-        }
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
-      if (blob.size === 0) throw new Error("Fichier export vide");
-      const burl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = burl;
-      a.download = `${entity}-export.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(burl);
-      toast.success(`Export ${format.toUpperCase()} téléchargé`);
-    } catch (err) {
-      console.error("[EXPORT] Error:", err);
-      toast.error(`Erreur export : ${(err as Error).message}`);
-    } finally {
-      setExporting(null);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-base font-semibold text-text-primary">
-          Exports de données
-        </h2>
-        <p className="text-xs text-text-secondary">
-          Exportez vos données métier en Excel ou CSV
-        </p>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {EXPORT_ENTITIES.map(({ key, label, icon: Icon, description }) => (
-          <Card key={key} className="transition-shadow hover:shadow-md">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-app-primary/10">
-                  <Icon size={16} className="text-app-primary" />
-                </div>
-                <div>
-                  <CardTitle className="text-sm">{label}</CardTitle>
-                  <p className="text-[11px] text-text-muted">{description}</p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 text-xs"
-                  disabled={exporting === `${key}-xlsx`}
-                  onClick={() => void doExport(key, "xlsx")}
-                >
-                  {exporting === `${key}-xlsx` ? (
-                    <RefreshCw size={11} className="mr-1 animate-spin" />
-                  ) : (
-                    <FileSpreadsheet size={11} className="mr-1" />
-                  )}
-                  Excel
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 text-xs"
-                  disabled={exporting === `${key}-csv`}
-                  onClick={() => void doExport(key, "csv")}
-                >
-                  {exporting === `${key}-csv` ? (
-                    <RefreshCw size={11} className="mr-1 animate-spin" />
-                  ) : (
-                    <FileText size={11} className="mr-1" />
-                  )}
-                  CSV
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
 // TAB: IMPORTS
 // ═══════════════════════════════════════════════════════════
 
@@ -2705,7 +2545,7 @@ export default function DatabasePage() {
               Base de données
             </h1>
             <p className="text-xs text-text-secondary">
-              Administration, sauvegardes, exports et maintenance système
+              Administration, sauvegardes et maintenance système
             </p>
           </div>
         </div>
@@ -2715,7 +2555,6 @@ export default function DatabasePage() {
           <TabsList className="mb-2 w-full justify-start gap-1 h-auto flex-wrap bg-muted/50 p-1">
             {[
               { value: "sauvegardes", label: "Sauvegardes", icon: Archive },
-              { value: "exports", label: "Exports", icon: Download },
               { value: "imports", label: "Imports", icon: Upload },
               { value: "sante", label: "Santé système", icon: Server },
               { value: "maintenance", label: "Maintenance", icon: Wrench },
@@ -2742,20 +2581,6 @@ export default function DatabasePage() {
               }
             >
               <BackupsTab />
-            </Can>
-          </TabsContent>
-
-          <TabsContent value="exports">
-            <Can
-              permission="database.export"
-              fallback={
-                <div className="flex items-center gap-2 rounded-lg bg-muted p-4 text-sm text-text-muted">
-                  <Shield size={16} /> Accès refusé — permission database.export
-                  requise
-                </div>
-              }
-            >
-              <ExportsTab />
             </Can>
           </TabsContent>
 

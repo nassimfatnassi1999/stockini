@@ -30,6 +30,7 @@ const nextConfig = {
     return [
       { source: '/facturation', destination: '/workflow', permanent: true },
       { source: '/facturation/:path*', destination: '/workflow', permanent: true },
+      { source: '/admin/database/exports', destination: '/admin/database', permanent: true },
     ];
   },
   async rewrites() {

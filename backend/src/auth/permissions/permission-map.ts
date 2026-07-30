@@ -162,7 +162,6 @@ export const PERMISSIONS = {
   DATABASE_VIEW: 'database.view',
   DATABASE_BACKUP: 'database.backup',
   DATABASE_RESTORE: 'database.restore',
-  DATABASE_EXPORT: 'database.export',
   DATABASE_IMPORT: 'database.import',
   DATABASE_MAINTENANCE: 'database.maintenance',
 } as const;
@@ -341,7 +340,6 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
   { code: 'database.view', module: 'database', action: 'view', label: 'Consulter', description: 'Consulter la section base de données' },
   { code: 'database.backup', module: 'database', action: 'backup', label: 'Sauvegarder', description: 'Créer et gérer les sauvegardes' },
   { code: 'database.restore', module: 'database', action: 'restore', label: 'Restaurer', description: 'Restaurer une sauvegarde (admin uniquement)' },
-  { code: 'database.export', module: 'database', action: 'export', label: 'Exporter', description: 'Exporter les données en Excel/CSV' },
   { code: 'database.import', module: 'database', action: 'import', label: 'Importer', description: 'Importer des données depuis Excel/CSV' },
   { code: 'database.maintenance', module: 'database', action: 'maintenance', label: 'Maintenance', description: 'Exécuter les outils de maintenance système' },
 ];

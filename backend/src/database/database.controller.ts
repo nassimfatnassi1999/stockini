@@ -10,7 +10,6 @@ import {
   NotFoundException,
   Param,
   Post,
-  Query,
   Res,
   UploadedFile,
   UseGuards,
@@ -514,59 +513,6 @@ export class DatabaseController {
       },
       status,
     );
-  }
-
-  // ─── Export ───────────────────────────────────────────────────────────────────
-
-  @RequirePermissions('database.export')
-  @Get('export/:entity')
-  async exportEntity(
-    @Param('entity') entity: string,
-    @Query('format') format: 'xlsx' | 'csv' = 'xlsx',
-    @Query('dateFrom') dateFrom: string,
-    @Query('dateTo') dateTo: string,
-    @Res() res: Response,
-  ) {
-    this.logger.log(`[EXPORT] Generating ${entity}.${format}`);
-    try {
-      const filters: Record<string, string> = {};
-      if (dateFrom) filters.dateFrom = dateFrom;
-      if (dateTo) filters.dateTo = dateTo;
-
-      const buffer = await this.db.exportEntity(entity, format, filters);
-
-      if (!buffer || buffer.length === 0) {
-        this.logger.warn(`[EXPORT] Empty buffer for ${entity}.${format}`);
-        res.status(400).json({ message: 'Aucune donnée à exporter' });
-        return;
-      }
-
-      const mimeTypes: Record<string, string> = {
-        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        csv: 'text/csv; charset=utf-8',
-      };
-      const extensions: Record<string, string> = { xlsx: '.xlsx', csv: '.csv' };
-      const ext = extensions[format] ?? '';
-      const mime = mimeTypes[format] ?? 'application/octet-stream';
-
-      this.logger.log(
-        `[EXPORT] Sending ${entity}${ext} (${buffer.length} bytes)`,
-      );
-      res.set({
-        'Content-Type': mime,
-        'Content-Disposition': `attachment; filename="${entity}-export${ext}"`,
-        'Content-Length': String(buffer.length),
-      });
-      res.end(buffer);
-    } catch (err) {
-      this.logger.error(
-        `[EXPORT] Error for ${entity}.${format}: ${(err as Error).message}`,
-      );
-      if (!res.headersSent) {
-        const status = err instanceof BadRequestException ? 400 : 500;
-        res.status(status).json({ message: (err as Error).message });
-      }
-    }
   }
 
   // ─── Import ───────────────────────────────────────────────────────────────────
