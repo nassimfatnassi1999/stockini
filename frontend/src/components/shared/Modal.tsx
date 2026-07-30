@@ -13,12 +13,21 @@ interface ModalProps {
   onSave?: () => void;
   saveLabel?: string;
   saving?: boolean;
+  saveDisabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
 }
 
 export function Modal({
-  open, onClose, title, reference, children,
-  onSave, saveLabel = 'Enregistrer', saving = false, size = 'md',
+  open,
+  onClose,
+  title,
+  reference,
+  children,
+  onSave,
+  saveLabel = 'Enregistrer',
+  saving = false,
+  size = 'md',
+  saveDisabled = false,
 }: ModalProps) {
   const subtitle = reference;
   const footer = onSave ? (
@@ -34,7 +43,7 @@ export function Modal({
       <button
         type="button"
         onClick={onSave}
-        disabled={saving}
+        disabled={saving || saveDisabled}
         className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-80"
       >
         {saving ? 'Enregistrement…' : saveLabel}
@@ -43,14 +52,7 @@ export function Modal({
   ) : undefined;
 
   return (
-    <SlideOver
-      title={title}
-      subtitle={subtitle}
-      open={open}
-      onClose={onClose}
-      width={SIZE_W[size]}
-      footer={footer}
-    >
+    <SlideOver title={title} subtitle={subtitle} open={open} onClose={onClose} width={SIZE_W[size]} footer={footer}>
       {children}
     </SlideOver>
   );

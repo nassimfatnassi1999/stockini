@@ -2,24 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  BarChart3,
-  Banknote,
-  Building2,
-  Globe,
-  List,
-  Plus,
-  Minus,
-  RefreshCw,
-  RotateCcw,
-  Trash2,
-} from 'lucide-react';
+import { BarChart3, Banknote, Building2, Globe, List, Plus, Minus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cleanPaginationParams } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { stockiniApi } from '@/lib/stockini/api';
 import { toast } from '@/lib/toast';
+import { getApiErrorMessage } from '@/lib/api-error';
 import { CashSummaryCards, type CashSummary, type AccountView } from './CashSummaryCards';
 import { CashFilters, type CashFilterState } from './CashFilters';
 import { CashTransactionsTable, type CashTransaction, type CashPagination } from './CashTransactionsTable';
@@ -29,14 +19,32 @@ import { CashResetModal } from './CashResetModal';
 import { CashManualOpModal } from './CashManualOpModal';
 import { ClearHistoryModal } from '../shared/ClearHistoryModal';
 import { buildCashPeriodParams, cashPeriodQueryKey, shouldShowCashKpiLoader } from './cash-period';
+import { CashMovementDeleteModal } from './CashMovementDeleteModal';
+import { CashMovementDetailsModal } from './CashMovementDetailsModal';
+import { canShowCashMovementDeletion } from './cash-movement-deletion';
 
 type ContentTab = 'transactions' | 'analytics';
 type AccountTab = 'global' | 'cash' | 'bank';
 
-const ACCOUNT_TABS: { id: AccountTab; label: string; icon: React.ElementType; account?: string }[] = [
-  { id: 'cash',   label: 'Caisse physique',        icon: Banknote,   account: 'PHYSICAL_CASH' },
-  { id: 'bank',   label: 'Banque / Chèques',        icon: Building2,  account: 'BANK_TREASURY' },
-  { id: 'global', label: 'Vue globale',             icon: Globe,      account: undefined },
+const ACCOUNT_TABS: {
+  id: AccountTab;
+  label: string;
+  icon: React.ElementType;
+  account?: string;
+}[] = [
+  {
+    id: 'cash',
+    label: 'Caisse physique',
+    icon: Banknote,
+    account: 'PHYSICAL_CASH',
+  },
+  {
+    id: 'bank',
+    label: 'Banque / Chèques',
+    icon: Building2,
+    account: 'BANK_TREASURY',
+  },
+  { id: 'global', label: 'Vue globale', icon: Globe, account: undefined },
 ];
 
 function todayStr() {
@@ -53,16 +61,18 @@ export function CashDashboard() {
   const [accountTab, setAccountTab] = useState<AccountTab>('cash');
   const [contentTab, setContentTab] = useState<ContentTab>('transactions');
   const [filters, setFilters] = useState<CashFilterState>({
-    period:    'today',
+    period: 'today',
     startDate: '',
-    endDate:   '',
+    endDate: '',
   });
   const { page, limit, setPage, setLimit } = useUrlPagination();
   const [showReset, setShowReset] = useState(false);
   const [showDepot, setShowDepot] = useState(false);
   const [showRetrait, setShowRetrait] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
-  const { can } = usePermissions();
+  const [movementToDelete, setMovementToDelete] = useState<CashTransaction | null>(null);
+  const [movementToView, setMovementToView] = useState<CashTransaction | null>(null);
+  const { can, role } = usePermissions();
 
   useEffect(() => {
     const today = todayStr();
@@ -81,7 +91,26 @@ export function CashDashboard() {
       setShowClearModal(false);
       toast.success(`Historique caisse vidé (${res.count} entrées masquées)`);
     },
-    onError: () => toast.error('Erreur lors du vidage de l\'historique caisse'),
+    onError: () => toast.error("Erreur lors du vidage de l'historique caisse"),
+  });
+
+  const deleteMovementMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.delete(`/caisse/movements/${id}`, { data: { reason } }).then((response) => response.data),
+    onSuccess: () => {
+      setMovementToDelete(null);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['caisse-transactions'] }),
+        queryClient.invalidateQueries({ queryKey: ['caisse-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['caisse-analytics'] }),
+        queryClient.invalidateQueries({ queryKey: ['caisse-balance'] }),
+        queryClient.invalidateQueries({ queryKey: ['caisse-historique'] }),
+        queryClient.invalidateQueries({ queryKey: ['reports'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+      toast.success('Mouvement supprimé et solde de caisse recalculé.');
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, 'Impossible de supprimer ce mouvement de caisse.')),
   });
 
   // Build period params (+ optional account filter for transactions/analytics)
@@ -91,20 +120,26 @@ export function CashDashboard() {
 
   // Summary always global (returns both breakdowns)
   const summaryParams = buildParams(false);
-  const customRangeReady = filters.period !== 'custom' ||
-    Boolean(filters.startDate && filters.endDate);
+  const customRangeReady = filters.period !== 'custom' || Boolean(filters.startDate && filters.endDate);
   const summaryQuery = useQuery<CashSummary>({
     queryKey: cashPeriodQueryKey('caisse-summary', filters),
-    queryFn:  () => api.get('/caisse/summary', { params: summaryParams }).then((r) => r.data),
+    queryFn: () => api.get('/caisse/summary', { params: summaryParams }).then((r) => r.data),
     staleTime: 30_000,
     enabled: customRangeReady,
   });
 
   const txParams = buildParams(true);
-  const txQuery = useQuery<{ data: CashTransaction[]; pagination: CashPagination }>({
+  const txQuery = useQuery<{
+    data: CashTransaction[];
+    pagination: CashPagination;
+  }>({
     queryKey: [...cashPeriodQueryKey('caisse-transactions', filters, accountParam), page, limit],
-    queryFn:  () =>
-      api.get('/caisse/transactions', { params: cleanPaginationParams({ ...txParams, page, limit }) }).then((r) => r.data),
+    queryFn: () =>
+      api
+        .get('/caisse/transactions', {
+          params: cleanPaginationParams({ ...txParams, page, limit }),
+        })
+        .then((r) => r.data),
     staleTime: 30_000,
     enabled: customRangeReady,
   });
@@ -112,8 +147,7 @@ export function CashDashboard() {
   const analyticsParams = buildParams(true);
   const analyticsQuery = useQuery<CashAnalytics>({
     queryKey: cashPeriodQueryKey('caisse-analytics', filters, accountParam),
-    queryFn:  () =>
-      api.get('/caisse/analytics', { params: analyticsParams }).then((r) => r.data),
+    queryFn: () => api.get('/caisse/analytics', { params: analyticsParams }).then((r) => r.data),
     staleTime: 60_000,
     enabled: customRangeReady,
   });
@@ -134,7 +168,11 @@ export function CashDashboard() {
     setPage(1);
   }
 
-  const viewMap: Record<AccountTab, AccountView> = { cash: 'cash', bank: 'bank', global: 'global' };
+  const viewMap: Record<AccountTab, AccountView> = {
+    cash: 'cash',
+    bank: 'bank',
+    global: 'global',
+  };
 
   return (
     <div className="space-y-4">
@@ -160,6 +198,20 @@ export function CashDashboard() {
         />
       )}
 
+      <CashMovementDetailsModal movement={movementToView} onClose={() => setMovementToView(null)} />
+      <CashMovementDeleteModal
+        movement={movementToDelete}
+        onClose={() => !deleteMovementMutation.isPending && setMovementToDelete(null)}
+        onConfirm={(reason) =>
+          movementToDelete &&
+          deleteMovementMutation.mutate({
+            id: movementToDelete.id,
+            reason,
+          })
+        }
+        isPending={deleteMovementMutation.isPending}
+      />
+
       <ClearHistoryModal
         open={showClearModal}
         onClose={() => setShowClearModal(false)}
@@ -177,9 +229,7 @@ export function CashDashboard() {
             onClick={() => handleAccountTabChange(id)}
             className={cn(
               'flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors',
-              accountTab === id
-                ? 'bg-card text-text-primary shadow-sm'
-                : 'text-text-secondary hover:text-text-primary',
+              accountTab === id ? 'bg-card text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary',
             )}
           >
             <Icon size={13} />
@@ -258,8 +308,16 @@ export function CashDashboard() {
       {/* Content tabs */}
       <div className="flex gap-1 border-b border-border">
         {[
-          { id: 'transactions' as ContentTab, label: 'Transactions', icon: List },
-          { id: 'analytics'    as ContentTab, label: 'Analytiques',  icon: BarChart3 },
+          {
+            id: 'transactions' as ContentTab,
+            label: 'Transactions',
+            icon: List,
+          },
+          {
+            id: 'analytics' as ContentTab,
+            label: 'Analytiques',
+            icon: BarChart3,
+          },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -303,6 +361,9 @@ export function CashDashboard() {
             onPageChange={setPage}
             onLimitChange={setLimit}
             showAccount={accountTab === 'global'}
+            isAdmin={canShowCashMovementDeletion(role)}
+            onViewDetails={setMovementToView}
+            onDelete={setMovementToDelete}
           />
         </>
       )}

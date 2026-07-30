@@ -889,6 +889,7 @@ export class ReportsService {
       }),
       this.prisma.caisseMovement.findMany({
         where: {
+          deletedAt: null,
           createdAt: range,
           type: { not: CaisseMovementType.CASH_RESET },
         },
@@ -1024,14 +1025,10 @@ export class ReportsService {
         caTrend: trend(caNet, prevCaNet),
         encaissementsClients: moneyRound(num(customerPaymentsAgg._sum.amount)),
         impayesClients: moneyRound(
-          CustomerDebtCalculator.remaining(
-            salesAgg._sum.remainingAmount ?? 0,
-          ),
+          CustomerDebtCalculator.remaining(salesAgg._sum.remainingAmount ?? 0),
         ),
         resteAEncaisser: moneyRound(
-          CustomerDebtCalculator.remaining(
-            salesAgg._sum.remainingAmount ?? 0,
-          ),
+          CustomerDebtCalculator.remaining(salesAgg._sum.remainingAmount ?? 0),
         ),
         dettesClients: moneyRound(
           CustomerDebtCalculator.remaining(

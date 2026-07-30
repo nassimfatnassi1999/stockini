@@ -1,17 +1,22 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
+  Param,
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { CaisseMovementType, TreasuryAccount } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RequirePermissions } from '../auth/decorators';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequirePermissions, Roles } from '../auth/decorators';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
@@ -22,6 +27,7 @@ import {
   CashSummaryQueryDto,
   CashTransactionsQueryDto,
   ClearCaisseHistoryDto,
+  DeleteCashMovementDto,
 } from './dto/caisse.dto';
 import { CaisseService } from './caisse.service';
 
@@ -54,6 +60,22 @@ export class CaisseController {
     return this.caisseService.getTransactions(query);
   }
 
+  @Delete('movements/:id')
+  @HttpCode(200)
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN', 'admin', 'super_admin')
+  deleteMovement(
+    @Param('id') id: string,
+    @Body() dto: DeleteCashMovementDto,
+    @CurrentUser() user: AuthUser,
+    @Req() request: Request,
+  ) {
+    return this.caisseService.deleteMovement(id, dto.reason, user.id, {
+      ipAddress: request.ip,
+      userAgent: request.get('user-agent') ?? null,
+    });
+  }
+
   // ─── Analytics ────────────────────────────────────────────────────────────────
 
   @RequirePermissions('caisse.view')
@@ -78,20 +100,32 @@ export class CaisseController {
   @RequirePermissions('caisse.operate')
   @Post('retrait')
   retrait(@Body() dto: CaisseOperationDto, @CurrentUser() user?: AuthUser) {
-    return this.caisseService.retrait(dto.montant, dto.motif, user?.id, dto.account);
+    return this.caisseService.retrait(
+      dto.montant,
+      dto.motif,
+      user?.id,
+      dto.account,
+    );
   }
 
   @RequirePermissions('caisse.operate')
   @Post('depot')
   depot(@Body() dto: CaisseOperationDto, @CurrentUser() user?: AuthUser) {
-    return this.caisseService.depot(dto.montant, dto.motif, user?.id, dto.account);
+    return this.caisseService.depot(
+      dto.montant,
+      dto.motif,
+      user?.id,
+      dto.account,
+    );
   }
 
   @RequirePermissions('caisse.admin')
   @Patch('config')
   updateConfig(@Body() dto: CaisseConfigUpdateDto) {
     return this.caisseService.setAllowNegative(
-      dto.account === 'BANK_TREASURY' ? (dto.allowNegativeBanque ?? false) : (dto.allowNegative ?? false),
+      dto.account === 'BANK_TREASURY'
+        ? (dto.allowNegativeBanque ?? false)
+        : (dto.allowNegative ?? false),
       dto.account,
     );
   }
@@ -110,7 +144,10 @@ export class CaisseController {
   @RequirePermissions('finance.history.clear')
   @Post('history/clear')
   @HttpCode(200)
-  clearHistory(@Body() dto: ClearCaisseHistoryDto, @CurrentUser() user?: AuthUser) {
+  clearHistory(
+    @Body() dto: ClearCaisseHistoryDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
     return this.caisseService.clearHistory(dto, user!.id);
   }
 

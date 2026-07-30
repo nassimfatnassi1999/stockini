@@ -1,55 +1,70 @@
 'use client';
 
-import { ArrowDownCircle, ArrowUpCircle, Banknote, Building2 } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Banknote, Building2, Eye, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DataTablePagination } from '@/components/ui/DataTablePagination';
+import { KebabMenu } from '../shared/KebabMenu';
 
 export interface CashTransaction {
-  id:             string;
-  date:           string;
-  type:           string;
-  account:        'PHYSICAL_CASH' | 'BANK_TREASURY';
-  direction:      'IN' | 'OUT';
-  reference:      string | null;
-  montant:        number;
-  ancienSolde:    number;
-  nouveauSolde:   number;
-  motif:          string | null;
-  user:           { id: string; fullName: string; email: string } | null;
+  id: string;
+  date: string;
+  type: string;
+  account: 'PHYSICAL_CASH' | 'BANK_TREASURY';
+  direction: 'IN' | 'OUT';
+  reference: string | null;
+  montant: number;
+  ancienSolde: number;
+  nouveauSolde: number;
+  motif: string | null;
+  user: { id: string; fullName: string; email: string } | null;
+  isManualAdjustment: boolean;
 }
 
 export interface CashPagination {
-  page:       number;
-  limit:      number;
-  total:      number;
+  page: number;
+  limit: number;
+  total: number;
   totalPages: number;
 }
 
 interface Props {
-  data:         CashTransaction[];
-  pagination:   CashPagination | undefined;
-  isLoading:    boolean;
+  data: CashTransaction[];
+  pagination: CashPagination | undefined;
+  isLoading: boolean;
   onPageChange: (page: number) => void;
   onLimitChange: (limit: number) => void;
   showAccount?: boolean;
+  isAdmin?: boolean;
+  onViewDetails: (movement: CashTransaction) => void;
+  onDelete: (movement: CashTransaction) => void;
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  ENCAISSEMENT_VENTE:  'Vente',
+  ENCAISSEMENT_VENTE: 'Vente',
   CUSTOMER_CHANGE_OUT: 'Monnaie client',
-  CASH_SURPLUS_IN:      'Écart encaissé',
-  DECAISSEMENT_ACHAT:  'Achat',
-  DEPOT_MANUEL:        'Dépôt manuel',
-  RETRAIT_MANUEL:      'Retrait manuel',
-  ANNULATION_VENTE:    'Annulation vente',
-  REFUND_OUT:          'Remboursement avoir',
-  ANNULATION_ACHAT:    'Annulation achat',
-  CASH_RESET:          'Remise à zéro',
+  CASH_SURPLUS_IN: 'Écart encaissé',
+  DECAISSEMENT_ACHAT: 'Achat',
+  DEPOT_MANUEL: 'Dépôt manuel',
+  RETRAIT_MANUEL: 'Retrait manuel',
+  ANNULATION_VENTE: 'Annulation vente',
+  REFUND_OUT: 'Remboursement avoir',
+  ANNULATION_ACHAT: 'Annulation achat',
+  CASH_RESET: 'Remise à zéro',
 };
 
 const ACCOUNT_META: Record<string, { label: string; icon: React.ElementType; color: string; bg: string }> = {
-  PHYSICAL_CASH: { label: 'Caisse',  icon: Banknote,   color: 'text-amber-700',  bg: 'bg-amber-50' },
-  BANK_TREASURY: { label: 'Banque',  icon: Building2,  color: 'text-blue-700',   bg: 'bg-blue-50'  },
+  PHYSICAL_CASH: {
+    label: 'Caisse',
+    icon: Banknote,
+    color: 'text-amber-700',
+    bg: 'bg-amber-50',
+  },
+  BANK_TREASURY: {
+    label: 'Banque',
+    icon: Building2,
+    color: 'text-blue-700',
+    bg: 'bg-blue-50',
+  },
 };
 
 function fmt(n: number) {
@@ -61,8 +76,11 @@ function fmt(n: number) {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('fr-FR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -73,6 +91,9 @@ export function CashTransactionsTable({
   onPageChange,
   onLimitChange,
   showAccount = true,
+  isAdmin = false,
+  onViewDetails,
+  onDelete,
 }: Props) {
   if (isLoading) {
     return (
@@ -86,7 +107,7 @@ export function CashTransactionsTable({
     );
   }
 
-  const colSpan = showAccount ? 10 : 9;
+  const colSpan = showAccount ? 11 : 10;
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -96,9 +117,7 @@ export function CashTransactionsTable({
             <tr className="border-b border-border bg-surface">
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Date</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Type</th>
-              {showAccount && (
-                <th className="px-4 py-3 text-left font-semibold text-text-secondary">Compte</th>
-              )}
+              {showAccount && <th className="px-4 py-3 text-left font-semibold text-text-secondary">Compte</th>}
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Sens</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Référence</th>
               <th className="px-4 py-3 text-right font-semibold text-text-secondary">Montant</th>
@@ -106,6 +125,7 @@ export function CashTransactionsTable({
               <th className="px-4 py-3 text-right font-semibold text-text-secondary">Solde après</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Utilisateur</th>
               <th className="px-4 py-3 text-left font-semibold text-text-secondary">Note</th>
+              <th className="w-12 px-2 py-3 text-right font-semibold text-text-secondary">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -120,10 +140,7 @@ export function CashTransactionsTable({
                 const acc = ACCOUNT_META[row.account] ?? ACCOUNT_META.PHYSICAL_CASH;
                 const AccIcon = acc.icon;
                 return (
-                  <tr
-                    key={row.id}
-                    className="border-b border-border/50 transition-colors hover:bg-surface/60"
-                  >
+                  <tr key={row.id} className="border-b border-border/50 transition-colors hover:bg-surface/60">
                     <td className="px-4 py-2.5 text-text-secondary">{formatDate(row.date)}</td>
                     <td className="px-4 py-2.5">
                       <span className="rounded-md bg-surface px-2 py-0.5 text-[11px] font-medium text-text-primary">
@@ -132,10 +149,13 @@ export function CashTransactionsTable({
                     </td>
                     {showAccount && (
                       <td className="px-4 py-2.5">
-                        <span className={cn(
-                          'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium',
-                          acc.bg, acc.color,
-                        )}>
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium',
+                            acc.bg,
+                            acc.color,
+                          )}
+                        >
                           <AccIcon size={11} />
                           {acc.label}
                         </span>
@@ -154,14 +174,15 @@ export function CashTransactionsTable({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-[11px] text-text-secondary">
-                      {row.reference ?? '—'}
-                    </td>
-                    <td className={cn(
-                      'px-4 py-2.5 text-right font-semibold tabular-nums',
-                      row.direction === 'IN' ? 'text-emerald-600' : 'text-red-500',
-                    )}>
-                      {row.direction === 'IN' ? '+' : '−'}{fmt(row.montant)} DT
+                    <td className="px-4 py-2.5 font-mono text-[11px] text-text-secondary">{row.reference ?? '—'}</td>
+                    <td
+                      className={cn(
+                        'px-4 py-2.5 text-right font-semibold tabular-nums',
+                        row.direction === 'IN' ? 'text-emerald-600' : 'text-red-500',
+                      )}
+                    >
+                      {row.direction === 'IN' ? '+' : '−'}
+                      {fmt(row.montant)} DT
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-text-secondary">
                       {fmt(row.ancienSolde)} DT
@@ -169,11 +190,25 @@ export function CashTransactionsTable({
                     <td className="px-4 py-2.5 text-right tabular-nums text-text-primary">
                       {fmt(row.nouveauSolde)} DT
                     </td>
-                    <td className="px-4 py-2.5 text-text-secondary">
-                      {row.user?.fullName ?? row.user?.email ?? '—'}
-                    </td>
-                    <td className="max-w-[160px] truncate px-4 py-2.5 text-text-secondary">
-                      {row.motif ?? '—'}
+                    <td className="px-4 py-2.5 text-text-secondary">{row.user?.fullName ?? row.user?.email ?? '—'}</td>
+                    <td className="max-w-[160px] truncate px-4 py-2.5 text-text-secondary">{row.motif ?? '—'}</td>
+                    <td className="px-2 py-2.5 text-right">
+                      <KebabMenu
+                        items={[
+                          {
+                            label: 'Voir les détails',
+                            icon: <Eye />,
+                            onClick: () => onViewDetails(row),
+                          },
+                          {
+                            label: 'Supprimer le mouvement',
+                            icon: <Trash2 />,
+                            variant: 'destructive',
+                            hidden: !isAdmin,
+                            onClick: () => onDelete(row),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );

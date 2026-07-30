@@ -53,7 +53,7 @@ describe('CaisseService summary — trésorerie séparée du bénéfice', () => 
       {} as any,
       reports,
     );
-    return { service, reports };
+    return { service, reports, prisma };
   }
 
   it('un dépôt et un retrait changent les flux mais jamais le bénéfice ventes', async () => {
@@ -90,5 +90,16 @@ describe('CaisseService summary — trésorerie séparée du bénéfice', () => 
     const summary = await service.getSummary({ period: 'today' });
     expect(summary.entrees - summary.sorties).toBe(400);
     expect(summary.profitPeriode).toBe(11.8);
+  });
+
+  it('les KPIs excluent explicitement les mouvements supprimés', async () => {
+    const { service, prisma } = buildService();
+    await service.getSummary({ period: 'today' });
+
+    expect(prisma.caisseMovement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null }),
+      }),
+    );
   });
 });

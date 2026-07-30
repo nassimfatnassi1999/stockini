@@ -162,3 +162,9 @@ export class ClearCaisseHistoryDto {
   @IsEnum(TreasuryAccount)
   account?: TreasuryAccount;
 }
+
+export class DeleteCashMovementDto {
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+}

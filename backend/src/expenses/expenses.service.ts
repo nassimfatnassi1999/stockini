@@ -211,6 +211,7 @@ export class ExpensesService {
           where: {
             expenseId: expense.id,
             type: CaisseMovementType.ANNULATION_DEPENSE,
+            deletedAt: null,
           },
           select: { id: true },
         });
