@@ -874,6 +874,7 @@ export class SalesService {
             userId: sellerId,
             sourceType: 'SALE_ITEM',
             sourceId: item.id,
+            originalSaleId: sale.id,
             unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
@@ -1106,6 +1107,7 @@ export class SalesService {
             userId,
             sourceType: 'SALE_ITEM',
             sourceId: item.id,
+            originalSaleId: sale.id,
             unitCostHtNet: historicalUnitCost,
           });
         }
@@ -1319,6 +1321,7 @@ export class SalesService {
             userId,
             sourceType: 'SALE_CANCELLATION',
             sourceId: item.id,
+            originalSaleId: sale.id,
             unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
@@ -1556,6 +1559,8 @@ export class SalesService {
             quantity: item.quantity,
             reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
+            sourceType: 'SALE_EDIT_RETURN',
+            originalSaleId: sale.id,
             unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
@@ -1576,6 +1581,7 @@ export class SalesService {
             reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
             sourceType: 'SALE_EDIT',
+            originalSaleId: sale.id,
             unitCostHtNet: item.unitPurchaseCostHt,
           });
         }
@@ -1653,46 +1659,114 @@ export class SalesService {
     const userId = user?.id;
     this.logger.log(`DELETE /sales/${id} called by ${userId ?? 'unknown'}`);
 
-    const sale = await this.prisma.sale.findFirstOrThrow({
-      where: { id, deletedAt: null },
-      select: {
-        id: true,
-        invoiceNumber: true,
-        documentType: true,
-        status: true,
-        total: true,
-        customerId: true,
-      },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${id} FOR UPDATE`;
+      const sale = await tx.sale.findFirstOrThrow({
+        where: { id, deletedAt: null },
+        include: { items: true },
+      });
 
-    await this.prisma.sale.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId ?? null },
-    });
+      let restoredQuantity = 0;
+      let reverseMovementCount = 0;
+      const canRestoreStock =
+        sale.stockImpactDone &&
+        sale.status === SaleStatus.COMPLETED &&
+        STOCK_IMPACTING_TYPES.has(sale.documentType);
 
-    await this.auditLogs.audit({
-      action: 'sale.deleted',
-      entity: 'Sale',
-      entityId: sale.id,
-      userId,
-      userName: user?.email,
-      oldValue: {
-        id: sale.id,
-        invoiceNumber: sale.invoiceNumber,
-        documentType: sale.documentType,
-        status: sale.status,
-        total: Number(sale.total),
-        customerId: sale.customerId,
-        deletedAt: null,
-      },
-      newValue: {
-        deletedAt: new Date().toISOString(),
-        deletedBy: userId ?? null,
-      },
-      metadata: {
-        invoiceNumber: sale.invoiceNumber,
-        documentType: sale.documentType,
-      },
+      if (canRestoreStock) {
+        const itemIds = sale.items.map((item) => item.id);
+        const sourceMovements = await tx.stockMovement.findMany({
+          where: {
+            type: {
+              in: [
+                StockMovementType.SALE,
+                StockMovementType.CUSTOMER_RETURN,
+                StockMovementType.RETURN_IN,
+              ],
+            },
+            OR: [
+              { originalSaleId: sale.id },
+              ...(itemIds.length > 0
+                ? [{ sourceType: 'SALE_ITEM', sourceId: { in: itemIds } }]
+                : []),
+              // Compatibility for movements created before originalSaleId was
+              // populated (notably edited documents).
+              { reason: { contains: sale.invoiceNumber } },
+            ],
+          },
+          select: {
+            productId: true,
+            previousQuantity: true,
+            newQuantity: true,
+          },
+        });
+
+        const netImpactByProduct = new Map<string, number>();
+        for (const movement of sourceMovements) {
+          const delta = movement.newQuantity - movement.previousQuantity;
+          netImpactByProduct.set(
+            movement.productId,
+            (netImpactByProduct.get(movement.productId) ?? 0) + delta,
+          );
+        }
+
+        for (const [productId, netImpact] of netImpactByProduct) {
+          if (netImpact >= 0) continue;
+          const quantity = Math.abs(netImpact);
+          await this.stockService.applyMovement(tx, {
+            productId,
+            type: StockMovementType.CUSTOMER_RETURN,
+            quantity,
+            reason: `Suppression ${sale.documentType}:${sale.invoiceNumber}`,
+            userId,
+            sourceType: 'SALE_DELETE',
+            sourceId: sale.id,
+            originalSaleId: sale.id,
+          });
+          restoredQuantity += quantity;
+          reverseMovementCount++;
+        }
+      }
+
+      const deletedAt = new Date();
+      await tx.sale.update({
+        where: { id },
+        data: {
+          deletedAt,
+          deletedBy: userId ?? null,
+          ...(canRestoreStock && { stockImpactDone: false }),
+        },
+      });
+
+      await this.auditLogs.audit(
+        {
+          action: 'sale.deleted',
+          entity: 'Sale',
+          entityId: sale.id,
+          userId,
+          userName: user?.email,
+          oldValue: {
+            id: sale.id,
+            invoiceNumber: sale.invoiceNumber,
+            documentType: sale.documentType,
+            status: sale.status,
+            total: Number(sale.total),
+            customerId: sale.customerId,
+            deletedAt: null,
+          },
+          newValue: {
+            deletedAt: deletedAt.toISOString(),
+            deletedBy: userId ?? null,
+          },
+          metadata: {
+            invoiceNumber: sale.invoiceNumber,
+            documentType: sale.documentType,
+            reverseMovementCount,
+            restoredQuantity,
+          },
+        },
+        tx,
+      );
     });
 
     this.logger.log(`Sale ${id} moved to trash by ${userId ?? 'unknown'}`);
@@ -1864,6 +1938,7 @@ export class SalesService {
             userId,
             sourceType: 'SALE_ITEM',
             sourceId: item.id,
+            originalSaleId: newSale.id,
             unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
           });
         }
