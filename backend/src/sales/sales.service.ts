@@ -1428,8 +1428,12 @@ export class SalesService {
       'sales.line.edit_unit_price_ht',
     );
     const userId = user?.id;
+    if (dto.paymentMethod) {
+      await this.settings.assertActiveOption('payment_methods', dto.paymentMethod);
+    }
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id = ${id} FOR UPDATE`);
       const sale = await tx.sale.findFirst({
         where: { id, deletedAt: null },
         include: { items: true, payments: { where: { deletedAt: null } } },
@@ -1536,40 +1540,101 @@ export class SalesService {
       const tax = updateTotals.totalVat;
       const total = updateTotals.totalTtc;
       const totalFinal = commercialTotalFinal(total, Number(sale.stampDuty));
-      const paidAmount = Number(sale.paidAmount);
-      if (
-        dto.paidAmount !== undefined &&
-        Math.abs(dto.paidAmount - paidAmount) > 0.001
-      ) {
+      const activePayments = sale.payments.filter(
+        (payment) => payment.type === PaymentType.CUSTOMER_PAYMENT,
+      );
+      const paidBefore = this.round3(activePayments.length
+        ? activePayments.reduce((sum, payment) => sum + Number(payment.amountApplied), 0)
+        : Number(sale.paidAmount));
+      const acceptedBefore = this.round3(activePayments.reduce(
+        (sum, payment) => sum + Number(payment.acceptedDifference), 0,
+      ));
+      const requestedPaidTotal = this.round3(dto.paidAmount ?? paidBefore);
+      const paymentDelta = this.round3(requestedPaidTotal - paidBefore);
+      if (paymentDelta < -0.001) {
         throw new BadRequestException(
-          'Modifiez les encaissements depuis le module Paiements',
+          'Un encaissement existant ne peut pas être diminué depuis la modification du document',
         );
       }
-      if (paidAmount > totalFinal + 0.001) {
+      if (paidBefore > totalFinal + 0.001) {
         throw new BadRequestException(
           'Le nouveau total ne peut pas être inférieur au montant déjà payé',
         );
       }
+      if (paymentDelta > 0 && !PAYMENT_ACCEPTING_TYPES.has(sale.documentType)) {
+        throw new BadRequestException(`Le type ${sale.documentType} n'accepte pas de paiement`);
+      }
+      if (paymentDelta > 0 && !dto.paymentMethod) {
+        throw new BadRequestException('La méthode de paiement est requise pour le nouvel encaissement');
+      }
+      if (dto.acceptAsFullyPaid && paymentDelta <= 0) {
+        throw new BadRequestException("L'acceptation d'un écart exige un nouvel encaissement supérieur à zéro");
+      }
+      if (dto.acceptAsFullyPaid && !this.hasPermission(user, 'payments.accept_difference')) {
+        throw new ForbiddenException("Vous n'avez pas la permission d'abandonner un reliquat.");
+      }
+      const remainingBeforePayment = this.round3(
+        Math.max(totalFinal - paidBefore - acceptedBefore, 0),
+      );
+      const allocation = paymentDelta > 0 && dto.paymentMethod
+        ? allocateCustomerPayment({
+            remainingBefore: remainingBeforePayment,
+            amountReceived: paymentDelta,
+            method: dto.paymentMethod,
+            surplusDisposition: dto.surplusDisposition,
+            hasCustomer: Boolean(dto.customerId ?? sale.customerId),
+            acceptAsFullyPaid: dto.acceptAsFullyPaid,
+          })
+        : null;
+      const paidAmount = this.round3(paidBefore + (allocation?.amountApplied.toNumber() ?? 0));
+      const acceptedDifference = this.round3(
+        acceptedBefore + (allocation?.acceptedDifference.toNumber() ?? 0),
+      );
+      const remainingAmount = allocation
+        ? allocation.remainingAfter.toNumber()
+        : this.round3(Math.max(totalFinal - paidAmount - acceptedDifference, 0));
 
       if (sale.stockImpactDone) {
+        const oldQuantities = new Map<string, number>();
+        const oldCosts = new Map<string, Prisma.Decimal | null>();
         for (const item of sale.items) {
+          oldQuantities.set(item.productId, (oldQuantities.get(item.productId) ?? 0) + item.quantity);
+          oldCosts.set(item.productId, item.unitPurchaseCostHt);
+        }
+        const newQuantities = new Map<string, number>();
+        for (const item of calculated) {
+          newQuantities.set(item.productId, (newQuantities.get(item.productId) ?? 0) + item.quantity);
+        }
+        const changedProductIds = new Set([...oldQuantities.keys(), ...newQuantities.keys()]);
+        for (const productId of changedProductIds) {
+          const returnedQuantity = this.round3(Math.max(
+            (oldQuantities.get(productId) ?? 0) - (newQuantities.get(productId) ?? 0), 0,
+          ));
+          if (returnedQuantity <= 0) continue;
           await this.stockService.applyMovement(tx, {
-            productId: item.productId,
+            productId,
             type: StockMovementType.CUSTOMER_RETURN,
-            quantity: item.quantity,
+            quantity: returnedQuantity,
             reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
             sourceType: 'SALE_EDIT_RETURN',
             originalSaleId: sale.id,
-            unitCostHtNet: item.unitPurchaseCostHt ?? undefined,
+            unitCostHtNet: oldCosts.get(productId) ?? undefined,
           });
         }
+        const soldProductIds = new Set<string>();
         for (const item of calculated) {
+          if (soldProductIds.has(item.productId)) continue;
+          soldProductIds.add(item.productId);
+          const soldQuantity = this.round3(Math.max(
+            (newQuantities.get(item.productId) ?? 0) - (oldQuantities.get(item.productId) ?? 0), 0,
+          ));
+          if (soldQuantity <= 0) continue;
           const current = await tx.product.findUnique({
             where: { id: item.productId },
             select: { quantity: true, name: true },
           });
-          if (!current || current.quantity < item.quantity) {
+          if (!current || current.quantity < soldQuantity) {
             throw new BadRequestException(
               `Stock insuffisant pour "${current?.name ?? item.designation}"`,
             );
@@ -1577,7 +1642,7 @@ export class SalesService {
           await this.stockService.applyMovement(tx, {
             productId: item.productId,
             type: StockMovementType.SALE,
-            quantity: item.quantity,
+            quantity: soldQuantity,
             reason: `Modification ${sale.documentType}:${sale.invoiceNumber}`,
             userId,
             sourceType: 'SALE_EDIT',
@@ -1607,9 +1672,10 @@ export class SalesService {
           discount,
           tax,
           total,
-          remainingAmount: this.round3(Math.max(totalFinal - paidAmount, 0)),
+          paidAmount,
+          remainingAmount,
           paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType)
-            ? this.paymentStatus(totalFinal, paidAmount)
+            ? this.paymentStatus(totalFinal, paidAmount + acceptedDifference)
             : null,
           isEdited: true,
           editedAt: new Date(),
@@ -1629,6 +1695,90 @@ export class SalesService {
           payments: true,
         },
       });
+
+      if (allocation && dto.paymentMethod) {
+        const payRef = await this.references.generate('PAY', 'payment', tx);
+        const payment = await tx.payment.create({
+          data: {
+            reference: payRef,
+            type: PaymentType.CUSTOMER_PAYMENT,
+            method: dto.paymentMethod,
+            amount: allocation.amountApplied.toNumber(),
+            amountReceived: allocation.amountReceived.toNumber(),
+            amountApplied: allocation.amountApplied.toNumber(),
+            changeDue: allocation.changeDue.toNumber(),
+            changeReturned: allocation.changeReturned.toNumber(),
+            retainedSurplus: allocation.retainedSurplus.toNumber(),
+            customerCreditCreated: allocation.customerCreditCreated.toNumber(),
+            remainingBefore: allocation.remainingBefore.toNumber(),
+            remainingAfter: allocation.remainingAfter.toNumber(),
+            acceptedDifference: allocation.acceptedDifference.toNumber(),
+            settlementMode: allocation.settlementMode,
+            acceptanceReason: allocation.acceptedDifference.gt(0)
+              ? 'Règlement accepté comme définitif'
+              : undefined,
+            acceptedById: allocation.acceptedDifference.gt(0) ? userId : undefined,
+            acceptedAt: allocation.acceptedDifference.gt(0) ? new Date() : undefined,
+            surplusDisposition: allocation.surplusDisposition,
+            cashImpactDone: true,
+            saleId: sale.id,
+            customerId: dto.customerId ?? sale.customerId ?? undefined,
+          },
+        });
+        await this.caisseService.recordMovement(tx, {
+          type: CaisseMovementType.ENCAISSEMENT_VENTE,
+          montant: allocation.surplusDisposition === SurplusDisposition.CASH_SURPLUS
+            ? allocation.amountApplied.toNumber()
+            : allocation.amountReceived.toNumber(),
+          motif: `Encaissement vente ${sale.invoiceNumber}`,
+          referenceDoc: payRef,
+          userId,
+          paymentMethod: dto.paymentMethod,
+        });
+        if (allocation.changeReturned.gt(0)) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.CUSTOMER_CHANGE_OUT,
+            montant: allocation.changeReturned.negated().toNumber(),
+            motif: `Monnaie rendue pour ${sale.invoiceNumber}`,
+            referenceDoc: `CHANGE-${payRef}`,
+            userId,
+            paymentMethod: dto.paymentMethod,
+          });
+        }
+        if (allocation.retainedSurplus.gt(0)) {
+          await this.caisseService.recordMovement(tx, {
+            type: CaisseMovementType.CASH_SURPLUS_IN,
+            montant: allocation.retainedSurplus.toNumber(),
+            motif: `Surplus non rendu pour ${sale.invoiceNumber}`,
+            referenceDoc: `SURPLUS-${payRef}`,
+            userId,
+            paymentMethod: dto.paymentMethod,
+          });
+        }
+        if (allocation.customerCreditCreated.gt(0) && (dto.customerId ?? sale.customerId)) {
+          await tx.customer.update({
+            where: { id: (dto.customerId ?? sale.customerId)! },
+            data: { creditBalance: { increment: allocation.customerCreditCreated } },
+          });
+        }
+        await this.auditLogs.audit({
+          action: allocation.acceptedDifference.gt(0)
+            ? 'PAYMENT_ACCEPTED_AS_FULL'
+            : 'payment.sale_payment',
+          entity: 'Payment',
+          entityId: payment.id,
+          userId,
+          userName: user?.email,
+          newValue: {
+            amountReceived: allocation.amountReceived.toNumber(),
+            amountApplied: allocation.amountApplied.toNumber(),
+            acceptedDifference: allocation.acceptedDifference.toNumber(),
+            remainingBefore: allocation.remainingBefore.toNumber(),
+            remainingAfter: allocation.remainingAfter.toNumber(),
+          },
+          metadata: { saleId: sale.id, invoiceNumber: sale.invoiceNumber },
+        }, tx);
+      }
 
       await this.auditLogs.audit(
         {

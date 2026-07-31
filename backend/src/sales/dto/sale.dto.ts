@@ -235,6 +235,8 @@ export class UpdateSaleDto {
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) discount?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) paidAmount?: number;
   @IsOptional() @IsEnum(PaymentMethod) paymentMethod?: PaymentMethod;
+  @IsOptional() @IsEnum(SurplusDisposition) surplusDisposition?: SurplusDisposition;
+  @IsOptional() @IsBoolean() acceptAsFullyPaid?: boolean;
 }
 
 export class SalePaginationDto extends PaginationQueryDto {

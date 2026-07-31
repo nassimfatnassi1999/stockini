@@ -42,6 +42,7 @@ describe('SalesService document references', () => {
     };
 
     const tx: any = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       product: {
         findMany: jest.fn().mockResolvedValue([product]),
         findUniqueOrThrow: jest.fn().mockResolvedValue(product),
@@ -49,6 +50,7 @@ describe('SalesService document references', () => {
       },
       customer: {
         findUnique: jest.fn().mockResolvedValue({ name: 'Auto Top' }),
+        update: jest.fn().mockResolvedValue({}),
       },
       sale: {
         create: jest.fn(({ data }: { data: any }) =>
@@ -333,6 +335,62 @@ describe('SalesService document references', () => {
         calculationVersion: 4,
       }),
     );
+  });
+
+  it('encaisse seulement le delta et audite séparément un reliquat accepté', async () => {
+    const { service, tx, stockService } = buildService();
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'sale-edit', invoiceNumber: 'BL-EDIT', customerId: 'customer-1',
+      clientType: 'PERSISTENT', documentType: DocumentType.BON_LIVRAISON,
+      status: SaleStatus.COMPLETED, stockImpactDone: false, stampDuty: 1,
+      paidAmount: 40, items: [],
+      payments: [{ type: 'CUSTOMER_PAYMENT', amountApplied: 40, acceptedDifference: 0 }],
+    });
+    tx.sale.update.mockImplementationOnce(({ data }: { data: any }) =>
+      Promise.resolve({ id: 'sale-edit', ...data }),
+    );
+
+    await service.update('sale-edit', {
+      paidAmount: 100,
+      paymentMethod: PaymentMethod.CASH,
+      acceptAsFullyPaid: true,
+      items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+    }, {
+      id: 'user-1', email: 'test@example.com', role: 'ADMIN',
+      permissions: ['payments.accept_difference'],
+    });
+
+    expect(tx.payment.create).toHaveBeenCalledTimes(1);
+    expect(tx.payment.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      amountReceived: 60, amountApplied: 60, acceptedDifference: 67.6,
+    }));
+    expect(tx.sale.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      paidAmount: 100, remainingAmount: 0, paymentStatus: PaymentStatus.PAID,
+    }));
+    expect((service as any).caisseService.recordMovement).toHaveBeenCalledTimes(1);
+    expect(stockService.applyMovement).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate payment or cash when the cumulative amount is unchanged', async () => {
+    const { service, tx } = buildService();
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'sale-edit', invoiceNumber: 'FAC-EDIT', customerId: 'customer-1',
+      clientType: 'PERSISTENT', documentType: DocumentType.FACTURE,
+      status: SaleStatus.COMPLETED, stockImpactDone: false, stampDuty: 1,
+      paidAmount: 40, items: [],
+      payments: [{ type: 'CUSTOMER_PAYMENT', amountApplied: 40, acceptedDifference: 0 }],
+    });
+    tx.sale.update.mockImplementationOnce(({ data }: { data: any }) =>
+      Promise.resolve({ id: 'sale-edit', ...data }),
+    );
+
+    await service.update('sale-edit', {
+      paidAmount: 40,
+      items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+    });
+
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect((service as any).caisseService.recordMovement).not.toHaveBeenCalled();
   });
 
   it('rejects AVOIR creation through /sales with a clear error', async () => {
