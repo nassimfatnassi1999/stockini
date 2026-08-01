@@ -1432,8 +1432,9 @@ export class SalesService {
       await this.settings.assertActiveOption('payment_methods', dto.paymentMethod);
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id = ${id} FOR UPDATE`);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM "Sale" WHERE id = ${id} FOR UPDATE`);
       const sale = await tx.sale.findFirst({
         where: { id, deletedAt: null },
         include: { items: true, payments: { where: { deletedAt: null } } },
@@ -1462,6 +1463,9 @@ export class SalesService {
       const productsById = new Map(
         products.map((product) => [product.id, product]),
       );
+      const existingItemsByProductId = new Map(
+        sale.items.map((item) => [item.productId, item]),
+      );
       const calculated = requestedItems.map((item) => {
         const product = productsById.get(item.productId);
         if (!product)
@@ -1473,16 +1477,28 @@ export class SalesService {
           item.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT;
         const discountPercent = item.discountPercent ?? 0;
         const tvaRate = Number(product.tva ?? 0);
+        const submittedUnitPrice = item.unitPrice ?? this.salePriceHt(product);
+        const existingItem = existingItemsByProductId.get(item.productId);
+        const priceChanged = !existingItem ||
+          Math.abs(submittedUnitPrice - Number(existingItem.unitPrice)) > 0.001;
+        const marginChanged = !existingItem ||
+          Math.abs(marginPercent - Number(existingItem.marginPercent ?? DEFAULT_SALES_MARGIN_PERCENT)) > 0.001;
+        const discountChanged = !existingItem ||
+          Math.abs(discountPercent - Number(existingItem.discountPercent ?? 0)) > 0.001;
+        const commercialTermsChanged = priceChanged || marginChanged || discountChanged;
         const values = calculateSalesLine({
           purchasePriceHt,
           purchasePriceTtc: product.purchasePriceTtc?.toString(),
-          ...((purchasePriceHt <= 0 || allowEditUnitPriceHt) && { grossSalePriceHt: item.unitPrice }),
+          ...((purchasePriceHt <= 0 || allowEditUnitPriceHt || !priceChanged) && {
+            grossSalePriceHt: submittedUnitPrice,
+          }),
           marginPercent,
           discountPercent,
           taxPercent: tvaRate,
           quantity: item.quantity,
         });
         if (
+          marginChanged &&
           Math.abs(marginPercent - DEFAULT_SALES_MARGIN_PERCENT) > 0.001 &&
           !allowEditUnitPriceHt
         ) {
@@ -1498,7 +1514,8 @@ export class SalesService {
         if (
           sale.documentType !== DocumentType.DEVIS &&
           values.netMarginPercent < MIN_MARGIN_PERCENT &&
-          !allowLowMargin
+          !allowLowMargin &&
+          commercialTermsChanged
         ) {
           throw new BadRequestException(
             `Vente refusée : marge insuffisante pour "${product.name}".`,
@@ -1549,18 +1566,7 @@ export class SalesService {
       const acceptedBefore = this.round3(activePayments.reduce(
         (sum, payment) => sum + Number(payment.acceptedDifference), 0,
       ));
-      const requestedPaidTotal = this.round3(dto.paidAmount ?? paidBefore);
-      const paymentDelta = this.round3(requestedPaidTotal - paidBefore);
-      if (paymentDelta < -0.001) {
-        throw new BadRequestException(
-          'Un encaissement existant ne peut pas être diminué depuis la modification du document',
-        );
-      }
-      if (paidBefore > totalFinal + 0.001) {
-        throw new BadRequestException(
-          'Le nouveau total ne peut pas être inférieur au montant déjà payé',
-        );
-      }
+      const paymentDelta = this.round3(dto.paymentAmount ?? 0);
       if (paymentDelta > 0 && !PAYMENT_ACCEPTING_TYPES.has(sale.documentType)) {
         throw new BadRequestException(`Le type ${sale.documentType} n'accepte pas de paiement`);
       }
@@ -1796,8 +1802,20 @@ export class SalesService {
         },
         tx,
       );
-      return updated;
-    });
+        return updated;
+      });
+    } catch (error: unknown) {
+      const prismaCode = (error as { code?: unknown })?.code;
+      this.logger.error(JSON.stringify({
+        event: 'SALE_UPDATE_FAILED',
+        saleId: id,
+        userId: userId ?? null,
+        prismaCode: typeof prismaCode === 'string' ? prismaCode : null,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      }), error instanceof Error ? error.stack : undefined);
+      throw error;
+    }
   }
 
   async remove(id: string, user?: AuthUser) {

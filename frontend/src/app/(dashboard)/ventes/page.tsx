@@ -524,7 +524,7 @@ function ValidateDocumentModal({
   onConfirm,
   onCancel,
 }: ValidateDocModalProps) {
-  const [paidAmount, setPaidAmount] = useState(initialPaidAmount ? String(initialPaidAmount) : "");
+  const [paidAmount, setPaidAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [pmtError, setPmtError] = useState("");
   const [confirmOverpayment, setConfirmOverpayment] = useState(false);
@@ -535,10 +535,10 @@ function ValidateDocumentModal({
 
   const paymentAllowed = docType === "FACTURE" || docType === "BON_LIVRAISON";
   const paidAmountNum = Number(paidAmount) || 0;
-  const paymentDelta = round3(Math.max(paidAmountNum - initialPaidAmount, 0));
-  const preview = calculateCustomerPayment(totals.totalFinal, paidAmount || "0");
+  const remainingBeforePayment = round3(Math.max(totals.totalFinal - initialPaidAmount, 0));
+  const preview = calculateCustomerPayment(remainingBeforePayment, paidAmount || "0");
   const acceptedPreview = calculateCustomerPayment(
-    totals.totalFinal,
+    remainingBeforePayment,
     paidAmount || "0",
     acceptAsFullyPaid,
   );
@@ -547,7 +547,7 @@ function ValidateDocumentModal({
   const tabCfg = DOC_TAB_CONFIG.find((t) => t.id === docType);
 
   const handleConfirm = () => {
-    if (paymentAllowed && paymentDelta > 0 && !paymentMethod) {
+    if (paymentAllowed && paidAmountNum > 0 && !paymentMethod) {
       setPmtError("Veuillez sélectionner une méthode de paiement");
       return;
     }
@@ -652,7 +652,7 @@ function ValidateDocumentModal({
                   setPaidAmount(e.target.value);
                   setConfirmAcceptedDifference(false);
                   const value = Number(e.target.value);
-                  if (!(value > 0 && value < totals.totalFinal)) {
+                  if (!(value > 0 && value < remainingBeforePayment)) {
                     setAcceptAsFullyPaid(false);
                   }
                   setPmtError("");
@@ -673,7 +673,7 @@ function ValidateDocumentModal({
             )}
             <AcceptedDifferenceOption
               checked={acceptAsFullyPaid}
-              disabled={!canAcceptDifference || paymentDelta <= 0 || paidAmountNum >= totals.totalFinal}
+              disabled={!canAcceptDifference || paidAmountNum <= 0 || paidAmountNum >= remainingBeforePayment}
               difference={acceptedPreview.acceptedDifference.gt(0)
                 ? acceptedPreview.acceptedDifference
                 : acceptedPreview.remainingBefore.minus(acceptedPreview.amountApplied)}
@@ -703,7 +703,7 @@ function ValidateDocumentModal({
                 {paymentMethod === "CASH" && <label className="flex gap-2"><input type="radio" checked={surplusDisposition === "CASH_SURPLUS"} onChange={() => setSurplusDisposition("CASH_SURPLUS")} />Pourboire / écart encaissé</label>}
               </div>
             )}
-            {paymentDelta > 0 && (
+            {paidAmountNum > 0 && (
               <div className="space-y-1.5">
                 <Label htmlFor="vm-method" className="text-xs">
                   Méthode de paiement *
@@ -1301,13 +1301,19 @@ export default function VentesPage() {
       const paymentAllowed =
         docType === "FACTURE" || docType === "BON_LIVRAISON";
       const submittedPaidAmount = paymentAllowed ? round3(paid) : 0;
-      const paymentFields = buildSalePaymentPayload({
-        paidAmount: submittedPaidAmount,
-        existingPaidAmount: editingSaleId ? editingPaidAmount : 0,
-        paymentMethod: method || undefined,
-        surplusDisposition,
-        acceptAsFullyPaid,
-      });
+      const paymentFields = editingSaleId
+        ? buildSalePaymentPayload({
+            paymentAmount: submittedPaidAmount,
+            paymentMethod: method || undefined,
+            surplusDisposition,
+            acceptAsFullyPaid,
+          })
+        : {
+            paidAmount: submittedPaidAmount,
+            ...(submittedPaidAmount > 0 && method ? { paymentMethod: method } : {}),
+            ...(submittedPaidAmount > 0 && surplusDisposition ? { surplusDisposition } : {}),
+            ...(submittedPaidAmount > 0 ? { acceptAsFullyPaid: Boolean(acceptAsFullyPaid) } : {}),
+          };
       const trimmedName = counterClientName.trim();
       const trimmedEmail = counterClientEmail.trim();
       const trimmedPhone = counterClientPhone.trim();
@@ -1338,9 +1344,29 @@ export default function VentesPage() {
             marginPercent: l.defaultMarginPercent,
           })),
         };
-      return editingSaleId
-        ? api.patch<Sale>(`/sales/${editingSaleId}`, payload, { suppressErrorToast: true }).then((r) => r.data)
-        : api.post<Sale>("/sales", payload).then((r) => r.data);
+      if (!editingSaleId) {
+        return api.post<Sale>("/sales", payload).then((r) => r.data);
+      }
+      return api.patch<Sale>(`/sales/${editingSaleId}`, payload, { suppressErrorToast: true })
+        .then((r) => r.data)
+        .catch((error: unknown) => {
+          if (process.env.NODE_ENV === "development") {
+            const response = (error as { response?: { status?: number; data?: unknown } }).response;
+            console.error("SALE_UPDATE_FAILED", {
+              saleId: editingSaleId,
+              status: response?.status,
+              response: response?.data,
+              payload: {
+                documentType: payload.documentType,
+                date: payload.date,
+                clientType: payload.clientType,
+                ...paymentFields,
+                items: payload.items,
+              },
+            });
+          }
+          throw error;
+        });
     },
     onSuccess: (newSale) => {
       queryClient.invalidateQueries({ queryKey: ["stockini-sales"] });
@@ -1378,15 +1404,10 @@ export default function VentesPage() {
         error as { response?: { data?: { message?: string | string[] } } }
       )?.response?.data?.message;
       if (editingSaleId) {
-        if (process.env.NODE_ENV === "development") {
-          const response = (error as { response?: { status?: number; data?: unknown } }).response;
-          console.error("Échec de mise à jour de vente", {
-            endpoint: `/sales/${editingSaleId}`,
-            status: response?.status,
-            response: response?.data,
-          });
-        }
-        toast.error(`Impossible de modifier le ${DOC_TYPE_SHORT[activeTab] ?? "document"}. Vérifiez les informations de paiement.`);
+        const details = (error as { response?: { data?: { details?: { reason?: string } } } })
+          .response?.data?.details?.reason;
+        const backendMessage = Array.isArray(msg) ? msg[0] : msg;
+        toast.error(backendMessage || details || `Impossible de modifier le ${DOC_TYPE_SHORT[activeTab] ?? "document"}.`);
         return;
       }
       const text = Array.isArray(msg)

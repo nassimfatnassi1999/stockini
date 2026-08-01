@@ -351,7 +351,7 @@ describe('SalesService document references', () => {
     );
 
     await service.update('sale-edit', {
-      paidAmount: 100,
+      paymentAmount: 60,
       paymentMethod: PaymentMethod.CASH,
       acceptAsFullyPaid: true,
       items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
@@ -385,10 +385,109 @@ describe('SalesService document references', () => {
     );
 
     await service.update('sale-edit', {
-      paidAmount: 40,
       items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
     });
 
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect((service as any).caisseService.recordMovement).not.toHaveBeenCalled();
+  });
+
+  it('modifie un BL sans paiement avec une seule sortie de stock différentielle', async () => {
+    const { service, tx, stockService } = buildService();
+    tx.product.findUnique = jest.fn().mockResolvedValue({ quantity: 50, name: product.name });
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'bl-edit', invoiceNumber: 'BL-EDIT', customerId: 'customer-1',
+      clientType: 'PERSISTENT', documentType: DocumentType.BON_LIVRAISON,
+      status: SaleStatus.COMPLETED, stockImpactDone: true, stampDuty: 1,
+      paidAmount: 0,
+      items: [{ productId: product.id, quantity: 2, unitPurchaseCostHt: 100 }],
+      payments: [],
+    });
+    tx.sale.update.mockImplementationOnce(({ data }: { data: any }) =>
+      Promise.resolve({ id: 'bl-edit', ...data }),
+    );
+
+    await service.update('bl-edit', {
+      items: [{ productId: product.id, quantity: 3, unitPrice: AUTO_UNIT_PRICE }],
+    });
+
+    expect(stockService.applyMovement).toHaveBeenCalledTimes(1);
+    expect(stockService.applyMovement).toHaveBeenCalledWith(tx, expect.objectContaining({
+      type: StockMovementType.SALE, quantity: 1,
+    }));
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect((service as any).caisseService.recordMovement).not.toHaveBeenCalled();
+  });
+
+  it('conserve une marge historique inchangée lors d’une modification de quantité', async () => {
+    const { service, tx } = buildService();
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'bl-margin', invoiceNumber: 'BL-MARGIN', customerId: 'customer-1',
+      clientType: 'PERSISTENT', documentType: DocumentType.BON_LIVRAISON,
+      status: SaleStatus.COMPLETED, stockImpactDone: false, stampDuty: 1,
+      paidAmount: 0,
+      items: [{
+        productId: product.id, quantity: 1, unitPrice: 130,
+        marginPercent: 30, discountPercent: 0, unitPurchaseCostHt: 100,
+      }],
+      payments: [],
+    });
+    tx.sale.update.mockImplementationOnce(({ data }: { data: any }) =>
+      Promise.resolve({ id: 'bl-margin', ...data }),
+    );
+
+    await expect(service.update('bl-margin', {
+      items: [{
+        productId: product.id, quantity: 2, unitPrice: 130,
+        marginPercent: 30, discountPercent: 0,
+      }],
+    })).resolves.toBeDefined();
+  });
+
+  it('conserve un paiement historique supérieur au nouveau total sans nouvel encaissement', async () => {
+    const { service, tx } = buildService();
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'fac-paid', invoiceNumber: 'FAC-PAID', customerId: 'customer-1',
+      clientType: 'PERSISTENT', documentType: DocumentType.FACTURE,
+      status: SaleStatus.COMPLETED, stockImpactDone: false, stampDuty: 1,
+      paidAmount: 500, items: [],
+      payments: [{ type: 'CUSTOMER_PAYMENT', amountApplied: 500, acceptedDifference: 0 }],
+    });
+    tx.sale.update.mockImplementationOnce(({ data }: { data: any }) =>
+      Promise.resolve({ id: 'fac-paid', ...data }),
+    );
+
+    await service.update('fac-paid', {
+      items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+    });
+
+    expect(tx.sale.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      paidAmount: 500, remainingAmount: 0, paymentStatus: PaymentStatus.PAID,
+    }));
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect((service as any).caisseService.recordMovement).not.toHaveBeenCalled();
+  });
+
+  it('ne laisse aucune écriture vente, paiement ou caisse si le stock échoue', async () => {
+    const { service, tx, stockService } = buildService();
+    tx.product.findUnique = jest.fn().mockResolvedValue({ quantity: 50, name: product.name });
+    tx.sale.findFirst.mockResolvedValueOnce({
+      id: 'bl-rollback', invoiceNumber: 'BL-ROLLBACK', customerId: 'customer-1',
+      clientType: 'PERSISTENT', documentType: DocumentType.BON_LIVRAISON,
+      status: SaleStatus.COMPLETED, stockImpactDone: true, stampDuty: 1,
+      paidAmount: 0,
+      items: [{ productId: product.id, quantity: 2, unitPurchaseCostHt: 100 }],
+      payments: [],
+    });
+    stockService.applyMovement.mockRejectedValueOnce(new Error('stock failed'));
+
+    await expect(service.update('bl-rollback', {
+      paymentAmount: 10,
+      paymentMethod: PaymentMethod.CASH,
+      items: [{ productId: product.id, quantity: 3, unitPrice: AUTO_UNIT_PRICE }],
+    })).rejects.toThrow('stock failed');
+
+    expect(tx.sale.update).not.toHaveBeenCalled();
     expect(tx.payment.create).not.toHaveBeenCalled();
     expect((service as any).caisseService.recordMovement).not.toHaveBeenCalled();
   });

@@ -3,22 +3,22 @@ import test from "node:test";
 import { buildSalePaymentPayload } from "./sale-update-payload";
 
 test("omits payment-only fields when no new payment applies", () => {
-  assert.deepEqual(buildSalePaymentPayload({ paidAmount: 40, existingPaidAmount: 40 }), { paidAmount: 40 });
+  assert.deepEqual(buildSalePaymentPayload({ paymentAmount: "" }), {});
+  assert.deepEqual(buildSalePaymentPayload({ paymentAmount: "0.000" }), {});
 });
 
 test("emits a real boolean when a new payment applies", () => {
   assert.deepEqual(
     buildSalePaymentPayload({
-      paidAmount: 100,
-      existingPaidAmount: 40,
+      paymentAmount: "60,000",
       paymentMethod: "CASH",
       acceptAsFullyPaid: true,
     }),
-    { paidAmount: 100, paymentMethod: "CASH", acceptAsFullyPaid: true },
+    { paymentAmount: 60, paymentMethod: "CASH", acceptAsFullyPaid: true },
   );
 });
 
 test("rejects NaN and a cumulative amount below existing payments", () => {
-  assert.throws(() => buildSalePaymentPayload({ paidAmount: Number.NaN }));
-  assert.throws(() => buildSalePaymentPayload({ paidAmount: 39, existingPaidAmount: 40 }));
+  assert.throws(() => buildSalePaymentPayload({ paymentAmount: Number.NaN }));
+  assert.throws(() => buildSalePaymentPayload({ paymentAmount: -1 }));
 });

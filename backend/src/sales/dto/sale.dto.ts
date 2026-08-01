@@ -233,7 +233,7 @@ export class UpdateSaleDto {
   items?: CreateSaleItemDto[];
 
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) discount?: number;
-  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) paidAmount?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) paymentAmount?: number;
   @IsOptional() @IsEnum(PaymentMethod) paymentMethod?: PaymentMethod;
   @IsOptional() @IsEnum(SurplusDisposition) surplusDisposition?: SurplusDisposition;
   @IsOptional() @IsBoolean() acceptAsFullyPaid?: boolean;
