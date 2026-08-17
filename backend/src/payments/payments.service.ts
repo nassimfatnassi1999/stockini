@@ -30,6 +30,7 @@ import {
 import {
   commercialTotalFinal,
   commercialTotalFinalDecimal,
+  isPayableSaleDocument,
 } from '../common/utils/commercial-document';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import {
@@ -403,11 +404,7 @@ export class PaymentsService {
             );
           }
 
-          if (
-            sale.documentType === DocumentType.DEVIS ||
-            sale.documentType === DocumentType.BON_COMMANDE ||
-            sale.documentType === DocumentType.AVOIR
-          ) {
+          if (!isPayableSaleDocument(sale.documentType)) {
             throw new PaymentHttpException(
               HttpStatus.BAD_REQUEST,
               'PAYMENT_NOT_ALLOWED',

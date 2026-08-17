@@ -242,6 +242,23 @@ describe('SalesService document references', () => {
     },
   );
 
+  it('persists a DEVIS as financially neutral while preserving its TTC', async () => {
+    const { service, tx } = buildService();
+
+    await service.create({
+      documentType: DocumentType.DEVIS,
+      customerId: 'customer-1',
+      items: [{ productId: product.id, quantity: 1, unitPrice: AUTO_UNIT_PRICE }],
+    });
+
+    expect(tx.sale.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      total: AUTO_TOTAL_TTC,
+      paidAmount: 0,
+      remainingAmount: 0,
+      paymentStatus: null,
+    }));
+  });
+
   it('crée une vente v4 avec une remise commerciale de 20%', async () => {
     const { service, tx } = buildService();
     tx.product.findMany.mockResolvedValueOnce([

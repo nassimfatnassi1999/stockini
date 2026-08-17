@@ -17,12 +17,11 @@ const PAYMENT_STATUS_CLASSES: Record<string, string> = {
   UNPAID: 'border-red-200 bg-red-50 text-red-700',
 };
 
-const NON_PAYABLE_TYPES: ReadonlySet<string> = new Set([
-  'DEVIS',
-  'BON_COMMANDE',
-  'PURCHASE_ORDER',
-  'AVOIR',
-]);
+const PAYABLE_SALE_TYPES: ReadonlySet<string> = new Set(['BON_LIVRAISON', 'FACTURE']);
+
+export function isPayableDocument(documentType: string | null | undefined): boolean {
+  return Boolean(documentType && PAYABLE_SALE_TYPES.has(documentType));
+}
 
 const NEUTRAL_PAYMENT: PaymentDisplay = {
   label: '—',
@@ -37,7 +36,7 @@ export function getPaymentDisplay(
   documentType: string | null | undefined,
   paymentStatus: string | null | undefined,
 ): PaymentDisplay {
-  if (!documentType || NON_PAYABLE_TYPES.has(documentType) || !paymentStatus) {
+  if (!isPayableDocument(documentType) || !paymentStatus) {
     return NEUTRAL_PAYMENT;
   }
   return {

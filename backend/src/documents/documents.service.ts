@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from './minio.service';
 import { PdfService } from './pdf.service';
+import { isPayableSaleDocument } from '../common/utils/commercial-document';
 import { EmailService } from './email.service';
 import type {
   GenerateDocumentsDto,
@@ -141,8 +142,12 @@ export class DocumentsService {
           tax: Number(sale.tax),
           total: Number(sale.total),
           timbreFiscal: Number(sale.stampDuty),
-          paidAmount: Number(sale.paidAmount),
-          remainingAmount: Number(sale.remainingAmount),
+          ...(isPayableSaleDocument(sale.documentType)
+            ? {
+                paidAmount: Number(sale.paidAmount),
+                remainingAmount: Number(sale.remainingAmount),
+              }
+            : {}),
           sourceReferences: (sale.consolidationSources ?? []).map(
             (source) => source.sourceReference,
           ),

@@ -9,7 +9,7 @@ import { KebabMenu } from '@/components/stockini/shared/KebabMenu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import { money } from '@/lib/stockini/format';
+import { isPayableDocument, money } from '@/lib/stockini/format';
 import { stockiniApi } from '@/lib/stockini/api';
 import type {
   CustomerSaleHistoryItem,
@@ -282,6 +282,7 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
             !query.data?.data.length ? <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-text-muted">Aucune vente enregistrée pour ce client</td></tr> :
             query.data.data.map((sale) => {
               const isConsolidationSource = isSourceOfActiveConsolidation(sale);
+              const payable = isPayableDocument(sale.documentType);
               return <tr key={sale.id} className={isConsolidationSource ? 'bg-slate-50/70 hover:bg-slate-100/70' : 'hover:bg-slate-50/70'}>
               <td className="px-3 py-3 text-center"><input type="checkbox" checked={selected.some((item) => item.id === sale.id)} disabled={Boolean(sale.activeConsolidation)} onChange={() => toggle(sale)} aria-label={`Sélectionner ${sale.invoiceNumber}`} /></td>
               <td className="px-3 py-3 font-mono text-xs font-semibold text-slate-800">{sale.invoiceNumber}</td>
@@ -289,9 +290,9 @@ export function CustomerSalesHistory({ customerId }: { customerId: string }) {
               <td className="px-3 py-3 text-slate-600">{new Date(sale.createdAt).toLocaleDateString('fr-TN')}</td>
               <td className="px-3 py-3 text-center tabular-nums">{sale.itemCount}</td>
               <td className="px-3 py-3 text-right font-medium tabular-nums">{money(sale.totalTtc)}</td>
-              <td className="px-3 py-3 text-right tabular-nums text-emerald-700">{money(sale.paidAmount)}</td>
-              <td className="px-3 py-3 text-right tabular-nums text-red-700">{money(sale.remainingAmount)}</td>
-              <td className="px-3 py-3 text-center"><SalePaymentCell sale={sale}><PaymentStatusBadge status={sale.paymentStatus} /></SalePaymentCell></td>
+              <td className="px-3 py-3 text-right tabular-nums text-emerald-700">{payable ? money(sale.paidAmount) : <span className="text-gray-500">—</span>}</td>
+              <td className="px-3 py-3 text-right tabular-nums text-red-700">{payable ? money(sale.remainingAmount) : <span className="text-gray-500">—</span>}</td>
+              <td className="px-3 py-3 text-center"><SalePaymentCell sale={sale}>{payable ? <PaymentStatusBadge status={sale.paymentStatus} /> : <span className="text-gray-500">—</span>}</SalePaymentCell></td>
               <td className="px-3 py-3"><span className={`app-status-badge ${STATUS_COLORS[sale.status] ?? 'border-slate-200 bg-slate-50 text-slate-700'}`}>{STATUS_LABELS[sale.status] ?? sale.status}</span></td>
               <td className="px-3 py-3 text-right"><KebabMenu items={[{ label: 'Voir les détails', icon: <Eye size={14} />, onClick: () => setDetailSaleId(sale.id), hidden: !can('sales.view_details') }, { label: 'Voir le regroupement', icon: <Combine size={14} />, onClick: () => setDetailSaleId(String(sale.activeConsolidation?.id)), hidden: !isConsolidationSource || !can('sales.view_details') }, { label: 'Annuler le regroupement', icon: <RotateCcw size={14} />, onClick: () => setDeconsolidationTarget(sale), hidden: !sale.isConsolidated || sale.consolidationStatus !== 'ACTIVE' || !can('sales.consolidation.cancel') }, { label: 'Modifier', icon: <Pencil size={14} />, onClick: () => edit(sale), hidden: isConsolidationSource || sale.isConsolidated || !can('sales.update') }]} /></td>
             </tr>})}

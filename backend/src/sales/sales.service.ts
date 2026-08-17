@@ -38,6 +38,8 @@ import {
 import {
   commercialTotalFinal,
   DEFAULT_STAMP_DUTY,
+  isPayableSaleDocument,
+  nonPayableFinancialState,
 } from '../common/utils/commercial-document';
 import { calculatePaymentAmounts } from '../common/utils/payment-status';
 import { allocateCustomerPayment } from '../common/utils/customer-payment';
@@ -55,11 +57,6 @@ const MIN_MARGIN_PERCENT = 20;
 const STOCK_IMPACTING_TYPES = new Set<DocumentType>([
   DocumentType.BON_LIVRAISON,
   DocumentType.FACTURE,
-]);
-
-const PAYMENT_ACCEPTING_TYPES = new Set<DocumentType>([
-  DocumentType.FACTURE,
-  DocumentType.BON_LIVRAISON,
 ]);
 
 const LAST_SALE_PRICE_TYPES = new Set<DocumentType>([
@@ -445,12 +442,14 @@ export class SalesService {
           await tx.sale.update({
             where: { id: source.id },
             data: {
-              paidAmount: paid,
               totalRefunded: credits,
-              remainingAmount: amounts.remainingAmount,
-              paymentStatus: PAYMENT_ACCEPTING_TYPES.has(source.documentType)
-                ? amounts.paymentStatus
-                : null,
+              ...(isPayableSaleDocument(source.documentType)
+                ? {
+                    paidAmount: paid,
+                    remainingAmount: amounts.remainingAmount,
+                    paymentStatus: amounts.paymentStatus,
+                  }
+                : nonPayableFinancialState()),
             },
           });
         }
@@ -572,7 +571,7 @@ export class SalesService {
 
     const reserveStock = dto.reserveStock ?? false;
     const isDevis = documentType === DocumentType.DEVIS;
-    const acceptsPayment = PAYMENT_ACCEPTING_TYPES.has(documentType);
+    const acceptsPayment = isPayableSaleDocument(documentType);
 
     // ── Blocage client verrouillé (hors DEVIS) ────────────────────────────────
     if (!isDevis && resolvedCustomerId) {
@@ -795,7 +794,9 @@ export class SalesService {
         );
       }
 
-      const remainingAmount = allocation?.remainingAfter.toNumber() ?? totalFinal;
+      const remainingAmount = acceptsPayment
+        ? (allocation?.remainingAfter.toNumber() ?? totalFinal)
+        : 0;
       // Only FACTURE carries a payment status; other document types are not payable
       const paymentStatus = acceptsPayment
         ? (allocation?.paymentStatus ?? this.paymentStatus(totalFinal, paidAmount))
@@ -848,9 +849,9 @@ export class SalesService {
           tax,
           total,
           stampDuty,
-          paidAmount,
-          remainingAmount,
-          paymentStatus,
+          ...(acceptsPayment
+            ? { paidAmount, remainingAmount, paymentStatus }
+            : nonPayableFinancialState()),
           status: immediateStockImpact
             ? SaleStatus.COMPLETED
             : SaleStatus.DRAFT,
@@ -1264,6 +1265,9 @@ export class SalesService {
     // Flatten _count into creditNotesCount for simpler frontend consumption
     const enriched = data.map(({ _count, ...sale }) => ({
       ...sale,
+      ...(isPayableSaleDocument(sale.documentType)
+        ? {}
+        : nonPayableFinancialState()),
       creditNotesCount: _count.creditNotes,
       sourceDocumentsCount: _count.consolidationSources,
       activeConsolidation: sale.consolidationMemberships[0]?.consolidatedSale ?? null,
@@ -1272,13 +1276,13 @@ export class SalesService {
     return buildPaginatedResponse(enriched, page, limit, total);
   }
 
-  findOne(id: string, user?: AuthUser) {
+  async findOne(id: string, user?: AuthUser) {
     if (!this.hasPermission(user, 'sales.view_details')) {
       throw new ForbiddenException(
         "Vous n'avez pas la permission de voir les détails d'une vente",
       );
     }
-    return this.prisma.sale.findFirstOrThrow({
+    const sale = await this.prisma.sale.findFirstOrThrow({
       where: { id, deletedAt: null },
       include: {
         customer: true,
@@ -1288,6 +1292,9 @@ export class SalesService {
         consolidationMemberships: { where: { active: true }, include: { consolidatedSale: true } },
       },
     });
+    return isPayableSaleDocument(sale.documentType)
+      ? sale
+      : { ...sale, ...nonPayableFinancialState() };
   }
 
   cancel(id: string, user?: AuthUser) {
@@ -1351,11 +1358,13 @@ export class SalesService {
         data: {
           status: SaleStatus.CANCELLED,
           lastSalePriceImpactDone: false,
-          paidAmount: 0,
-          remainingAmount: commercialTotalFinal(sale.total, sale.stampDuty),
-          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType)
-            ? PaymentStatus.UNPAID
-            : null,
+          ...(isPayableSaleDocument(sale.documentType)
+            ? {
+                paidAmount: 0,
+                remainingAmount: commercialTotalFinal(sale.total, sale.stampDuty),
+                paymentStatus: PaymentStatus.UNPAID,
+              }
+            : nonPayableFinancialState()),
         },
         include: { items: true, payments: true },
       });
@@ -1567,7 +1576,7 @@ export class SalesService {
         (sum, payment) => sum + Number(payment.acceptedDifference), 0,
       ));
       const paymentDelta = this.round3(dto.paymentAmount ?? 0);
-      if (paymentDelta > 0 && !PAYMENT_ACCEPTING_TYPES.has(sale.documentType)) {
+      if (paymentDelta > 0 && !isPayableSaleDocument(sale.documentType)) {
         throw new BadRequestException(`Le type ${sale.documentType} n'accepte pas de paiement`);
       }
       if (paymentDelta > 0 && !dto.paymentMethod) {
@@ -1678,11 +1687,13 @@ export class SalesService {
           discount,
           tax,
           total,
-          paidAmount,
-          remainingAmount,
-          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(sale.documentType)
-            ? this.paymentStatus(totalFinal, paidAmount + acceptedDifference)
-            : null,
+          ...(isPayableSaleDocument(sale.documentType)
+            ? {
+                paidAmount,
+                remainingAmount,
+                paymentStatus: this.paymentStatus(totalFinal, paidAmount + acceptedDifference),
+              }
+            : nonPayableFinancialState()),
           isEdited: true,
           editedAt: new Date(),
           items: {
@@ -2056,11 +2067,13 @@ export class SalesService {
           tax: source.tax,
           total: source.total,
           stampDuty: source.stampDuty,
-          paidAmount: 0,
-          remainingAmount: commercialTotalFinal(source.total, source.stampDuty),
-          paymentStatus: PAYMENT_ACCEPTING_TYPES.has(targetType)
-            ? PaymentStatus.UNPAID
-            : null,
+          ...(isPayableSaleDocument(targetType)
+            ? {
+                paidAmount: 0,
+                remainingAmount: commercialTotalFinal(source.total, source.stampDuty),
+                paymentStatus: PaymentStatus.UNPAID,
+              }
+            : nonPayableFinancialState()),
           status: targetAppliesStock ? SaleStatus.COMPLETED : SaleStatus.DRAFT,
           documentType: targetType,
           reserveStock: false,

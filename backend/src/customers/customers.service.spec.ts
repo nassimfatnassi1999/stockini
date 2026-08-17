@@ -218,4 +218,40 @@ describe('CustomersService.findSales', () => {
     await expect(service.findSales('missing', {})).rejects.toBe(missing);
     expect(prisma.sale.findMany).not.toHaveBeenCalled();
   });
+
+  it('returns a legacy DEVIS with neutral financial fields and excludes it from the history summary', async () => {
+    const quote = {
+      id: 'quote-1', invoiceNumber: 'DEV-001', documentType: 'DEVIS', status: 'DRAFT',
+      createdAt: new Date('2026-08-13'), subtotal: new Prisma.Decimal(449.249), tax: new Prisma.Decimal(0),
+      total: new Prisma.Decimal(449.249), stampDuty: new Prisma.Decimal(0), items: [{ id: 'quote-item' }],
+      paidAmount: new Prisma.Decimal(0), remainingAmount: new Prisma.Decimal(449.249), paymentStatus: 'UNPAID',
+      totalRefunded: new Prisma.Decimal(0), consolidationMemberships: [], _count: { consolidationSources: 0 },
+    };
+    const prisma = {
+      customer: { findFirstOrThrow: jest.fn().mockResolvedValue({ id: 'client-1' }) },
+      sale: {
+        findMany: jest.fn().mockResolvedValue([quote]),
+        count: jest.fn().mockResolvedValue(1),
+        aggregate: jest.fn().mockResolvedValue({ _sum: {
+          total: new Prisma.Decimal(0), stampDuty: new Prisma.Decimal(0), paidAmount: new Prisma.Decimal(0),
+          remainingAmount: new Prisma.Decimal(0), totalRefunded: new Prisma.Decimal(0),
+        } }),
+      },
+    } as any;
+    const service = new CustomersService(prisma, {} as any, {} as any);
+
+    const result = await service.findSales('client-1', { page: 1, limit: 10 });
+    const historyQuote = result.data[0] as any;
+    expect(historyQuote.totalTtc.toNumber()).toBe(449.249);
+    expect(historyQuote.paidAmount).toBeNull();
+    expect(historyQuote.remainingAmount).toBeNull();
+    expect(historyQuote.paymentStatus).toBeNull();
+    expect(result.summary.totalPaid.toNumber()).toBe(0);
+    expect(result.summary.totalRemaining.toNumber()).toBe(0);
+    expect(prisma.sale.aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ AND: expect.arrayContaining([
+        expect.objectContaining({ documentType: { in: ['BON_LIVRAISON', 'FACTURE'] } }),
+      ]) }),
+    }));
+  });
 });

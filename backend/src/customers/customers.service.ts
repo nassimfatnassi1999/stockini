@@ -4,6 +4,7 @@ import {
   CustomerDebtCalculator,
   customerDebtSaleWhere,
 } from '../common/utils/customer-debt-calculator';
+import { isPayableSaleDocument, PAYABLE_SALE_DOCUMENT_TYPES } from '../common/utils/commercial-document';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferenceGeneratorService } from '../references/reference-generator.service';
 import { SettingsService } from '../settings/settings.service';
@@ -168,11 +169,11 @@ export class CustomersService {
     }
 
     if (query.paymentStatus === PaymentStatus.PAID) {
-      and.push({ remainingAmount: { lte: 0.001 } });
+      and.push({ documentType: { in: [...PAYABLE_SALE_DOCUMENT_TYPES] }, remainingAmount: { lte: 0.001 } });
     } else if (query.paymentStatus === PaymentStatus.PARTIAL) {
-      and.push({ paidAmount: { gt: 0 }, remainingAmount: { gt: 0.001 } });
+      and.push({ documentType: { in: [...PAYABLE_SALE_DOCUMENT_TYPES] }, paidAmount: { gt: 0 }, remainingAmount: { gt: 0.001 } });
     } else if (query.paymentStatus === PaymentStatus.UNPAID) {
-      and.push({ paidAmount: { lte: 0 }, remainingAmount: { gt: 0.001 } });
+      and.push({ documentType: { in: [...PAYABLE_SALE_DOCUMENT_TYPES] }, paidAmount: { lte: 0 }, remainingAmount: { gt: 0.001 } });
     }
 
     const where: Prisma.SaleWhereInput = {
@@ -207,7 +208,11 @@ export class CustomersService {
     const orderBy = (query.sortBy && sortFields[query.sortBy]) || { createdAt: sortOrder };
 
     const financialWhere: Prisma.SaleWhereInput = {
-      AND: [where, { consolidationMemberships: { none: { active: true } } }],
+      AND: [
+        where,
+        { documentType: { in: [...PAYABLE_SALE_DOCUMENT_TYPES] } },
+        { consolidationMemberships: { none: { active: true } } },
+      ],
     };
     const [sales, total, totals, unpaidCount] = await Promise.all([
       this.prisma.sale.findMany({
@@ -252,17 +257,15 @@ export class CustomersService {
 
     const data = sales.map(({ items, consolidationMemberships, _count, ...sale }) => {
       const totalPayable = new Prisma.Decimal(sale.total).plus(sale.stampDuty ?? 0);
-      const remainingAmount = CustomerDebtCalculator.remaining(
-        sale.remainingAmount,
-      );
+      const payable = isPayableSaleDocument(sale.documentType);
       return {
         ...sale,
         itemCount: items.length,
         totalTtc: totalPayable,
         totalFinal: totalPayable,
-        paidAmount: new Prisma.Decimal(sale.paidAmount),
-        remainingAmount,
-        paymentStatus: sale.paymentStatus,
+        paidAmount: payable ? new Prisma.Decimal(sale.paidAmount) : null,
+        remainingAmount: payable ? CustomerDebtCalculator.remaining(sale.remainingAmount) : null,
+        paymentStatus: payable ? sale.paymentStatus : null,
         activeConsolidation: consolidationMemberships?.[0]?.consolidatedSale ?? null,
         sourceDocumentsCount: _count?.consolidationSources ?? 0,
       };
